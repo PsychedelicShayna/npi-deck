@@ -53,15 +53,13 @@ The same directory holds:
 
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
-| `OMP_AGENT_DIR` | `~/.omp/agent` | yes | omp SDK session + auth data directory. |
 | `OMP_MODEL` | SDK default | next session | Default model id (e.g. `anthropic/claude-opus-4-7`). The model picker in the chat header overrides per-session. |
 | `PI_NO_TITLE` | _(unset)_ | next session | Set truthy to disable SDK auto-title generation. |
 
-### Auto-start (off by default)
+### Sessions
 
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
-| `OMP_DECK_AUTO_START` | `/start` | no | Prompt fired automatically when a new session opens. Set to `""` or `0` to disable; set to any other string to override the default `/start` slash-command invocation. Requires `~/.omp/agent/commands/start.md` to exist (see [start-command-template](./start-command-template.md)). |
 | `OMP_DECK_IDLE_TIMEOUT_MS` | `300000` (5 min) | no | Milliseconds before an unsubscribed idle session is reaped. `0` disables reaping. |
 
 ### Storage
@@ -116,8 +114,7 @@ location. The Settings UI surfaces a "Restart server to apply" banner with a
 one-click button (`POST /api/server/restart`) when you save one.
 
 Vars with `Restart?: no` hot-apply: `LOG_LEVEL` flips the logger threshold,
-`OMP_DECK_IDLE_TIMEOUT_MS` re-arms the reaper, `OMP_DECK_AUTO_START` updates
-the bridge in-process, etc.
+`OMP_DECK_IDLE_TIMEOUT_MS` re-arms the reaper, etc.
 
 Vars with `Restart?: bridge` mean the deck server keeps running, but the
 relevant bridge process (e.g. telegram) must be restarted via Settings →

@@ -120,7 +120,6 @@ export function buildRouter(
 				: await bridge.createSession({
 						cwd,
 						...(body.model ? { model: body.model } : {}),
-						...(body.suppressAutoStart ? { suppressAutoStart: true } : {}),
 					});
 			const resp: CreateSessionResponse = {
 				sessionId: handle.sessionId,

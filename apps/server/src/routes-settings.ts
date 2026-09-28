@@ -12,7 +12,7 @@ import type {
 } from "@omp-deck/protocol";
 
 import type { Config } from "./config.ts";
-import { parseAutoStart, parseInt10, splitList } from "./config.ts";
+import { parseInt10, splitList } from "./config.ts";
 import { ENV_SCHEMA, ENV_SCHEMA_BY_KEY, type EnvSchemaEntry, validateEnvValue } from "./env-schema.ts";
 import {
 	MANAGED_ENV_KEYS_LOADED,
@@ -162,12 +162,6 @@ function applyHotUpdates(
 		config.idleTimeoutMs = next;
 		bridge.applyEnvUpdate?.({ idleTimeoutMs: next });
 		applied.push("OMP_DECK_IDLE_TIMEOUT_MS");
-	}
-	if ("OMP_DECK_AUTO_START" in updates) {
-		const next = parseAutoStart(effective.get("OMP_DECK_AUTO_START"));
-		config.autoStartCommand = next;
-		bridge.applyEnvUpdate?.({ autoStartCommand: next });
-		applied.push("OMP_DECK_AUTO_START");
 	}
 	if ("OMP_DECK_DEFAULT_CWD" in updates) {
 		const next = effective.get("OMP_DECK_DEFAULT_CWD")?.trim() || os.homedir();

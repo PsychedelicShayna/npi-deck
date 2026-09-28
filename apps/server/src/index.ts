@@ -119,7 +119,6 @@ async function main(): Promise<void> {
 
 	const bridge = new InProcessAgentBridge({
 		idleTimeoutMs: config.idleTimeoutMs,
-		autoStartCommand: config.autoStartCommand,
 	});
 	const routinesRunner = new RoutinesRunner();
 	routinesRunner.start();

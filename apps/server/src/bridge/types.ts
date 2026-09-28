@@ -77,13 +77,11 @@ export interface AgentBridge {
 
 export interface RuntimeEnvUpdate {
 	idleTimeoutMs?: number;
-	autoStartCommand?: string | null;
 }
 
 export interface CreateSessionOpts {
 	cwd: string;
 	model?: ModelRef;
-	suppressAutoStart?: boolean;
 }
 
 export interface ResumeSessionOpts {

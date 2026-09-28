@@ -45,8 +45,6 @@ export interface CreateSessionRequest {
 	cwd: string;
 	resumeFromPath?: string;
 	model?: ModelRef;
-	/** Do not fire the configured auto-start prompt when this creates a fresh session. */
-	suppressAutoStart?: boolean;
 }
 
 export interface CreateSessionResponse {
