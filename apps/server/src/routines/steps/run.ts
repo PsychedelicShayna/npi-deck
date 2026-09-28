@@ -6,6 +6,7 @@
 import type { RoutineStep } from "@npi-deck/protocol";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
+import { spawnOwned, terminateOwned } from "../../owned-process.ts";
 
 const MAX_EXCERPT = 8 * 1024;
 
@@ -24,21 +25,16 @@ export async function executeRunStep(
 	const cmd = isWin ? ["cmd", "/c", command] : ["bash", "-lc", command];
 
 	try {
-		const proc = Bun.spawn(cmd, {
+		const proc = spawnOwned(cmd, {
 			cwd,
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
 			windowsHide: true,
 		});
-		const onAbort = () => {
-			try {
-				proc.kill();
-			} catch {
-				/* already gone */
-			}
-		};
-		signal.addEventListener("abort", onAbort);
+		const onAbort = () => { void terminateOwned(proc); };
+		signal.addEventListener("abort", onAbort, { once: true });
+		if (signal.aborted) onAbort();
 		try {
 			const [stdout, stderr, exitCode] = await Promise.all([
 				readClipped(proc.stdout),

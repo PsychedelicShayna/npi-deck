@@ -17,6 +17,8 @@ import type { RoutineStep } from "@npi-deck/protocol";
 import { costMicros } from "../budget.ts";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
+import { spawnOwned, terminateOwned } from "../../owned-process.ts";
+import { routineAgentCommand } from "../agent-command.ts";
 import { validateRoutineSpec as _vrs } from "@npi-deck/protocol";
 
 void _vrs; // keep import; unused but ensures protocol re-export typechecks here
@@ -48,21 +50,16 @@ export async function executeAgentStep(
 	}
 
 	try {
-		const proc = Bun.spawn(["omp", ...args], {
+		const proc = spawnOwned(routineAgentCommand(args), {
 			cwd: defaultCwd,
 			stdin: "ignore",
 			stdout: "pipe",
 			stderr: "pipe",
 			windowsHide: true,
 		});
-		const onAbort = () => {
-			try {
-				proc.kill();
-			} catch {
-				/* already gone */
-			}
-		};
-		signal.addEventListener("abort", onAbort);
+		const onAbort = () => { void terminateOwned(proc); };
+		signal.addEventListener("abort", onAbort, { once: true });
+		if (signal.aborted) onAbort();
 		try {
 			const [stdout, stderr, exitCode] = await Promise.all([
 				readClipped(proc.stdout),
@@ -84,7 +81,7 @@ export async function executeAgentStep(
 					status: "failed",
 					stdoutExcerpt: stdout,
 					stderrExcerpt: stderr,
-					error: `omp exit code ${exitCode}`,
+					error: `agent exit code ${exitCode}`,
 					durationMs,
 				};
 			}

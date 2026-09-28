@@ -183,12 +183,13 @@ export async function runV1Pipeline(input: {
 		}
 
 		// Execute with retry policy.
-		const attemptCap = step.retry?.times ?? 1;
+		const attemptCap = step.on_failure === "retry" ? (step.retry?.times ?? 1) : 1;
 		const backoff = step.retry?.backoff ?? "exponential";
 		const maxDelaySecs = step.retry?.max_delay_secs ?? 60;
 		let lastResult: StepResult | undefined;
 		let attempt = 0;
-		while (attempt < Math.max(1, attemptCap)) {
+		let timedOut = false;
+		while (attempt < Math.max(1, attemptCap) && !abortSignal.aborted) {
 			attempt += 1;
 			const stepRunId = startStepRun({
 				runId,
@@ -206,7 +207,27 @@ export async function runV1Pipeline(input: {
 				startedAt: new Date().toISOString(),
 			});
 
-			const result = await dispatchStep(step, context, abortSignal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox);
+			const stepAbort = new AbortController();
+			const onAbort = () => stepAbort.abort();
+			abortSignal.addEventListener("abort", onAbort, { once: true });
+			if (abortSignal.aborted) stepAbort.abort();
+			const stepMs = (step.timeout_secs ?? (step.type === "agent" ? 600 : 60)) * 1000;
+			const remainingMs = spec.budget?.max_duration_secs == null
+				? stepMs : Math.min(stepMs, spec.budget.max_duration_secs * 1000 - (Date.now() - startedMs));
+			let result: StepResult;
+			if (remainingMs <= 0) {
+				timedOut = true;
+				result = { status: "aborted", stdoutExcerpt: "", stderrExcerpt: "", error: "step timed out", durationMs: 0 };
+			} else {
+				const timer = setTimeout(() => { timedOut = true; stepAbort.abort(); }, remainingMs);
+				try {
+					result = await dispatchStep(step, context, stepAbort.signal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox);
+				} finally {
+					clearTimeout(timer);
+					abortSignal.removeEventListener("abort", onAbort);
+				}
+				if (timedOut) result = { ...result, status: "aborted", error: "step timed out" };
+			}
 			lastResult = result;
 			finishStepRun(stepRunId, {
 				status: result.status,
@@ -241,9 +262,7 @@ export async function runV1Pipeline(input: {
 						: undefined,
 			});
 
-			if (result.status === "success" || result.status === "aborted") break;
-
-			// failed — maybe retry
+			if (result.status === "success" || result.status === "aborted" || abortSignal.aborted) break;
 			if (attempt < attemptCap) {
 				const delaySecs = Math.min(
 					backoff === "exponential" ? Math.pow(2, attempt - 1) : attempt,
@@ -280,13 +299,13 @@ export async function runV1Pipeline(input: {
 		accumulate(budget, finalResult);
 		aggregateStdout = appendClipped(aggregateStdout, finalResult.stdoutExcerpt);
 
-		if (finalResult.status === "failed" || finalResult.status === "aborted") {
+		if (finalResult.status === "failed" || finalResult.status === "aborted" || abortSignal.aborted) {
 			stepCountFailed += 1;
 			const onFailure = step.on_failure ?? "abort";
 			const afterRetry = step.retry?.after_retry ?? "abort";
 			const effective = onFailure === "retry" ? afterRetry : onFailure;
-			if (effective === "abort" || finalResult.status === "aborted") {
-				abortReason = finalResult.status === "aborted" ? "cancelled" : "failure";
+			if (effective === "abort" || finalResult.status === "aborted" || abortSignal.aborted) {
+				abortReason = timedOut ? "timeout" : abortSignal.aborted || finalResult.status === "aborted" ? "cancelled" : "failure";
 				break;
 			}
 			// continue: fall through to next step
@@ -431,9 +450,11 @@ function appendClipped(acc: string, more: string): string {
 }
 
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {
+	if (signal.aborted) return;
 	await new Promise<void>((resolve) => {
-		const timer = setTimeout(resolve, ms);
-		signal.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
+		const finish = () => { clearTimeout(timer); signal.removeEventListener("abort", finish); resolve(); };
+		const timer = setTimeout(finish, ms);
+		signal.addEventListener("abort", finish, { once: true });
 	});
 }
 

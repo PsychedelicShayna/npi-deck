@@ -26,6 +26,9 @@ import { ConcurrencyController } from "./routines/concurrency.ts";
 import { runV1Pipeline } from "./routines/v1-runner.ts";
 import { finalizeRun, insertAbortedRun } from "./db/routine-step-runs.ts";
 import { loadConfig } from "./config.ts";
+import { spawnOwned, terminateOwned } from "./owned-process.ts";
+import { routineAgentCommand } from "./routines/agent-command.ts";
+import { workRegistry } from "./work-registry.ts";
 
 const log = logger("routines-runner");
 
@@ -40,7 +43,14 @@ interface ScheduledCron {
 export class RoutinesRunner {
 	private crons = new Map<string, ScheduledCron[]>();
 	private disposed = false;
+	private closing = false;
+	private readonly runs = new Map<string, { abort: AbortController; finished: Promise<void> }>();
 	readonly concurrency = new ConcurrencyController();
+	get busy(): boolean { return this.runs.size > 0; }
+	get workSnapshot(): Array<{ runId: string; routineId: string }> {
+		return [...this.runs.keys()].map((key) => ({ routineId: key.split(":")[0]!, runId: key.split(":")[1]! }));
+	}
+	closeAdmissions(): void { this.closing = true; }
 
 	start(): void {
 		const routines = listRoutines();
@@ -50,19 +60,18 @@ export class RoutinesRunner {
 		log.info(`scheduled ${routines.filter((r) => r.enabled).length} routine(s)`);
 	}
 
-	dispose(): void {
+	async dispose(): Promise<void> {
 		if (this.disposed) return;
+		this.closeAdmissions();
 		this.disposed = true;
 		for (const entries of this.crons.values()) {
 			for (const entry of entries) {
-				try {
-					entry.cron.stop();
-				} catch (err) {
-					log.warn(`stop failed for routine ${entry.routineId}`, err);
-				}
+				try { entry.cron.stop(); } catch (err) { log.warn(`stop failed for routine ${entry.routineId}`, err); }
 			}
 		}
 		this.crons.clear();
+		for (const run of this.runs.values()) run.abort.abort();
+		await Promise.allSettled([...this.runs.values()].map((run) => run.finished));
 	}
 
 	schedule(r: Routine): void {
@@ -120,13 +129,14 @@ export class RoutinesRunner {
 		trigger: "cron" | "manual" | "webhook" | "event" = "manual",
 		payload: Record<string, unknown> = {},
 	): Promise<void> {
+		if (this.closing) throw new Error("routine admissions closed");
 		const all = listRoutines();
 		const routine = all.find((r) => r.id === routineId);
 		if (!routine) {
 			log.warn(`fire: routine ${routineId} not found`);
 			return;
 		}
-		if (!routine.enabled && trigger === "cron") return;
+		if (!routine.enabled && (trigger === "cron" || trigger === "webhook" || trigger === "event")) return;
 
 		if (routine.specVersion === 1 && routine.specYaml) {
 			await this.fireV1(routine, trigger, payload);
@@ -134,11 +144,12 @@ export class RoutinesRunner {
 			await this.fireV0(routine, trigger === "cron" || trigger === "manual" ? trigger : "manual");
 		}
 
-		const reschedule = this.crons.get(routineId)?.[0];
+		const entries = this.crons.get(routineId) ?? [];
+		const next = entries.map(({ cron }) => cron.nextRun()).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime())[0];
 		const now = new Date().toISOString();
 		setRoutineSchedule(routineId, {
 			lastRunAt: now,
-			nextRunAt: reschedule?.cron.nextRun()?.toISOString() ?? null,
+			nextRunAt: next?.toISOString() ?? null,
 		});
 	}
 
@@ -181,7 +192,7 @@ export class RoutinesRunner {
 			return;
 		}
 
-		const run = startRun(routine.id, trigger);
+		const run = startRun(routine.id, trigger, JSON.stringify(payload));
 		const decision = this.concurrency.decide(routine.id, run.id, routine.concurrency);
 		if (decision.kind === "skip") {
 			finalizeRun(run.id, {
@@ -196,27 +207,30 @@ export class RoutinesRunner {
 			decision.toCancel.abort();
 		}
 
-		log.info(`firing V1 routine ${routine.name} (${spec.steps.length} steps, trigger=${trigger})`);
-		const config = loadConfig();
-		try {
-			await runV1Pipeline({
-				routine,
-				spec,
-				runId: run.id,
-				triggerKind: trigger,
-				triggerPayload: payload,
-				abortSignal: decision.abort.signal,
-				defaultCwd: config.defaultCwd,
-				// Sandbox `agent` steps in <deck-data-dir>/routine-runs/<runId>/
-				// so the embedded coding agent can't reach into the user's home
-				// for "context" it wasn't asked about.
-				agentSandboxRoot: path.join(path.dirname(config.dbPath), "routine-runs"),
-			});
-		} catch (err) {
-			log.error(`V1 pipeline threw for ${routine.id}`, err);
-		} finally {
-			this.concurrency.finish(routine.id, run.id);
-		}
+		const key = `${routine.id}:${run.id}`;
+		const releaseWork = workRegistry.admit(decision.kind === "queue" ? "routine-queued" : "routine-run", key);
+		const finished = (async () => {
+			if (decision.kind === "queue") await decision.release;
+			if (decision.abort.signal.aborted) {
+				finalizeRun(run.id, { endedAt: new Date().toISOString(), abortedAt: new Date().toISOString(), abortReason: "cancelled" });
+				return;
+			}
+			log.info(`firing V1 routine ${routine.name} (${spec.steps.length} steps, trigger=${trigger})`);
+			const config = loadConfig();
+			try {
+				await runV1Pipeline({
+					routine, spec, runId: run.id, triggerKind: trigger, triggerPayload: payload,
+					abortSignal: decision.abort.signal, defaultCwd: config.defaultCwd,
+					agentSandboxRoot: path.join(path.dirname(config.dbPath), "routine-runs"),
+				});
+			} catch (err) {
+				log.error(`V1 pipeline threw for ${routine.id}`, err);
+			} finally {
+				this.concurrency.finish(routine.id, run.id);
+			}
+		})();
+		this.runs.set(key, { abort: decision.abort, finished });
+		try { await finished; } finally { this.runs.delete(key); releaseWork(); }
 	}
 }
 
@@ -250,16 +264,10 @@ async function runV0Action(
 	if (!cmd) {
 		return { error: `unsupported action kind: ${kind}`, stdoutExcerpt: "", stderrExcerpt: "" };
 	}
-	const proc = Bun.spawn(cmd, {
-		cwd,
-		stdin: "ignore",
-		stdout: "pipe",
-		stderr: "pipe",
-		windowsHide: true,
+	const proc = spawnOwned(cmd, {
+		cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true,
 	});
-	const timer = setTimeout(() => {
-		try { proc.kill(); } catch { /* already gone */ }
-	}, MAX_RUNTIME_MS);
+	const timer = setTimeout(() => { void terminateOwned(proc); }, MAX_RUNTIME_MS);
 	timer.unref?.();
 	const [stdout, stderr, exitCode] = await Promise.all([
 		readClipped(proc.stdout),
@@ -285,7 +293,7 @@ function buildV0Cmd(kind: RoutineActionKind, body: string): string[] | null {
 			return parts as string[];
 		}
 		case "prompt":
-			return ["omp", "-p", body];
+			return routineAgentCommand(["-p", body]);
 		default:
 			return null;
 	}

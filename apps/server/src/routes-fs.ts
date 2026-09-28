@@ -6,6 +6,7 @@ import type { FilePathMatch, ListFilePathsResponse } from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 
+import { spawnOwned } from "./owned-process.ts";
 const log = logger("fs-complete");
 
 /**
@@ -109,14 +110,14 @@ async function loadInventory(cwd: string): Promise<InventoryEntry[]> {
 }
 
 /**
- * Use Bun's spawn to call `git ls-files --cached --others --exclude-standard`.
+ * Use the owned spawn boundary to call `git ls-files --cached --others --exclude-standard`.
  * Output is one relative path per line. We probe `stat()` to mark directories
  * — `git ls-files` only emits files, but `@filepath` autocomplete should let
  * users insert directories too (the SDK's auto-reader handles directory
  * targets by listing contents).
  */
 async function runGitLsFiles(cwd: string): Promise<InventoryEntry[] | null> {
-	const proc = Bun.spawn(
+	const proc = spawnOwned(
 		["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
 		{ cwd, stdout: "pipe", stderr: "pipe" },
 	);

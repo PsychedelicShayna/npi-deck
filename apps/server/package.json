@@ -3,12 +3,12 @@
 	"version": "0.6.1",
 	"private": true,
 	"type": "module",
-	"main": "./src/index.ts",
+	"main": "./src/deck.ts",
 	"scripts": {
 		"dev": "bun --hot src/index.ts",
 		"start": "bun src/index.ts",
 		"build": "bun build src/index.ts --target=bun --outdir=dist --minify",
-		"typecheck": "bun ../../scripts/check-sdk-imports.ts && bun ../../scripts/tsgo.ts --noEmit -p .",
+		"typecheck": "bun ../../scripts/check-sdk-imports.ts && bun ../../scripts/check-owned-spawns.ts && bun ../../scripts/tsgo.ts --noEmit -p .",
 		"test": "bun test"
 	},
 	"dependencies": {

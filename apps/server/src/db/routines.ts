@@ -376,14 +376,14 @@ export function setRoutineSchedule(
 
 // ─── Runs ──────────────────────────────────────────────────────────────────
 
-export function startRun(routineId: string, trigger: RoutineRun["trigger"]): RoutineRun {
+export function startRun(routineId: string, trigger: RoutineRun["trigger"], triggerPayload?: string): RoutineRun {
 	const runId = `run_${id().toLowerCase().slice(0, 18)}`;
 	const startedAt = nowIso();
 	getDb()
-		.prepare<unknown, [string, string, string, string]>(
-			"INSERT INTO routine_runs (id, routine_id, started_at, trigger) VALUES (?, ?, ?, ?)",
+		.prepare<unknown, [string, string, string, string, string | null]>(
+			"INSERT INTO routine_runs (id, routine_id, started_at, trigger, trigger_payload) VALUES (?, ?, ?, ?, ?)",
 		)
-		.run(runId, routineId, startedAt, trigger);
+		.run(runId, routineId, startedAt, trigger, triggerPayload ?? null);
 	const out = getRun(runId);
 	if (!out) throw new Error("startRun failed");
 	return out;
