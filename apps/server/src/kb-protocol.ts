@@ -2,10 +2,9 @@
  * `kb://` URI handler for the omp SDK's InternalUrlRouter.
  *
  * Lets the `read` tool resolve `kb://<path>` against the user's configured
- * KB root (the same root `kb-service.ts` serves over REST). Without this,
- * the prelude's promise that the harness resolves `kb://` URIs is a lie —
- * the SDK only ships handlers for `agent://`, `artifact://`, `memory://`,
- * `skill://`, `rule://`, `mcp://`, `omp://`, `local://`, `issue://`, `pr://`.
+ * KB root (the same root `kb-service.ts` serves over REST). The SDK only
+ * ships handlers for `agent://`, `artifact://`, `memory://`, `skill://`,
+ * `rule://`, `mcp://`, `omp://`, `local://`, `issue://`, `pr://`.
  *
  * Resolution rules (intentionally narrow — the wider semantic-match surface
  * lives behind /api/kb/search, this is for the read tool only):

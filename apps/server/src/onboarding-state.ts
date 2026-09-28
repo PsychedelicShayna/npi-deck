@@ -27,9 +27,9 @@
  * the wizard can re-trigger when there are new must-show steps.
  *
  * Composite read also enumerates whether the user has any provider
- * credentials, a kb root that exists, and a `/start` command — the
- * wizard uses these to tick each step's "already done" state, so a
- * user who set things up out-of-band doesn't have to redo them.
+ * credentials and a kb root that exists — the wizard uses these to tick
+ * each step's "already done" state, so a user who set things up
+ * out-of-band doesn't have to redo them.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
@@ -42,7 +42,6 @@ import { sdk } from "./backend/runtime.ts";
 import { getDataDir } from "./env-store.ts";
 import { resolveKbRoot } from "./kb-service.ts";
 import { logger } from "./log.ts";
-import { readStartCommand } from "./orientation-store.ts";
 import { getDb } from "./db/index.ts";
 
 const log = logger("onboarding");
@@ -173,7 +172,8 @@ export async function getOnboardingState(): Promise<OnboardingState> {
 			providers: await readProviders(),
 			kbRoot: resolveKbRoot(),
 			kbExists: existsSync(resolveKbRoot()),
-			startCommandExists: readStartCommand().exists,
+			// Placeholder until the protocol drops `startCommandExists` (#50).
+			startCommandExists: false,
 		};
 	}
 
@@ -200,7 +200,8 @@ export async function getOnboardingState(): Promise<OnboardingState> {
 			providers: await readProviders(),
 			kbRoot: resolveKbRoot(),
 			kbExists: existsSync(resolveKbRoot()),
-			startCommandExists: readStartCommand().exists,
+			// Placeholder until the protocol drops `startCommandExists` (#50).
+			startCommandExists: false,
 		};
 	}
 
@@ -213,7 +214,8 @@ export async function getOnboardingState(): Promise<OnboardingState> {
 		providers: await readProviders(),
 		kbRoot: resolveKbRoot(),
 		kbExists: existsSync(resolveKbRoot()),
-		startCommandExists: readStartCommand().exists,
+		// Placeholder until the protocol drops `startCommandExists` (#50).
+		startCommandExists: false,
 	};
 }
 

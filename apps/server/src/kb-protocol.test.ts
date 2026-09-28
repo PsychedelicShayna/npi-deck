@@ -36,8 +36,8 @@ beforeEach(() => {
 		"utf8",
 	);
 	writeFileSync(
-		path.join(kbRoot, "system", "deck-orientation.md"),
-		"# Deck orientation\n\nbody — with em-dash\n",
+		path.join(kbRoot, "system", "deck-notes.md"),
+		"# Deck notes\n\nbody — with em-dash\n",
 		"utf8",
 	);
 	writeFileSync(path.join(kbRoot, "tools", "x.md"), "x\n", "utf8");
@@ -65,7 +65,7 @@ describe("kb:// resolution", () => {
 	});
 
 	test("UTF-8 content (em-dash etc.) round-trips byte-exact", async () => {
-		const res = await router.resolve("kb://system/deck-orientation.md");
+		const res = await router.resolve("kb://system/deck-notes.md");
 		expect(res.content).toContain("with em-dash");
 		expect(res.content.includes("\u2014")).toBe(true);
 	});

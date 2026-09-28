@@ -22,15 +22,15 @@ let savedDataDir: string | undefined;
 let tmpDir: string;
 
 beforeEach(() => {
-	savedDataDir = process.env.NPI_DECK_DATA_DIR;
+	savedDataDir = process.env.NPI_DECK_HOME;
 	tmpDir = mkdtempSync(path.join(os.tmpdir(), "npi-deck-onboarding-"));
-	process.env.NPI_DECK_DATA_DIR = tmpDir;
+	process.env.NPI_DECK_HOME = tmpDir;
 	resetOnboardingForTests();
 });
 
 afterEach(() => {
-	if (savedDataDir === undefined) delete process.env.NPI_DECK_DATA_DIR;
-	else process.env.NPI_DECK_DATA_DIR = savedDataDir;
+	if (savedDataDir === undefined) delete process.env.NPI_DECK_HOME;
+	else process.env.NPI_DECK_HOME = savedDataDir;
 	try {
 		rmSync(tmpDir, { recursive: true, force: true });
 	} catch {
@@ -72,13 +72,12 @@ describe("onboarding-state", () => {
 		expect(state.needsOnboarding).toBe(false);
 	});
 
-	test("composite state includes kbRoot + kbExists + startCommandExists fields", async () => {
+	test("composite state includes kbRoot + kbExists fields", async () => {
 		markOnboardingComplete(false);
 		const state = await getOnboardingState();
 		expect(typeof state.kbRoot).toBe("string");
 		expect(state.kbRoot.length).toBeGreaterThan(0);
 		expect(typeof state.kbExists).toBe("boolean");
-		expect(typeof state.startCommandExists).toBe("boolean");
 		expect(Array.isArray(state.providers)).toBe(true);
 	});
 });

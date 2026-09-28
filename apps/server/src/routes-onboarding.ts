@@ -4,14 +4,13 @@
  * GET  /api/onboarding/state          → OnboardingState (composite)
  * POST /api/onboarding/complete       → mark done (skipped flag distinguishes
  *                                       walked-through vs X-ed out)
- * POST /api/onboarding/seed-kb-system → write the four `system/*.md` stubs
- *                                       that the default `/start` body
- *                                       references; idempotent (won't
- *                                       overwrite existing files)
+ * POST /api/onboarding/seed-kb-system → create the kb root and its starter
+ *                                       README; idempotent (won't overwrite
+ *                                       an existing README)
  *
- * Provider auth, kb init, start.md write, and env updates all reuse their
- * existing routes (`/api/auth/oauth/*`, `/api/kb/init`,
- * `/api/orientation/*`, `/api/env/*`). The wizard just sequences them.
+ * Provider auth, kb init, and env updates reuse their existing routes
+ * (`/api/auth/oauth/*`, `/api/kb/init`, `/api/env/*`). The wizard just
+ * sequences them.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
@@ -31,12 +30,6 @@ import { getOnboardingState, markOnboardingComplete } from "./onboarding-state.t
 
 const log = logger("routes:onboarding");
 
-/**
- * The four `kb://system/*.md` files the default `/start` body fetches.
- * Shipped as blank-ish stubs so the agent's read-on-orient flow returns
- * something rather than a stream of 404s. Users can edit / replace at
- * will — we never overwrite a file the user has touched.
- */
 /**
  * Top-level README written at the kb root by `seed-kb-system`. Same
  * intent as the one rendered by `kb-service.initialize()` — drop a
@@ -63,8 +56,7 @@ const KB_README_BODY = [
 	"  `updated`, `tags` are parsed automatically).",
 	"- `[[some-file]]` resolves by filename stem. `[[dir/path]]` for explicit",
 	"  paths. `[[target|label]]` to rename the rendered text.",
-	"- The `/start` slash command reads `system/*.md` at session boot — drop",
-	"  notes about your voice, projects, and org system there.",
+	"- The deck's KB view browses, searches, and edits these files.",
 	"",
 	"## What this is NOT",
 	"",
@@ -74,97 +66,6 @@ const KB_README_BODY = [
 	"Happy authoring.",
 	"",
 ].join("\n");
-
-const KB_SYSTEM_STUBS: ReadonlyArray<{ name: string; body: string }> = [
-	{
-		name: "working-voice.md",
-		body: [
-			"---",
-			"type: knowledge",
-			"tags: [system, voice]",
-			"---",
-			"",
-			"# Working voice",
-			"",
-			"How you prefer the agent to communicate with you. Drop short notes here as",
-			"you notice things you want the agent to do or stop doing. Read at session",
-			"start by the default `/start` command.",
-			"",
-			"## Examples",
-			"",
-			"- Be direct. Skip pleasantries.",
-			"- Cite tasks by `T-N` ids.",
-			"- Don't ask for confirmation on reversible actions.",
-			"",
-		].join("\n"),
-	},
-	{
-		name: "deck-orientation.md",
-		body: [
-			"---",
-			"type: knowledge",
-			"tags: [system, deck]",
-			"---",
-			"",
-			"# Deck orientation",
-			"",
-			"Quick reference for what npi-deck is and the local API surface.",
-			"",
-			"## Capabilities",
-			"",
-			"- **Chat** — multi-session conversations with the omp agent.",
-			"- **Tasks** — `T-N` kanban. `GET /api/tasks` for state.",
-			"- **Routines** — cron / webhook / manual pipelines. `GET /api/routines`.",
-			"- **Inbox** — quick-capture surface. `GET /api/inbox`.",
-			"- **KB** — this folder. Read via `kb://` URIs or `GET /api/kb/file?path=…`.",
-			"- **Skills** — installed under `~/.omp/agent/skills/`.",
-			"",
-			"## Local API base",
-			"",
-			"`http://127.0.0.1:8787/api` — reachable from any session via `bash` + `curl`.",
-			"",
-		].join("\n"),
-	},
-	{
-		name: "projects-hub.md",
-		body: [
-			"---",
-			"type: knowledge",
-			"tags: [system, projects]",
-			"---",
-			"",
-			"# Active projects",
-			"",
-			"One-stop list of projects you're actively working on. Cross-reference",
-			"with the kanban for in-flight tasks.",
-			"",
-			"## Example structure",
-			"",
-			"### project-name",
-			"",
-			"- **What:** one line",
-			"- **Status:** active / paused / done",
-			"- **Related tasks:** T-N, T-M",
-			"",
-		].join("\n"),
-	},
-	{
-		name: "org-system-hub.md",
-		body: [
-			"---",
-			"type: knowledge",
-			"tags: [system, org]",
-			"---",
-			"",
-			"# Org system hub",
-			"",
-			"How your work is organized. The agent reads this at session start to",
-			"orient. Drop notes here about: where things live, how you triage, what",
-			"counts as 'done', anything cross-cutting the agent should default to.",
-			"",
-		].join("\n"),
-	},
-];
 
 export function buildOnboardingRouter(): Hono {
 	const app = new Hono();
@@ -194,11 +95,10 @@ export function buildOnboardingRouter(): Hono {
 			/* empty body uses defaults */
 		}
 		const kbRoot = body.kbRoot?.trim() || resolveKbRoot();
-		const systemDir = path.join(kbRoot, "system");
 		try {
-			mkdirSync(systemDir, { recursive: true });
+			mkdirSync(kbRoot, { recursive: true });
 		} catch (err) {
-			log.error(`mkdir failed at ${systemDir}`, err);
+			log.error(`mkdir failed at ${kbRoot}`, err);
 			return c.json({ error: String(err) }, 500);
 		}
 		const result: SeedKbSystemResponse = { created: [], skipped: [] };
@@ -217,20 +117,6 @@ export function buildOnboardingRouter(): Hono {
 			}
 		} else {
 			result.skipped.push("README.md");
-		}
-		for (const stub of KB_SYSTEM_STUBS) {
-			const dest = path.join(systemDir, stub.name);
-			if (existsSync(dest)) {
-				result.skipped.push(`system/${stub.name}`);
-				continue;
-			}
-			try {
-				writeFileSync(dest, stub.body, "utf8");
-				result.created.push(`system/${stub.name}`);
-			} catch (err) {
-				log.warn(`failed to write ${dest}`, err);
-				result.skipped.push(`system/${stub.name}`);
-			}
 		}
 		return c.json(result);
 	});
