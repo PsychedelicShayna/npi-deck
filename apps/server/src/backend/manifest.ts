@@ -28,6 +28,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/capability": typeof import("@oh-my-pi/pi-coding-agent/capability");
 	"@oh-my-pi/pi-coding-agent/capability/skill": typeof import("@oh-my-pi/pi-coding-agent/capability/skill");
 	"@oh-my-pi/pi-coding-agent/config/model-settings": typeof import("@oh-my-pi/pi-coding-agent/config/model-settings");
+	"@oh-my-pi/pi-coding-agent/session/settings": typeof import("@oh-my-pi/pi-coding-agent/session/settings");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace": typeof import("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace");
@@ -91,6 +92,10 @@ export const MANIFEST = {
 			Settings: op(CODING_AGENT, "Settings"),
 			getAgentDir: op(CODING_AGENT, "getAgentDir"),
 			VERSION: op(CODING_AGENT, "VERSION"),
+			cfgModelRoles: op("@oh-my-pi/pi-coding-agent/config/model-settings", "cfgModelRoles"),
+			cfgRetryEnabled: op("@oh-my-pi/pi-coding-agent/session/settings", "cfgRetryEnabled"),
+			cfgRetryModelFallback: op("@oh-my-pi/pi-coding-agent/session/settings", "cfgRetryModelFallback"),
+			cfgRetryFallbackChains: op("@oh-my-pi/pi-coding-agent/session/settings", "cfgRetryFallbackChains"),
 			getEnvApiKey: op("@oh-my-pi/pi-ai", "getEnvApiKey"),
 			getOAuthProviders: op("@oh-my-pi/pi-ai", "getOAuthProviders"),
 			runExtensionCompact: op("@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler", "runExtensionCompact"),
@@ -165,7 +170,6 @@ export const MANIFEST = {
 			cfgAdvisorSyncBacklog: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorSyncBacklog"),
 			cfgAdvisorMaxNotesPerUpdate: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorMaxNotesPerUpdate"),
 			cfgAdvisorEvictStaleResults: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorEvictStaleResults"),
-			cfgModelRoles: op("@oh-my-pi/pi-coding-agent/config/model-settings", "cfgModelRoles"),
 		},
 	},
 	/** W3: mixture-of-agents models (`mixture/<name>`) listed in the model picker without a live session. */

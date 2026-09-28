@@ -99,7 +99,7 @@ export function buildAdvisorsRouter(bridge: AgentBridge, config: import("./confi
 				enabled: api.cfgAdvisorEnabled.get(settings), syncBacklog: api.cfgAdvisorSyncBacklog.get(settings),
 				maxNotesPerUpdate: api.cfgAdvisorMaxNotesPerUpdate.get(settings),
 				evictStaleResults: api.cfgAdvisorEvictStaleResults.get(settings),
-				model: api.cfgModelRoles.get(settings).advisor ?? "",
+				model: sdk().cfgModelRoles.get(settings).advisor ?? "",
 			} });
 		} catch (err) { log.warn("read advisor config failed", err); return c.json({ error: errorText(err) }, 500); }
 	});

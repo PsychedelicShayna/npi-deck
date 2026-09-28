@@ -52,12 +52,25 @@ The managed `.env` is `<data dir>/.env`. The same directory holds:
 | `NPI_DECK_DEFAULT_CWD` | `process.cwd()` | next session | Working dir for new chat sessions. |
 | `NPI_DECK_WORKSPACES` | _(none)_ | next session | Comma-separated extra workspace roots shown in the picker. |
 
-### omp SDK
+### NeoPi SDK and new-chat models
 
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
-| `OMP_MODEL` | SDK default | next session | Default model id (e.g. `anthropic/claude-opus-4-7`). The model picker in the chat header overrides per-session. |
 | `PI_NO_TITLE` | _(unset)_ | next session | Set truthy to disable SDK auto-title generation. |
+
+New deck chats without an explicitly selected model start on **Opus 5.5
+(`medium`)**. The deck chooses the first authenticated provider: Anthropic,
+GitHub Copilot, then OpenRouter. The only retry fallback is **GPT-6 Sol
+(`medium`)**, preferring OpenAI Codex, then GitHub Copilot, then OpenRouter.
+If no Sol provider is authenticated, the fallback still targets OpenAI Codex
+and requires sign-in before it can serve a request. If no Opus provider is
+authenticated, creating a new chat reports an error instead of silently
+switching to an unrelated model.
+
+This policy applies only to new deck chats. It does not rewrite NeoPi's
+`config.yml`, affect CLI sessions or resumed chats, or replace an explicit
+model selection in the chat header. `OMP_MODEL` and NeoPi's global default
+model do not override the deck's new-chat default.
 
 ### Sessions
 

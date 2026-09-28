@@ -51,6 +51,25 @@ import type {
 } from "./types.ts";
 
 const log = logger("bridge:in-process");
+const DEFAULT_MODEL_CANDIDATES = [
+	{ provider: "anthropic", id: "claude-opus-5-5" },
+	{ provider: "github-copilot", id: "claude-opus-5.5" },
+	{ provider: "openrouter", id: "anthropic/claude-opus-5.5" },
+] as const;
+const FALLBACK_MODEL_CANDIDATES = [
+	{ provider: "openai-codex", id: "gpt-6-sol" },
+	{ provider: "github-copilot", id: "gpt-6-sol" },
+	{ provider: "openrouter", id: "openai/gpt-6-sol" },
+] as const;
+
+function firstAuthenticatedModel(registry: ModelRegistry, candidates: readonly ModelRef[]) {
+	for (const { provider, id } of candidates) {
+		const model = registry.find(provider, id);
+		if (model && registry.hasConfiguredAuth(model)) return model;
+	}
+	return undefined;
+}
+
 
 
 interface Active {
@@ -106,7 +125,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		const release = workRegistry.admit("session", `create:${crypto.randomUUID()}`);
 		try {
 			const sessionManager = sdk().SessionManager.create(opts.cwd);
-			const handle = await this.open(opts.cwd, sessionManager, opts.model, opts.mcpServersAllowed);
+			const handle = await this.open(opts.cwd, sessionManager, opts.model, opts.mcpServersAllowed, true);
 			log.info(`created session ${handle.sessionId} cwd=${opts.cwd}`);
 			return handle;
 		} finally { release(); }
@@ -127,12 +146,36 @@ export class InProcessAgentBridge implements AgentBridge {
 		} finally { release(); }
 	}
 
-	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed?: string[]): Promise<InProcessSessionHandle> {
+	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed?: string[], fresh = false): Promise<InProcessSessionHandle> {
 		const modelRegistry = await this.ensureModelRegistry();
 		const sessionId = sessionManager.getSessionId();
-		// Keep each root's effective workspace settings isolated. override() changes
-		// this instance only; a deck allowlist must never write user config.yml.
-		const settings = await sdk().Settings.loadIsolated({ cwd, agentDir: sdk().getAgentDir() });
+		// Keep each root's settings isolated; these overrides never write the
+		// user's NeoPi config or change their CLI sessions.
+		const core = sdk();
+		const settings = await core.Settings.loadIsolated({ cwd, agentDir: core.getAgentDir() });
+		let deckDefaultModel: ReturnType<ModelRegistry["find"]>;
+		if (fresh && !model) {
+			deckDefaultModel = firstAuthenticatedModel(modelRegistry, DEFAULT_MODEL_CANDIDATES);
+			if (!deckDefaultModel) {
+				throw new Error("No Opus 5.5 credentials configured; sign in to Anthropic, GitHub Copilot, or OpenRouter.");
+			}
+			const primary = `${deckDefaultModel.provider}/${deckDefaultModel.id}:medium`;
+			const fallbackModel = firstAuthenticatedModel(modelRegistry, FALLBACK_MODEL_CANDIDATES);
+			const fallback = fallbackModel
+				? `${fallbackModel.provider}/${fallbackModel.id}:medium`
+				: "openai-codex/gpt-6-sol:medium";
+			core.cfgModelRoles.override(settings, {
+				...core.cfgModelRoles.get(settings),
+				default: primary,
+			});
+			core.cfgRetryFallbackChains.override(settings, {
+				...core.cfgRetryFallbackChains.get(settings),
+				default: [fallback],
+				[primary]: [fallback],
+			});
+			core.cfgRetryEnabled.override(settings, true);
+			core.cfgRetryModelFallback.override(settings, true);
+		}
 		if (mcpServersAllowed !== undefined) {
 			if (mcpServersAllowed.some(name => !isLiteralAllowlistName(name))) {
 				throw new McpAllowlistError("MCP allowlist requires configured literal server names (no glob metacharacters)");
@@ -169,7 +212,11 @@ export class InProcessAgentBridge implements AgentBridge {
 						const m = modelRegistry.find(model.provider, model.id);
 						return m ? { model: m } : {};
 					})()
-				: {}),
+				: deckDefaultModel ? {
+						model: deckDefaultModel,
+						// NeoPi types this string through the Effort enum.
+						thinkingLevel: "medium" as import("@oh-my-pi/pi-coding-agent").CreateAgentSessionOptions["thinkingLevel"],
+					} : {}),
 			});
 		} catch (error) {
 			if (hasFeature("mcp-allowlist") && error instanceof feature("mcp-allowlist").MCPUnknownServerError) {

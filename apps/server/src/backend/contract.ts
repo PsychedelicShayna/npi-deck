@@ -26,6 +26,7 @@ import * as path from "node:path";
 import type { AgentSession, CreateAgentSessionOptions } from "@oh-my-pi/pi-coding-agent";
 
 import { MANIFEST, manifestRows, type FeatureSpec, type ModuleSpecifier } from "./manifest.ts";
+import { InProcessAgentBridge } from "../bridge/in-process.ts";
 import { spawnOwnedSync } from "../owned-process.ts";
 import { feature, formatDiagnostic, loadBackend, resolveBackendSelection, resolveManifest, sdk } from "./runtime.ts";
 
@@ -49,6 +50,7 @@ if (!process.env.NPI_DECK_CONTRACT_ROOT) {
 		XDG_CACHE_HOME: path.join(home, ".cache"),
 		PI_CODING_AGENT_DIR: path.join(root, "agent"),
 		OPENROUTER_API_KEY: "sk-or-contract-fixture-dummy",
+		ANTHROPIC_API_KEY: "sk-ant-contract-fixture-dummy",
 		NPI_DECK_BACKEND: selection.path,
 		NPI_DECK_CONTRACT_ROOT: root,
 	});
@@ -485,7 +487,6 @@ await check("advisors: save WATCHDOG.yml, rediscover, apply live", [
 	"cfgAdvisorSyncBacklog",
 	"cfgAdvisorMaxNotesPerUpdate",
 	"cfgAdvisorEvictStaleResults",
-	"cfgModelRoles",
 ], async () => {
 	assert(sessionB, "no session");
 	const file = await advisors.resolveAdvisorConfigEditPath("user", { projectDir: rootB, agentDir });
@@ -506,7 +507,7 @@ await check("advisors: save WATCHDOG.yml, rediscover, apply live", [
 	assert(advisors.cfgAdvisorSyncBacklog.get(settings) !== undefined, "advisor backlog setting unavailable");
 	assert(typeof advisors.cfgAdvisorMaxNotesPerUpdate.get(settings) === "number", "advisor notes limit unavailable");
 	assert(typeof advisors.cfgAdvisorEvictStaleResults.get(settings) === "boolean", "advisor eviction setting unavailable");
-	assert(typeof advisors.cfgModelRoles.get(settings) === "object", "model role setting unavailable");
+	assert(typeof core.cfgModelRoles.get(settings) === "object", "model role setting unavailable");
 	sessionB.setAdvisorEnabled(true);
 	const count = sessionB.applyAdvisorConfigs(discovered.advisors, discovered.sharedInstructions, discovered.sharedMaxNotesPerUpdate);
 	const status = await advisorStatus(sessionB);
@@ -566,7 +567,7 @@ await check("fact: per-root settings isolation (Settings.loadIsolated)", ["Setti
 	const before = { a: advisorModel(sessionA), b: advisorModel(sessionB), global: core.settings.getModelRole("advisor") };
 	const configPath = path.join(agentDir, "config.yml");
 	const configBefore = await Bun.file(configPath).exists() ? await Bun.file(configPath).text() : undefined;
-	advisors.cfgModelRoles.override(isolated, { ...advisors.cfgModelRoles.get(isolated), advisor: altModel });
+	core.cfgModelRoles.override(isolated, { ...core.cfgModelRoles.get(isolated), advisor: altModel });
 	await Bun.sleep(10);
 	const after = { a: advisorModel(sessionA), b: advisorModel(sessionB), global: core.settings.getModelRole("advisor") };
 	const persisted = (await core.Settings.loadIsolated({ cwd: rootB, agentDir })).getModelRole("advisor");
@@ -582,6 +583,50 @@ await check("fact: per-root settings isolation (Settings.loadIsolated)", ["Setti
 	};
 	return facts["settings-isolation"]!.evidence;
 });
+await check("models: new chats select Opus medium with one exact Sol fallback", [
+	"cfgModelRoles", "cfgRetryEnabled", "cfgRetryModelFallback", "cfgRetryFallbackChains",
+], async () => {
+	const cwd = mkdir("root-default");
+	const configPath = path.join(agentDir, "config.yml");
+	const before = await Bun.file(configPath).exists() ? await Bun.file(configPath).text() : undefined;
+	const bridge = new InProcessAgentBridge({ idleTimeoutMs: 0 });
+	try {
+		const handle = await bridge.createSession({ cwd, mcpServersAllowed: [] });
+		const snapshot = handle.snapshot();
+		const primary = "anthropic/claude-opus-5-5:medium";
+		const fallback = "openrouter/openai/gpt-6-sol:medium"; // Only OpenRouter is authenticated in this fixture.
+		assert(snapshot.model?.provider === "anthropic" && snapshot.model.id === "claude-opus-5-5"
+			&& snapshot.thinkingLevel === "medium", `new chat selected ${JSON.stringify(snapshot.model)}:${snapshot.thinkingLevel}`);
+		const settings = (handle as unknown as { session: AgentSession }).session.settings;
+		assert(core.cfgModelRoles.get(settings).default === primary, "new chat role does not match selected model");
+		assert(core.cfgRetryEnabled.get(settings) && core.cfgRetryModelFallback.get(settings), "model fallback disabled");
+		const model = registry.find("anthropic", "claude-opus-5-5");
+		assert(model, "primary absent from NeoPi model catalog");
+		const { resolveRetryFallbackChainKey, findRetryFallbackCandidates } = await importFromTree<
+			typeof import("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains")
+		>("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains");
+		const context = {
+			chains: core.cfgRetryFallbackChains.get(settings),
+			getModelRole: (role: string) => settings.getModelRole(role),
+			modelLookup: registry,
+		};
+		const key = resolveRetryFallbackChainKey(context, primary, model);
+		assert(key === primary, `expected exact fallback chain, got ${key}`);
+		const candidates = findRetryFallbackCandidates(context, key, primary, model);
+		assert(candidates.length === 1 && candidates[0]?.raw === fallback, `unexpected fallback: ${JSON.stringify(candidates)}`);
+		const manual = await bridge.createSession({
+			cwd: mkdir("root-explicit"), model: { provider: cheapModel!.provider, id: cheapModel!.id }, mcpServersAllowed: [],
+		});
+		assert(manual.snapshot().model?.id === cheapModel!.id, "explicit model replaced by deck default");
+		const fresh = await core.Settings.loadIsolated({ cwd, agentDir });
+		const after = await Bun.file(configPath).exists() ? await Bun.file(configPath).text() : undefined;
+		assert(fresh.getModelRole("default") !== primary && before === after, "deck model policy persisted to user config");
+		return `${primary} → ${candidates[0]!.raw}; explicit model preserved; config unchanged`;
+	} finally {
+		await bridge.dispose();
+	}
+});
+
 
 await sessionB?.dispose();
 
