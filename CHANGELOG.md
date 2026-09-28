@@ -18,7 +18,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 - **Shipped files resolve through `apps/server/src/assets.ts`**, not the process cwd. The server is `startDeck()` in `apps/server/src/deck.ts`; `index.ts` is only the process entry.
 - **The server loads NeoPi at runtime.** `apps/server/src/backend/manifest.ts` lists every SDK export the deck uses (module, export, tier). At boot the server imports them by absolute path from the tree named by `NPI_DECK_BACKEND` or `activeBackend` in `~/.npi-deck/config.yml`, and exits with a diagnostic naming each missing module/export when a required one is absent. `@oh-my-pi` is never in the deck's `node_modules`; `scripts/check-sdk-imports.ts` fails on value imports from it outside `apps/server/src/backend/`.
 - **Server typecheck uses the tree's `tsgo`.** `bun run --filter '@npi-deck/server' typecheck` runs the import check, then the pinned tree's `tsgo` (`scripts/tsgo.ts`).
-- **Plan mode is unavailable** until it is ported to NeoPi's `xd://propose` flow (#45). Toggling it reports that instead of half-entering.
+- **Plan mode now uses NeoPi's `xd://propose` flow** (#45). The deck preserves its plan artifact, shows approval and revision requests over WebSocket, and restores the mode when a session resumes. The backend contract fixture verifies every plan-mode and advisor export against the pinned tree.
 
 ### Fixed
 
