@@ -28,6 +28,7 @@ import { KbProtocolHandler } from "./kb-protocol.ts";
 import { installStarterSkills } from "./starter-skills.ts";
 import { installStarterExtensions } from "./starter-extensions.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
+import { abortOAuthFlows } from "./routes-auth-oauth.ts";
 import { formatDiagnostic, loadBackend, sdk } from "./backend/runtime.ts";
 import {
 	BrowserNotificationChannel,
@@ -236,6 +237,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 			["work admissions close", () => workRegistry.closeAdmissions()],
 			["runner close admissions", () => routinesRunner.closeAdmissions()],
 			["listener stop", () => server.stop(true)],
+			["oauth flows abort", () => abortOAuthFlows()],
 			["skills watcher dispose", () => skillsWatcherDispose()],
 			["kb watcher dispose", () => kbWatcherDispose()],
 			["runner dispose", () => routinesRunner.dispose()],

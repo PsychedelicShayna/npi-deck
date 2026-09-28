@@ -85,12 +85,30 @@ interface ActiveFlow {
 	/** Server-side max-lifetime timer; cleared on natural completion. */
 	expirationTimer: ReturnType<typeof setTimeout>;
 	releaseWork: () => void;
+	settled?: Promise<void>;
 }
 
 // One in-flight flow per provider — second `start` 409s while the first is
 // alive. flowsById is the WS lookup index.
 const flows = new Map<string, ActiveFlow>();
+
 const flowsById = new Map<string, ActiveFlow>();
+
+/** Abort provider sign-ins before the SDK and database are torn down. */
+export async function abortOAuthFlows(): Promise<void> {
+	const pending = [...flows.values()];
+	if (pending.length === 0) return;
+	for (const flow of pending) abortFlow(flow, "server shutdown");
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	try {
+		await Promise.race([
+			Promise.allSettled(pending.map((flow) => flow.settled)).then(() => undefined),
+			new Promise<void>((resolve) => { timeout = setTimeout(resolve, 2_000); }),
+		]);
+	} finally {
+		if (timeout) clearTimeout(timeout);
+	}
+}
 
 /**
  * Tear down a flow: cancel SDK abort, reject every pending deferred so the
@@ -309,6 +327,7 @@ export function buildAuthOAuthRouter(): Hono {
 				flowsById.delete(flowId);
 				flow.releaseWork();
 			});
+		flow.settled = loginPromise;
 		// Keep the unhandled-rejection inspector quiet — we attached handlers above.
 		loginPromise.catch(() => {});
 
