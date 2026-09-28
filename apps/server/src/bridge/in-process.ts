@@ -514,7 +514,6 @@ export class InProcessAgentBridge implements AgentBridge {
 			planBridge,
 			onDispose: () => {
 				uiBridge.dispose();
-				planBridge.dispose();
 				const entry = this.active.get(sessionId);
 				subagents?.dispose();
 				entry?.releaseWork?.();
@@ -1268,6 +1267,9 @@ export class InProcessSessionHandle implements SessionHandle {
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
 		this.disposed = true;
+		// An xd://propose tool may still be awaiting its operator response.
+		// Settle it before SDK disposal waits for the in-flight turn to drain.
+		this.planBridge.dispose();
 		this.listeners.clear();
 		try {
 			await this.session.dispose();

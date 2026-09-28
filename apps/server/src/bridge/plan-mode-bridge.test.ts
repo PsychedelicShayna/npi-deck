@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { feature, loadBackend, resolveBackendSelection } from "../backend/runtime.ts";
+import { InProcessSessionHandle } from "./in-process.ts";
 import { PlanModeBridge, type PlanModeSession } from "./plan-mode-bridge.ts";
 
 const backend = resolveBackendSelection();
@@ -90,4 +91,33 @@ test("resume restores plan state and cancel releases an outstanding proposal", a
 	expect(JSON.stringify(await proposal)).toContain("cancelled");
 	expect(f.bridge.getPendingPlanApproval()).toBeUndefined();
 	expect(f.manager.buildSessionContext().mode).toBe("none");
+});
+
+test("disposing a root settles its pending plan before waiting for the SDK turn", async () => {
+	const f = fixture();
+	await f.bridge.enter();
+	await mkdir(path.dirname(f.planPath), { recursive: true });
+	await writeFile(f.planPath, "# Awaiting review\n");
+	const proposal = f.handler!("test");
+	for (let i = 0; i < 50 && !f.bridge.getPendingPlanApproval(); i++) await Bun.sleep(10);
+	expect(f.bridge.getPendingPlanApproval()).toBeDefined();
+
+	let disposed = false;
+	const handle = new InProcessSessionHandle({
+		session: { dispose: async () => { await proposal; } } as never,
+		sessionManager: f.manager as never,
+		cwd: root,
+		sessionId: "test-session",
+		getModelRegistry: async () => ({}) as never,
+		planBridge: f.bridge,
+		onDispose: () => { disposed = true; },
+	});
+	const closing = handle.dispose();
+	const pendingWhileDisposing = f.bridge.getPendingPlanApproval();
+	// If disposal is broken, settle it here so the test cannot leave a pending turn.
+	f.bridge.dispose();
+	await closing;
+	expect(pendingWhileDisposing).toBeUndefined();
+	expect(JSON.stringify(await proposal)).toContain("Session disposed.");
+	expect(disposed).toBe(true);
 });
