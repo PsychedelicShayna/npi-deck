@@ -393,12 +393,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		// the deck UI via WebSocket frames.
 		setToolUIContext(uiBridge, true);
 
-		const planBridge = new PlanModeBridge({
-			sessionId,
-			session: session as unknown as import("./plan-mode-bridge.ts").PlanModeSessionSurface,
-			getArtifactsDir: () => (sessionManager as unknown as { getArtifactsDir: () => string | null }).getArtifactsDir(),
-			getSessionId: () => (sessionManager as unknown as { getSessionId: () => string | null }).getSessionId(),
-		});
+		const planBridge = new PlanModeBridge();
 
 		const handle = new InProcessSessionHandle({
 			session,
@@ -1104,7 +1099,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		if (enabled) {
 			await this.planBridge.enter();
 		} else {
-			await this.planBridge.exit("user_cancelled");
+			await this.planBridge.exit();
 		}
 	}
 
