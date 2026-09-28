@@ -544,7 +544,8 @@ function handleFrame(
 ): void {
 	switch (frame.type) {
 		case "hello": {
-			const changed = get().workerGeneration !== undefined && get().workerGeneration !== frame.workerGeneration;
+			const initial = get().workerGeneration === undefined;
+			const changed = !initial && get().workerGeneration !== frame.workerGeneration;
 			if (changed) {
 				set((s) => {
 					const sessionsById: Record<string, SessionUi> = {};
@@ -561,11 +562,16 @@ function handleFrame(
 						subscribed: new Set<string>(), subagentsBySession: {}, pendingDialogs: {},
 						heartbeat: null, sessions: [], workspaces: [] };
 				});
-				void get().refreshSessions();
-				void get().refreshWorkspaces();
 			} else {
 				set({ connectionId: frame.connectionId, workerGeneration: frame.workerGeneration, backend: frame.backend });
 				for (const id of get().subscribed) get().ws?.send({ type: "subscribe", sessionId: id });
+			}
+			// Bootstrap starts REST reads before the first WS hello. Their
+			// generation is undefined, so they may be discarded once hello
+			// identifies the worker. Fetch again against the identified worker.
+			if (initial || changed) {
+				void get().refreshSessions();
+				void get().refreshWorkspaces();
 			}
 			return;
 		}

@@ -44,3 +44,37 @@ test("new worker ends live UI sessions without auto-resume or prompt replay", as
 		Object.assign(globalThis, original);
 	}
 });
+
+test("first worker hello refetches lists discarded from pre-hello bootstrap", async () => {
+	const original = { WebSocket: globalThis.WebSocket, location: globalThis.location, fetch: globalThis.fetch };
+	useStore.getState().disconnect();
+	useStore.setState({ workerGeneration: undefined, sessions: [], workspaces: [], defaultCwd: "" });
+	const requests: Array<{ url: string; resolve: (response: Response) => void }> = [];
+	Object.assign(globalThis, {
+		WebSocket: FakeSocket,
+		location: { protocol: "http:", host: "localhost" },
+		fetch: (url: string) => new Promise<Response>((resolve) => requests.push({ url, resolve })),
+	});
+	const reply = (request: (typeof requests)[number]) => {
+		request.resolve(Response.json(request.url.includes("/workspaces")
+			? { workspaces: [{ cwd: "/workspace", label: "workspace", sessionCount: 1 }], defaultCwd: "/workspace" }
+			: { sessions: [{ id: "session-1", path: "/workspace/session.jsonl", cwd: "/workspace", messageCount: 1 }] }));
+	};
+	try {
+		const boot = useStore.getState().bootstrap();
+		const startedBeforeHello = requests.splice(0);
+		sockets.at(-1)!.emit("message", {
+			type: "hello", workerGeneration: "first", connectionId: "first-connection", backend: null, capabilities: [],
+		});
+		for (const request of startedBeforeHello) reply(request);
+		await boot;
+		for (const request of requests.splice(0)) reply(request);
+		await Bun.sleep(0);
+		expect(useStore.getState().workspaces.map(w => w.cwd)).toEqual(["/workspace"]);
+		expect(useStore.getState().sessions.map(s => s.id)).toEqual(["session-1"]);
+	} finally {
+		for (const request of requests) reply(request);
+		useStore.getState().disconnect();
+		Object.assign(globalThis, original);
+	}
+});

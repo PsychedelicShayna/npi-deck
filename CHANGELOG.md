@@ -27,6 +27,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 
 - Launcher-loss shutdown is now capped at five seconds before the worker exits and systemd reaps its entire cgroup (#74); ordinary SIGTERM still uses graceful teardown. Disposing a session settles an outstanding plan decision before awaiting NeoPi's turn drain.
 - An unanswered plan proposal expires 30 seconds after its last reviewer disconnects, allowing a quick reconnect to replay the card; even a connected review expires after ten minutes (#75). Expiration rejects approval without deleting the plan artifact. Concurrent proposal preparation can no longer overwrite a pending decision.
+- The first WebSocket hello now refetches session and workspace lists if bootstrap started REST reads before the worker generation was known; the sidebar no longer stays empty until manually refreshed.
 - **OAuth prompt lost before the flow id arrived** (R08, #8). The sign-in modal subscribes before starting the flow and replays the flow's early frames, so a provider that asks a question right away (Ollama) shows it. Closing the modal before the flow id arrives now cancels the flow.
 - Backendless startup now serves the backend picker without trying to install starters through an unloaded SDK (#36). A committed backend switch remains latched until worker exit (#78).
 - Session browsing uses a read-only global scan for project filters instead of repairing NeoPi session backups (#76); model-picker discovery uses read-only settings and cannot migrate user config (#77).
