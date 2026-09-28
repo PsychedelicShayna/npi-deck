@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { OAuthFlowModal } from "@/components/settings/OAuthFlowModal";
+import { ModelsConfigSection } from "@/components/settings/ModelsConfigSection";
 import { NpiConfigSection } from "@/components/settings/NpiConfigSection";
 import { McpServersSection } from "@/components/settings/McpServersSection";
 import { bridgesApi } from "@/lib/bridges-api";
@@ -33,6 +34,7 @@ import { cn } from "@/lib/utils";
 const SECTIONS = [
 	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
 	{ id: "backend", label: "Backend", description: "Source trees and worker switching" },
+	{ id: "models", label: "Models & providers", description: "Custom providers and models in models.yml" },
 	{ id: "neopi", label: "NeoPi", description: "Every NeoPi setting in config.yml" },
 	{ id: "mcp", label: "MCP servers", description: "Model Context Protocol servers and scopes" },
 	{ id: "providers", label: "Providers", description: "OAuth sign-in and API-key state" },
@@ -90,6 +92,8 @@ export function SettingsView() {
 								<EnvSection />
 							) : selected === "backend" ? (
 								<BackendSection />
+							) : selected === "models" ? (
+								<ModelsConfigSection />
 							) : selected === "neopi" ? (
 								<NpiConfigSection />
 							) : selected === "mcp" ? (

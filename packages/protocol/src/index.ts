@@ -227,6 +227,89 @@ export interface NpiConfigPatchResponse {
 	live: NpiConfigLiveApply[];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom providers and models (`~/.omp/agent/models.yml`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ModelsConfigModelSummary {
+	id: string;
+	name?: string;
+	api?: string;
+	baseUrl?: string;
+	contextWindow?: number;
+	maxTokens?: number;
+	reasoning?: boolean;
+	input?: string[];
+}
+
+/** One provider as NeoPi validated it. Credentials are reduced to whether they are set. */
+export interface ModelsConfigProviderSummary {
+	name: string;
+	baseUrl?: string;
+	api?: string;
+	auth: "apiKey" | "none" | "oauth";
+	/** `apiKey` is set (a literal key, an environment variable name, or a `!command`); never its value. */
+	apiKeySet: boolean;
+	/** Header names only; values can carry credentials. */
+	headers: string[];
+	/** Discovery type (`ollama`, `openai-models-list`, ...) when the provider discovers models. */
+	discovery?: string;
+	transport?: string;
+	models: ModelsConfigModelSummary[];
+	/** Model ids this provider overrides. */
+	modelOverrides: string[];
+}
+
+export interface ModelsConfigResponse {
+	/** File NeoPi reads: models.yml, or models.yaml when only that exists. */
+	path: string;
+	exists: boolean;
+	/** Identifies the file contents this response describes; saves must send it back. */
+	revision: string;
+	/**
+	 * The document with every credential replaced by a `<npi-deck-masked:…>` placeholder.
+	 * Saving a placeholder unchanged keeps the value on disk. Null when the credentials
+	 * cannot all be located and masked (the file is not parseable YAML); `rawUnavailable` says why.
+	 */
+	raw: string | null;
+	rawUnavailable?: string;
+	/** Distinct credentials masked in `raw`. */
+	maskedSecrets: number;
+	/** NeoPi's load error for this document; NeoPi ignores an invalid file. Credentials are masked. */
+	error?: string;
+	/** Empty when `error` is set. */
+	providers: ModelsConfigProviderSummary[];
+}
+
+/** Validate (POST /models-config/validate) or save (PUT /models-config) a whole document. */
+export interface ModelsConfigDocumentRequest {
+	raw: string;
+	/** Required for saves: the `revision` the edit started from. A mismatch is refused with 409. */
+	revision?: string;
+}
+
+export interface ModelsConfigValidateResponse {
+	providers: ModelsConfigProviderSummary[];
+}
+
+/** What the deck's shared model registry did after the save. */
+export interface ModelsConfigRegistryApply {
+	/** The registry re-read the file; false means the picker still shows the previous models. */
+	refreshed: boolean;
+	/** Why the refresh failed, or NeoPi's error for the reloaded file. */
+	error?: string;
+	/** `provider/id` of defined models the refreshed registry does not list. */
+	missingModels: string[];
+	/** Providers whose model discovery was started; their models arrive when it finishes. */
+	discovering: string[];
+}
+
+export interface ModelsConfigSaveResponse extends ModelsConfigResponse {
+	/** Copy of the replaced file, or null when there was none. */
+	backupPath: string | null;
+	registry: ModelsConfigRegistryApply;
+}
+
 export interface BackendStatusResponse {
 	workerGeneration: string;
 	running: { id: string | null; path: string; source: "env" | "config"; version: string | null; commit: string | null } | null;

@@ -115,6 +115,7 @@ const mcp = feature("mcp-allowlist");
 const multiRoot = feature("multi-root");
 const build = feature("build-identity");
 const npiConfig = feature("npi-config");
+const models = feature("models-config");
 
 await check("manifest: every feature available", [], () => {
 	const missing = Object.entries(backend.features).flatMap(([, f]) => f.diagnostics);
@@ -212,6 +213,24 @@ await check("auth: storage, registry, env key, oauth providers", ["discoverAuthS
 	const stored = registry.authStorage.credentials.all();
 	assert(Object.keys(stored).length === 0, `isolated auth store not empty: ${Object.keys(stored).join(",")}`);
 	return `${providers.length} OAuth providers; credentials.all() empty; model registry resolves ${cheapModel.provider}/${cheapModel.id}`;
+});
+
+await check("models-config: NeoPi validates a models.yml copy and a registry reload lists its new model", ["ModelsConfigFile"], async () => {
+	const file = path.join(mkdir("models-config"), "models.yml");
+	const provider = (models: string) => `providers:\n  contract-local:\n    baseUrl: http://127.0.0.1:9/v1\n    api: openai-completions\n    auth: none\n    models:\n${models}`;
+	writeFileSync(file, provider("      - id: first\n"));
+	const loaded = models.ModelsConfigFile.relocate(file).tryLoad();
+	assert(loaded.status === "ok" && loaded.value.providers?.["contract-local"]?.models?.[0]?.id === "first", `valid copy rejected: ${loaded.error}`);
+	const local = new core.ModelRegistry(registry.authStorage, file);
+	await local.refresh("offline");
+	assert(local.find("contract-local", "first") && !local.find("contract-local", "second"), "custom model not listed after first load");
+	writeFileSync(file, provider("      - id: first\n      - id: second\n"));
+	await local.reapplyModelPolicies();
+	assert(local.find("contract-local", "second") && !local.getError(), `reapplyModelPolicies did not list the added model: ${local.getError()?.message}`);
+	writeFileSync(file, provider("      - id: first\n        contextWindow: -1\n"));
+	const rejected = models.ModelsConfigFile.relocate(file).tryLoad();
+	assert(rejected.status === "error" && rejected.error.message.includes("invalid contextWindow"), `invalid copy accepted: ${rejected.status}`);
+	return `relocated load ok; reload lists added model; rejects with "${rejected.error.message.split("\n")[0]}"`;
 });
 
 await check("mixtures: workspaces register only their own MIXTURES.toml models", ["MixtureWorkspace"], async () => {

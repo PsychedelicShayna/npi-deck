@@ -29,6 +29,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/capability": typeof import("@oh-my-pi/pi-coding-agent/capability");
 	"@oh-my-pi/pi-coding-agent/capability/skill": typeof import("@oh-my-pi/pi-coding-agent/capability/skill");
 	"@oh-my-pi/pi-coding-agent/config/model-settings": typeof import("@oh-my-pi/pi-coding-agent/config/model-settings");
+	"@oh-my-pi/pi-coding-agent/config/models-config": typeof import("@oh-my-pi/pi-coding-agent/config/models-config");
 	"@oh-my-pi/pi-coding-agent/config/all-settings": typeof import("@oh-my-pi/pi-coding-agent/config/all-settings");
 	"@oh-my-pi/pi-coding-agent/config/registry": typeof import("@oh-my-pi/pi-coding-agent/config/registry");
 	"@oh-my-pi/pi-coding-agent/session/settings": typeof import("@oh-my-pi/pi-coding-agent/session/settings");
@@ -217,6 +218,14 @@ export const MANIFEST = {
 			validateMixture: op("@oh-my-pi/pi-coding-agent/moa/validate", "validateMixture"),
 			discoverRegistrableMixtures: op("@oh-my-pi/pi-coding-agent/moa/registration", "discoverRegistrableMixtures"),
 			withFileLock: op("@oh-my-pi/pi-utils", "withFileLock"),
+		},
+	},
+	/** #91: validate models.yml with NeoPi's own schema and provider checks before the deck writes it. */
+	"models-config": {
+		tier: "optional-feature",
+		consumers: ["routes-models-config.ts"],
+		exports: {
+			ModelsConfigFile: op("@oh-my-pi/pi-coding-agent/config/models-config", "ModelsConfigFile"),
 		},
 	},
 	/** #86: enumerate, validate and write every registered NeoPi setting from the Settings view. */
