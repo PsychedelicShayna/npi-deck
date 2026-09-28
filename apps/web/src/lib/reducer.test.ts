@@ -238,6 +238,41 @@ describe("run status across NeoPi's agent_end", () => {
 	});
 });
 
+describe("config warnings snapshot updates", () => {
+	test("refresh replaces and clears warnings without losing the selected model", () => {
+		let state = initSession({
+			sessionId: "s1", cwd: "/tmp/x", isStreaming: false, messages: [], todoPhases: [],
+			model: { provider: "mixture", id: "reviewers" }, configWarnings: ["retry chain unresolved"],
+		});
+		expect(state.configWarnings).toEqual(["retry chain unresolved"]);
+		state = applyEvent(state, { type: "session_updated", snapshot: {
+			sessionId: "s1", cwd: "/tmp/x", isStreaming: false, messages: [], todoPhases: [],
+			model: { provider: "mixture", id: "reviewers" }, configWarnings: [],
+		} } as never);
+		expect(state.configWarnings).toEqual([]);
+		expect(state.model).toEqual({ provider: "mixture", id: "reviewers" });
+	});
+});
+
+describe("mixture trace events", () => {
+	test("hop, checkpoint and terminal events remain visible with stable run ids", () => {
+		const hop = { v: 1, kind: "hop", runId: "r1", seq: 1, at: 42, mixture: "reviewers", memberId: "writer", output: "draft", visible: true, run: { status: "running" } };
+		let state = applyEvent(fresh(), { type: "mixture_hop_end", details: hop } as never);
+		state = applyEvent(state, { type: "mixture_checkpoint", details: { ...hop, kind: "checkpoint", seq: 2, reason: "abort" } } as never);
+		state = applyEvent(state, { type: "mixture_run_end", details: { ...hop, kind: "run_end", seq: 3, endReason: "done", run: { status: "completed" } } } as never);
+		expect(state.messages.filter((msg) => msg.role === "mixtureTrace").map((msg) => msg.id)).toEqual(["mixture:r1:1", "mixture:r1:2", "mixture:r1:3"]);
+		const same = applyEvent(state, { type: "mixture_hop_end", details: hop } as never);
+		expect(same).toBe(state);
+	});
+
+	test("persisted trace cards restore without a new run event", () => {
+		const state = initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: false, todoPhases: [], messages: [
+			{ role: "custom", customType: "mixture_trace", display: true, content: "writer", details: { v: 1, runId: "r2", seq: 4, kind: "hop", memberId: "writer", output: "answer", visible: true, run: { status: "running" } } },
+		] });
+		expect(state.messages).toMatchObject([{ id: "mixture:r2:4", role: "mixtureTrace", content: "writer" }]);
+	});
+});
+
 describe("assistant content blocks", () => {
 	test("a block type the client doesn't know is kept as a visible placeholder", () => {
 		let s = fresh();

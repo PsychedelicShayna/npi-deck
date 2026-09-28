@@ -692,6 +692,8 @@ export interface SessionSnapshot {
 	cwd: string;
 	model?: ModelRef;
 	thinkingLevel?: string;
+	/** Current NeoPi configuration warnings; refreshed by `config_warnings_changed`. */
+	configWarnings?: string[];
 	isStreaming: boolean;
 	messages: AgentMessageJson[];
 	todoPhases: Array<Record<string, unknown>>;

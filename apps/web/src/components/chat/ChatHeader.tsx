@@ -202,6 +202,16 @@ function Inner({ session }: { session: SessionUi }) {
 					<ChevronDown className="h-3 w-3" />
 				</button>
 			) : null}
+			{session.configWarnings?.length ? (
+				<details className="relative hidden shrink-0 sm:block">
+					<summary className="cursor-pointer rounded border border-warn/40 bg-warn/10 px-1.5 font-mono text-2xs text-warn">
+						{session.configWarnings.length} config warning{session.configWarnings.length === 1 ? "" : "s"}
+					</summary>
+					<ul className="absolute right-0 top-full z-30 mt-1 max-h-48 w-80 overflow-auto rounded border border-line bg-paper p-2 text-xs text-warn shadow-lg">
+						{session.configWarnings.map((warning, index) => <li key={`${index}:${warning}`} className="py-1">{warning}</li>)}
+					</ul>
+				</details>
+			) : null}
 			{session.planMode?.enabled ? (
 				<span
 					className="flex h-6 items-center rounded-md border border-thinking/60 bg-thinking/10 px-1.5 font-mono text-2xs uppercase tracking-meta text-thinking"

@@ -125,6 +125,15 @@ export interface IrcMsg {
 	timestamp: number;
 }
 
+/** Display-only mixture trace persisted by NeoPi with hop/limit/checkpoint details. */
+export interface MixtureTraceMsg {
+	id: string;
+	role: "mixtureTrace";
+	content: string;
+	details: Record<string, unknown>;
+	timestamp: number;
+}
+
 export type ChatMessage =
 	| UserMsg
 	| AssistantMsg
@@ -132,7 +141,8 @@ export type ChatMessage =
 	| NoticeMsg
 	| CompactionMsg
 	| TtsrMsg
-	| IrcMsg;
+	| IrcMsg
+	| MixtureTraceMsg;
 
 // ─── Queued prompts (sent while agent was streaming) ──────────────────────
 
@@ -217,6 +227,8 @@ export interface SessionUi {
 	sessionName?: string;
 	model?: ModelRef;
 	thinkingLevel?: string;
+	/** Current SDK configuration warnings, updated without restarting the session. */
+	configWarnings?: string[];
 
 	messages: ChatMessage[];
 	/** Tool calls keyed by toolCallId for richer per-call rendering. */

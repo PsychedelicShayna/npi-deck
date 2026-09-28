@@ -9,6 +9,7 @@ import { Notice } from "./messages/Notice";
 import { CompactionLine } from "./messages/CompactionLine";
 import { TtsrLine } from "./messages/TtsrLine";
 import { IrcLine } from "./messages/IrcLine";
+import { MixtureTraceLine } from "./messages/MixtureTraceLine";
 import { QueuedMessage } from "./messages/QueuedMessage";
 import { PlanApproval } from "./messages/PlanApproval";
 
@@ -74,6 +75,8 @@ export function Chat() {
 								return <TtsrLine key={m.id} msg={m} />;
 							case "irc":
 								return <IrcLine key={m.id} msg={m} />;
+							case "mixtureTrace":
+								return <MixtureTraceLine key={m.id} msg={m} />;
 							default:
 								return null;
 						}

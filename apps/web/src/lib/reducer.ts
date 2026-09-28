@@ -13,6 +13,7 @@ import type {
 	AssistantMsg,
 	ChatMessage,
 	ImageBlock,
+	MixtureTraceMsg,
 	NoticeMsg,
 	QueuedPrompt,
 	SessionUi,
@@ -45,6 +46,7 @@ export function initSession(snapshot: SessionSnapshot): SessionUi {
 		sessionName: snapshot.sessionName,
 		model: snapshot.model,
 		thinkingLevel: snapshot.thinkingLevel,
+		configWarnings: snapshot.configWarnings,
 		messages: [],
 		toolCalls: {},
 		todoPhases: normalizeTodoPhases(snapshot.todoPhases),
@@ -106,6 +108,7 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 				model: snap.model,
 				sessionName: snap.sessionName,
 				thinkingLevel: snap.thinkingLevel,
+				configWarnings: snap.configWarnings,
 			};
 		}
 
@@ -305,26 +308,16 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 				...state,
 				goal: { goal: (event as any).goal, state: (event as any).state },
 			};
-		// NeoPi config/advisor signals without payload the chat renders; the
-		// deck's Settings views fetch their own state.
+		// These are payload-free SDK notifications; the bridge sends a fresh
+		// snapshot for config warnings, and the advisor panel fetches live state.
 		case "config_warnings_changed":
 		case "advisor_cost_changed":
 		case "advisor_yielded":
 		case "mixture_hop_end":
 		case "mixture_checkpoint":
-			return state;
 		case "mixture_limit":
-			return pushNotice(state, {
-				level: "warning",
-				message: `Mixture limit reached: ${mixtureSummary((event as any).details)}`,
-				source: "mixture",
-			});
 		case "mixture_run_end":
-			return pushNotice(state, {
-				level: "info",
-				message: `Mixture run finished: ${mixtureSummary((event as any).details)}`,
-				source: "mixture",
-			});
+			return appendMixtureTrace(state, (event as { details?: unknown }).details);
 		case "irc_message": {
 			const msg = (event as any).message;
 			if (!msg) return state;
@@ -395,6 +388,17 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
+function appendMixtureTrace(state: SessionUi, details: unknown): SessionUi {
+	if (!details || typeof details !== "object") return state;
+	const d = details as Record<string, unknown>;
+	if (typeof d.runId !== "string" || typeof d.seq !== "number" || typeof d.kind !== "string") return state;
+	const id = `mixture:${d.runId}:${d.seq}`;
+	if (state.messages.some((message) => message.id === id)) return state;
+	const content = `${String(d.mixture ?? "Mixture")} · ${d.kind}${typeof d.memberId === "string" ? ` · ${d.memberId}` : ""}`;
+	const message: MixtureTraceMsg = { id, role: "mixtureTrace", content, details: d, timestamp: typeof d.at === "number" ? d.at : Date.now() };
+	return { ...state, messages: [...state.messages, message] };
+}
+
 function pushNotice(state: SessionUi, p: Omit<NoticeMsg, "id" | "role" | "timestamp">): SessionUi {
 	return {
 		...state,
@@ -437,6 +441,17 @@ function ingestMessage(state: SessionUi, msg: any): void {
 					];
 				}
 			}
+			return;
+		}
+		case "custom": {
+			if (msg.customType !== "mixture_trace" || msg.display === false) return;
+			const details = msg.details;
+			if (!details || typeof details !== "object") return;
+			const d = details as Record<string, unknown>;
+			if (typeof d.runId !== "string" || typeof d.seq !== "number") return;
+			const id = `mixture:${d.runId}:${d.seq}`;
+			if (state.messages.some((message) => message.id === id)) return;
+			state.messages.push({ id, role: "mixtureTrace", content: extractText(msg.content), details: d, timestamp: typeof d.at === "number" ? d.at : Date.now() });
 			return;
 		}
 		case "assistant": {
@@ -589,13 +604,6 @@ function extractAssistantBlocks(content: unknown): AssistantContentBlock[] {
 	return out;
 }
 
-/** One-line text for a NeoPi mixture trace event; the shape varies by kind. */
-function mixtureSummary(details: unknown): string {
-	if (!details || typeof details !== "object") return "";
-	const d = details as Record<string, unknown>;
-	const text = d.summary ?? d.message ?? d.reason ?? d.kind;
-	return typeof text === "string" ? text : "";
-}
 
 function normalizeTextOrImage(c: any): TextBlock | ImageBlock | null {
 	if (!c || typeof c !== "object") return null;
