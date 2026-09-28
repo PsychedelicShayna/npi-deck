@@ -127,52 +127,15 @@ function seedWelcomeTaskIfEmpty(db: Database): void {
 	log.info(`seeded welcome task (T-1) on empty kanban`);
 }
 
-const WELCOME_BODY = `Welcome to npi-deck. A few orientation pointers; mark this task done when you've finished.
+const WELCOME_BODY = `Welcome to npi-deck, a browser front end for the NeoPi agent. Mark this task done when you've had a look around.
 
-### Nav rail (left edge)
-- **Chat** — multi-session conversations with the omp agent.
+The nav rail on the left edge holds:
+- **Chat** — multi-session conversations with the agent. A new session starts as an empty thread.
 - **Tasks** — this kanban. \`T-N\` ids stay stable; columns are user-configurable.
-- **Routines** — cron-scheduled bash / prompt / script jobs.
-- **Inbox** — quick-capture surface. Promote items to tasks with one click.
-- **Marketplace** — browse and install plugins/skills from registered catalogs. The empty-state suggests \`anthropics/claude-plugins-official\`.
+- **Knowledge** — browse, search, and edit your markdown knowledge base.
 - **Settings** — env vars, themes, messaging bridges, appearance.
 
-### Define an auto-start prompt (optional)
-
-Want the agent to greet you with a workspace summary every time you open a fresh chat? Write \`~/.omp/agent/commands/start.md\` (the SDK's user-global slash-command location), e.g.:
-
-\`\`\`md
----
-description: Summarize the active workspace and surface anything in-flight
----
-Summarize the current workspace's state. Mention any active tasks (from the kanban),
-recent git activity, and anything that looks blocked.
-\`\`\`
-
-Then in **Settings → Env**, set \`NPI_DECK_AUTO_START\` to \`/start\`. The deck fires it once per new session, after you subscribe.
-
-### Themes
-
-**Settings → Appearance** ships two presets — Paper (warm cream, rust accent) and Slate (deep slate, brighter rust). System preference picks one on first visit; the choice persists per browser.
-
-### Deck slash commands
-
-In any composer:
-- \`/task add <title>\` — file a new backlog task in this workspace.
-- \`/task list [state]\` — list active + backlog (or any state).
-- \`/task done <T-id>\` — mark done.
-- \`/task move <T-id> <state>\` — move between columns.
-
-The picker shows all four under the \`DECK\` scope alongside SDK builtins (\`/context\`, \`/compact\`, \`/usage\`, ...).
-
-### Docs
-
-More in \`docs/\`:
-- \`docs/install.md\` — fresh vs existing-omp install paths.
-- \`docs/configuration.md\` — full env reference.
-- \`docs/deployment.md\` — Tailscale, SSH-tunnel hardening.
-- \`docs/marketplaces.md\` — catalog seeding and install semantics.
-- \`docs/telegram.md\` — bridge setup if you want to chat with the agent from your phone.
+More in \`docs/\`, starting with \`docs/install.md\` and \`docs/configuration.md\`.
 `;
 
 // ─── Small id helper ───────────────────────────────────────────────────────
