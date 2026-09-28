@@ -5,15 +5,17 @@
  * - Single endpoint: `POST /api/uploads/image` with either a `multipart/form-data`
  *   payload (field name `file`) OR a raw binary body whose `content-type` starts
  *   with `image/`.
- * - Server validates content-type against a whitelist (png / jpeg / gif / webp /
- *   svg+xml), enforces a max size, hashes the bytes (sha256), and writes them to
+ * - Server validates content-type against a whitelist (png / jpeg / gif / webp),
+ *   enforces a max size, hashes the bytes (sha256), and writes them to
  *   `<dataDir>/uploads/<yyyy>/<mm>/<hash>.<ext>`. Content-addressed paths mean
- *   re-pasting the same image is a no-op disk-wise.
+ *   re-pasting the same image is a no-op disk-wise. SVG is refused: opened as
+ *   a document it runs script with the deck origin's authority.
  * - Response: `{ url, name, size, mimeType }`. `url` is rooted at `/uploads/...`
  *   so it works for both browser-side <img src> and agent-written markdown.
  *
- * Files are served back via the static handler in `index.ts` mounted at
- * `/uploads/*` so they show up wherever the markdown renderer runs.
+ * Files are served back by `serveUpload` (mounted at `/uploads/*` in
+ * `index.ts`) under a sandboxing CSP, so even a stored active document —
+ * e.g. an SVG uploaded before SVG was refused — cannot script the deck origin.
  */
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -29,8 +31,9 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10 MB hard cap — way more than a screen
 
 /**
  * MIME → file extension. The keys are the only types we accept. We deliberately
- * exclude `image/heic` and friends (browsers don't render them inline) and
- * `image/avif` (uneven decoder support across embedded webviews).
+ * exclude `image/heic` and friends (browsers don't render them inline),
+ * `image/avif` (uneven decoder support across embedded webviews), and
+ * `image/svg+xml` (an active document, not just pixels).
  */
 const ACCEPTED_MIME: Record<string, string> = {
 	"image/png": "png",
@@ -38,7 +41,17 @@ const ACCEPTED_MIME: Record<string, string> = {
 	"image/jpg": "jpg",
 	"image/gif": "gif",
 	"image/webp": "webp",
-	"image/svg+xml": "svg",
+};
+
+/**
+ * Headers on every served upload. `sandbox` puts a directly opened file in an
+ * opaque origin with scripts disabled, and `default-src 'none'` stops it from
+ * fetching anything; `nosniff` keeps the browser from reinterpreting bytes as
+ * HTML. None of these affect rendering through `<img>`.
+ */
+export const UPLOAD_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
+	"content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+	"x-content-type-options": "nosniff",
 };
 
 export interface UploadsConfig {
@@ -181,4 +194,34 @@ export function buildUploadsRouter(config: UploadsConfig): Hono {
 	});
 
 	return app;
+}
+
+/**
+ * Serve a file from the uploads root. URL prefix `/uploads/` strips before
+ * resolving, so `/uploads/2026/05/abc.png` maps to `<uploadsRoot>/2026/05/abc.png`.
+ * No SPA fallback — a 404 here means the URL is bad.
+ *
+ * Path-traversal protection: any `..` in the relative path is rejected
+ * outright, and the resolved absolute path must remain inside `root`.
+ */
+export async function serveUpload(req: Request, root: string): Promise<Response> {
+	const url = new URL(req.url);
+	const rel = decodeURIComponent(url.pathname.replace(/^\/+uploads\/+/, ""));
+	if (!rel || rel.includes("..")) return new Response("forbidden", { status: 403 });
+
+	const resolved = path.resolve(path.join(root, rel));
+	const rootResolved = path.resolve(root);
+	if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
+		return new Response("forbidden", { status: 403 });
+	}
+
+	const file = Bun.file(resolved);
+	if (await file.exists()) {
+		// Long-lived caching is safe because the on-disk filename is content-
+		// addressed (sha256 prefix). If the bytes change, the URL changes.
+		return new Response(file, {
+			headers: { ...UPLOAD_RESPONSE_HEADERS, "cache-control": "public, max-age=31536000, immutable" },
+		});
+	}
+	return new Response("not found", { status: 404, headers: UPLOAD_RESPONSE_HEADERS });
 }

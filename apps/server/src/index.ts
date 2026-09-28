@@ -16,6 +16,7 @@ import { loadConfig } from "./config.ts";
 import { logger } from "./log.ts";
 import { resolveBunExecutable } from "./runtime-bun.ts";
 import { buildRouter } from "./routes.ts";
+import { serveUpload } from "./routes-uploads.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
 import { SkillsService } from "./skills-service.ts";
@@ -325,37 +326,6 @@ async function serveStatic(req: Request, root: string): Promise<Response> {
 	const index = Bun.file(path.join(rootResolved, "index.html"));
 	if (await index.exists()) {
 		return new Response(index, { headers: { "content-type": "text/html; charset=utf-8" } });
-	}
-	return new Response("not found", { status: 404 });
-}
-
-/**
- * Serve a file from the uploads root. URL prefix `/uploads/` strips before
- * resolving, so `/uploads/2026/05/abc.png` maps to `<uploadsRoot>/2026/05/abc.png`.
- * No SPA fallback — a 404 here means the URL is bad.
- *
- * Path-traversal protection mirrors `serveStatic`: any `..` in the relative
- * path is rejected outright, and the resolved absolute path must remain
- * inside `uploadsRoot`.
- */
-async function serveUpload(req: Request, root: string): Promise<Response> {
-	const url = new URL(req.url);
-	const rel = decodeURIComponent(url.pathname.replace(/^\/+uploads\/+/, ""));
-	if (!rel || rel.includes("..")) return new Response("forbidden", { status: 403 });
-
-	const resolved = path.resolve(path.join(root, rel));
-	const rootResolved = path.resolve(root);
-	if (!resolved.startsWith(rootResolved + path.sep) && resolved !== rootResolved) {
-		return new Response("forbidden", { status: 403 });
-	}
-
-	const file = Bun.file(resolved);
-	if (await file.exists()) {
-		// Long-lived caching is safe because the on-disk filename is content-
-		// addressed (sha256 prefix). If the bytes change, the URL changes.
-		return new Response(file, {
-			headers: { "cache-control": "public, max-age=31536000, immutable" },
-		});
 	}
 	return new Response("not found", { status: 404 });
 }

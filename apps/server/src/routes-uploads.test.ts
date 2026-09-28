@@ -8,7 +8,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { persistImage } from "./routes-uploads.ts";
+import { buildUploadsRouter, persistImage, serveUpload } from "./routes-uploads.ts";
 
 let workdir: string | null = null;
 
@@ -92,5 +92,45 @@ describe("persistImage", () => {
 		expect(saved.name).not.toContain("/");
 		expect(saved.name).not.toContain("\\");
 		expect(saved.name.startsWith(".")).toBe(false);
+	});
+});
+
+const ACTIVE_SVG = new TextEncoder().encode(
+	`<svg xmlns="http://www.w3.org/2000/svg" onload="fetch('/api/sessions',{method:'POST'})"><script>fetch('/api/tasks')</script></svg>`,
+);
+
+describe("SVG uploads", () => {
+	test("the upload route refuses image/svg+xml", async () => {
+		const root = await boot();
+		const app = buildUploadsRouter({ uploadsRoot: root });
+		const res = await app.request("/uploads/image", {
+			method: "POST",
+			headers: { "content-type": "image/svg+xml" },
+			body: ACTIVE_SVG,
+		});
+		expect(res.status).toBe(415);
+		expect(await fs.readdir(root)).toEqual([]);
+	});
+
+	test("a stored SVG is served sandboxed, so opening it cannot script the deck origin", async () => {
+		const root = await boot();
+		await fs.mkdir(path.join(root, "2026", "05"), { recursive: true });
+		await fs.writeFile(path.join(root, "2026", "05", "old.svg"), ACTIVE_SVG);
+		const res = await serveUpload(new Request("http://127.0.0.1:1701/uploads/2026/05/old.svg"), root);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toStartWith("image/svg+xml");
+		const csp = res.headers.get("content-security-policy") ?? "";
+		expect(csp.split(";").map((d) => d.trim())).toEqual(expect.arrayContaining(["sandbox", "default-src 'none'"]));
+		expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+	});
+
+	test("raster uploads keep their image type and caching", async () => {
+		const root = await boot();
+		const saved = await persistImage(root, TINY_PNG, "image/png", "a.png");
+		const res = await serveUpload(new Request(`http://127.0.0.1:1701${saved.url}`), root);
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toBe("image/png");
+		expect(res.headers.get("cache-control")).toContain("immutable");
+		expect(new Uint8Array(await res.arrayBuffer())).toEqual(TINY_PNG);
 	});
 });
