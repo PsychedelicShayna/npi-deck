@@ -9,7 +9,6 @@ interface without one of these.
 
 - [Tailscale-gated (recommended)](#tailscale-gated-recommended)
 - [SSH tunnel](#ssh-tunnel)
-- [Docker](#docker)
 - [Hardening checklist](#hardening-checklist)
 
 ## Tailscale-gated (recommended)
@@ -63,42 +62,10 @@ Host deck-host
   LocalForward 8787 127.0.0.1:8787
 ```
 
-## Docker
-
-A `Dockerfile` and `docker-compose.yml` ship in the repo root. The image
-build does an end-to-end Bun build of the server + web bundle, then runs the
-server in production mode (loopback by default).
-
-```sh
-docker build -t omp-deck .
-docker run -d --name omp-deck \
-  -p 127.0.0.1:8787:8787 \
-  -v omp-deck-agent:/data/omp-agent \
-  -v /srv/work:/workspace \
-  -e OMP_AGENT_DIR=/data/omp-agent \
-  -e OMP_DECK_DEFAULT_CWD=/workspace \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
-  omp-deck
-```
-
-Compose:
-
-```sh
-docker compose up -d
-```
-
-The compose file binds `127.0.0.1:8787` on the host and mounts a named volume
-for omp's session+auth state. Sit Tailscale on top of the host port — same
-recipe as above.
-
-**Auth state**: the named volume `/data/omp-agent` is critical. Without it,
-every container restart starts from a blank `~/.omp/agent` and you'll be asked
-to re-authenticate.
-
 ## Production knobs worth setting
 
 ```sh
-OMP_DECK_DB_PATH=/var/lib/omp-deck/deck.db    # outside the container fs
+OMP_DECK_DB_PATH=/var/lib/omp-deck/deck.db    # outside the checkout
 OMP_DECK_DATA_DIR=/var/lib/omp-deck           # managed .env + audit + bridge db
 OMP_AGENT_DIR=/var/lib/omp/agent              # SDK session + auth
 OMP_DECK_DEFAULT_CWD=/workspace               # mount your code here

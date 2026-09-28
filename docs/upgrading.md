@@ -13,17 +13,20 @@ How to update your install, what changed, what might break, and how to roll back
 
 ## The general upgrade procedure
 
-omp-deck never auto-updates, never migrates your data without your explicit say-so, and never replaces user-edited files. Upgrades are an explicit `npm` (or `git pull`) action you take, followed by a deck restart.
-
-### If you installed via npm
+omp-deck never auto-updates, never migrates your data without your explicit say-so, and never replaces user-edited files. Upgrades are an explicit `git pull` you run in your checkout, followed by a deck restart. There is no npm package or Docker image; an `npi-deck` launcher is planned.
 
 ```sh
-npm install -g omp-deck@latest
-# stop the running deck (Ctrl+C in its terminal, or close the launcher window)
-omp-deck
+cd /path/to/your/npi-deck/checkout
+git pull
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts   # prepares the NeoPi tree if neopi.pin moved
+# stop the running deck, then:
+bun run dev
 ```
 
-That's it. The deck:
+The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. Re-running `scripts/neopi-setup.ts` is safe. If you're skipping a major version, also run a `bun run --filter '@omp-deck/*' typecheck` once to catch any local divergence before booting.
+
+The deck:
 
 - Re-uses your existing `~/.omp-deck/` data dir (deck.db, managed `.env`, uploads, onboarding flag).
 - Re-uses your existing `~/.omp/agent/` (auth credentials, sessions, skills, extensions).
@@ -33,27 +36,10 @@ That's it. The deck:
 To check what version you have running:
 
 ```sh
-npm list -g omp-deck
-# or hit the local health endpoint:
+git -C /path/to/your/npi-deck/checkout rev-parse --short HEAD
+# or hit the local health endpoint (reports version + buildSha):
 curl http://127.0.0.1:8787/api/health
 ```
-
-### If you installed from source
-
-```sh
-cd /path/to/your/omp-deck/checkout
-git fetch origin
-git checkout v0.6.0   # or the version you're targeting
-bun install
-# stop the running deck, then:
-bun run dev
-```
-
-The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. If you're skipping a major version, also run a `bun run --filter '@omp-deck/*' typecheck` once to catch any local divergence before booting.
-
-### If you used Docker
-
-Pull the new image tag (we don't yet publish a `:latest` — pin to the version you want) and restart the container. Your bind-mounted data dir is preserved.
 
 ---
 
@@ -101,12 +87,9 @@ If you were running the deck via the pre-0.5.0 Docker image, **rebuild your imag
 If a new version breaks something for you, downgrade to the previous one and file an issue.
 
 ```sh
-# npm install
-npm install -g omp-deck@0.5.0
-
-# from source
-git checkout v0.5.0
-bun install
+git checkout <previous-commit-or-tag>
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts
 ```
 
 **SQLite migrations are forward-only.** Rolling back the package doesn't roll back the schema. In practice this hasn't caused user-visible problems because every migration we ship is additive (adding columns or tables, never removing or renaming), so an older deck just ignores the newer fields. If you're worried, snapshot `<dataDir>/deck.db` before upgrading.

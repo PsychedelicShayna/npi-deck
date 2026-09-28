@@ -3,7 +3,7 @@
 omp-deck reads configuration from three layers, in priority order:
 
 1. **Process environment** — values set in the launching shell (or systemd
-   unit, or Docker `-e`). Always win.
+   unit). Always win.
 2. **Deck-managed `.env`** — file the deck writes when you save through the
    Settings → Env UI. Loaded into `process.env` at boot.
 3. **Built-in defaults** — declared in

@@ -60,18 +60,21 @@ omp-deck is the cockpit that holds all of that. The chat surface stays at parity
 
 ## Quickstart
 
-### Global install (recommended)
+npi-deck runs from a git checkout. There is no npm package, Docker image, or Windows launcher; an `npi-deck` launcher is planned but not available yet.
 
-You don't need the `omp` CLI installed separately — the deck bundles the agent SDK in-process.
-
-**Prerequisites:** [Bun](https://bun.sh) ≥ 1.3.14 on your `PATH`, plus Node ≥ 18 (for `npm install` itself).
+**Prerequisites:** [Bun](https://bun.sh) ≥ 1.3.14 and Git on your `PATH`, plus a NeoPi checkout for `scripts/neopi-setup.ts` to build from (see [docs/install.md](./docs/install.md#neopi-backend-tree)).
 
 ```sh
-npm install -g omp-deck
-omp-deck
+git clone https://github.com/PsychedelicShayna/npi-deck.git
+cd npi-deck
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts
+bun run dev
 ```
 
-Boots on <http://127.0.0.1:8787> — open it in your browser. On first run, the deck creates `~/.omp/agent/` from scratch and installs starter skills + extensions; its own state lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
+`bun run dev` starts the server on <http://127.0.0.1:8787> and the Vite app with hot reload on <http://127.0.0.1:5173> — open the latter. To serve the built app from the server alone, run `bun run build && bun run start` and open `:8787`. `bash Start-OMP-Deck.sh start` runs the dev pair in the background with logs under `.logs/` (`stop` / `status` subcommands too).
+
+On first run, the deck creates `~/.omp/agent/` from scratch and installs starter skills + extensions; its own state lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
 
 **Authenticate (one-time, in the deck UI):**
 
@@ -80,24 +83,7 @@ Boots on <http://127.0.0.1:8787> — open it in your browser. On first run, the 
 
 That's it — pick a model in the chat surface and send a prompt.
 
-Other env knobs: `OMP_DECK_PORT`, `OMP_DECK_HOST`, `OMP_DECK_DB_PATH`, `OMP_DECK_UPLOADS_ROOT` — see [docs/configuration.md](./docs/configuration.md). Prefer to skip the global install? `bunx omp-deck` works too (same package, no PATH pollution).
-
-### From source (for development)
-
-If you're working on the deck itself or want hot reload + the Vite dev server:
-
-```sh
-git clone https://github.com/bjb2/omp-deck.git
-cd omp-deck
-bun install
-bun run dev
-```
-
-Open <http://127.0.0.1:5173>.
-
-On **Windows**, you can also double-click `Start-OMP-Deck.cmd` from the repo root — it boots the server on `:8787`, starts the Vite app on `:5173`, opens the deck in your browser, and writes logs under `.logs/`. On **macOS / Linux**, the sibling is `bash Start-OMP-Deck.sh start` (`stop` / `status` subcommands too); bare invocation runs foreground, same as `bun run dev`.
-
-For container-based deployment, the repo ships a `Dockerfile` (Debian-slim base, glibc-compatible); see [docs/deployment.md](./docs/deployment.md). For the full step-by-step (Bun install, optional `omp` CLI, auth alternatives), see [docs/install.md](./docs/install.md).
+Other env knobs: `OMP_DECK_PORT`, `OMP_DECK_HOST`, `OMP_DECK_DB_PATH`, `OMP_DECK_UPLOADS_ROOT` — see [docs/configuration.md](./docs/configuration.md). For the full step-by-step (Bun install, optional `omp` CLI, auth alternatives), see [docs/install.md](./docs/install.md).
 
 ## How it compares
 
@@ -130,7 +116,7 @@ The short version: **Claude Code** is the polished vendor experience for Claude.
 
 - [Install](./docs/install.md) — fresh vs existing-omp install paths.
 - [Configuration](./docs/configuration.md) — full env reference + restart semantics.
-- [Deployment](./docs/deployment.md) — Tailscale, Docker, SSH-tunnel, hardening checklist.
+- [Deployment](./docs/deployment.md) — Tailscale, SSH-tunnel, hardening checklist.
 - [Slash commands](./docs/slash-commands.md) — deck `/task` + `/plan`, SDK builtins, user/project markdown commands.
 - [Marketplaces](./docs/marketplaces.md) — catalog seeding, install semantics, capability badges.
 - [Skills](./docs/skills.md) — `/skills` view, plugin → skill hierarchy, scope semantics, REST surface.

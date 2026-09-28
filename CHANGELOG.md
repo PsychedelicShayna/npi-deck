@@ -5,6 +5,13 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+### Removed
+
+- **npm distribution.** `bin/omp-deck.mjs`, the `prepack` / `postpack` scripts, and the `bin` / `files` / `bundledDependencies` fields are gone; the root package is `private`. npi-deck runs from a checkout (`bun scripts/neopi-setup.ts`, then `bun run dev`); an `npi-deck` launcher is planned.
+- **In-app update check.** The daily `registry.npmjs.org/omp-deck` poll, `GET /api/version`, the `VersionInfo` protocol type, the StatusBar update pill, and `OMP_DECK_DISABLE_UPDATE_CHECK`. It could only advertise upstream omp-deck releases. A stale `<dataDir>/update-check.json` is harmless and can be deleted.
+- **Docker.** `Dockerfile`, `docker-compose.yml`, and the CI container smoke job.
+- **Windows launchers.** `Start-OMP-Deck.cmd` and every `scripts/*.ps1` helper, plus the task-seed JSON files only `create-v1-tasks.ps1` read. `Start-OMP-Deck.sh` stays as the POSIX dev launcher.
+
 ## [0.6.1] — 2026-05-29 — In-app update notification
 
 Small follow-up to v0.6.0. Adds a passive update-check pill in the StatusBar so future releases (this one and onward) become discoverable from inside the deck instead of requiring users to run `npm outdated -g`.

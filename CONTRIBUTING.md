@@ -116,7 +116,7 @@ routes are still primarily verified end-to-end via:
 
 1. `bun run typecheck` across every workspace.
 2. Manual browser smoke against `http://127.0.0.1:5173`.
-3. API smokes — small PowerShell or curl scripts under `.logs/` (gitignored).
+3. API smokes — small curl scripts under `.logs/` (gitignored).
 
 When you add a feature with non-trivial state, ship at least the
 bridge-side test alongside it. Reducer cases want a unit test apiece —

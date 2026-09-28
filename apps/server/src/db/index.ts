@@ -170,7 +170,7 @@ The picker shows all four under the \`DECK\` scope alongside SDK builtins (\`/co
 More in \`docs/\`:
 - \`docs/install.md\` — fresh vs existing-omp install paths.
 - \`docs/configuration.md\` — full env reference.
-- \`docs/deployment.md\` — Tailscale, Docker, SSH-tunnel hardening.
+- \`docs/deployment.md\` — Tailscale, SSH-tunnel hardening.
 - \`docs/marketplaces.md\` — catalog seeding and install semantics.
 - \`docs/telegram.md\` — bridge setup if you want to chat with the agent from your phone.
 `;

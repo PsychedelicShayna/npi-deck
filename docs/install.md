@@ -3,14 +3,20 @@
 omp-deck is the cockpit UI for [`oh-my-pi`](https://github.com/can1357/oh-my-pi)
 (`omp`).
 
-> **Fastest path:** `npm install -g omp-deck && omp-deck` — needs Bun ≥ 1.3.14
-> on `PATH`. Boots on <http://127.0.0.1:8787>; authenticate via Settings →
-> Providers (OAuth) or Settings → Env (API key). The `omp` CLI is **not**
-> required — the deck bundles the SDK in-process. See the [README quickstart](../README.md#quickstart).
+The deck runs from a git checkout. There is no npm package, Docker image, or
+Windows launcher; an `npi-deck` launcher is planned but not available yet.
 
-The longer paths below clone from source and are aimed at contributors or
-users who want the Vite dev server + hot reload. Two flavors depending on
-whether you already use omp on this machine:
+```sh
+git clone https://github.com/PsychedelicShayna/npi-deck.git
+cd npi-deck
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts   # prepare the pinned NeoPi tree (see below)
+bun run dev                  # server on :8787, Vite app on :5173
+```
+
+`bun run start` serves the built web app from the server on :8787 instead;
+run `bun run build` first. Two flavors depending on whether you already use
+omp on this machine:
 
 - [Path A — You already have omp installed and authenticated](#path-a--existing-omp-user)
 - [Path B — Fresh install (no omp yet)](#path-b--fresh-install)
@@ -68,9 +74,10 @@ directory is already authenticated and populated with sessions. The deck will
 pick it up automatically — no re-auth needed.
 
 ```sh
-git clone https://github.com/bjb2/omp-deck.git
-cd omp-deck
-bun install
+git clone https://github.com/PsychedelicShayna/npi-deck.git
+cd npi-deck
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts
 bun run dev
 ```
 
@@ -131,9 +138,10 @@ provider API key(s) there. The deck will write them to its managed `.env`.
 ### 4. Clone and run the deck
 
 ```sh
-git clone https://github.com/bjb2/omp-deck.git
-cd omp-deck
-bun install
+git clone https://github.com/PsychedelicShayna/npi-deck.git
+cd npi-deck
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts
 bun run dev
 ```
 
