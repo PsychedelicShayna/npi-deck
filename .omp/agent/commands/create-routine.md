@@ -103,7 +103,7 @@ In `when:` and `transform.body:` (JS sandbox-mode):
 
 ## 4. Critical rules (these are bugs every time)
 
-1. **NEVER write `type: http` with `url: http://127.0.0.1:8787/api/...`** — use `type: deck` with the matching action. Reasons: no HMAC mint required, slim summaries instead of full records (saves prompt tokens + Windows arg-cap headroom), survives port/auth changes.
+1. **NEVER write `type: http` with `url: http://127.0.0.1:1701/api/...`** — use `type: deck` with the matching action. Reasons: no HMAC mint required, slim summaries instead of full records (saves prompt tokens + Windows arg-cap headroom), survives port/auth changes.
 2. **NEVER add a `transform` "compact" step after `list_tasks` / `list_inbox`** — they already return slim summaries. The compact step is dead weight.
 3. **Every `state.X` key used (template OR sandbox) MUST be in `state.declared_keys`** — validator rejects undeclared keys, the routine refuses to save.
 4. **Agent prompts must stay under ~30 KB rendered** — Windows `Bun.spawn(["omp", "-p", ...])` blows up past ~32 KB total argv. Use `limit:` on deck reads and project at source; do NOT pass full Task records into the prompt.
@@ -141,20 +141,20 @@ Pick ONE path:
 - Server must restart to pick up template changes: restart `bun run dev:server` (or `bash Start-OMP-Deck.sh`)
 
 ### B. User routine (lives in this user's DB)
-- POST `http://127.0.0.1:8787/api/routines` with `{name, description, specYaml}`
+- POST `http://127.0.0.1:1701/api/routines` with `{name, description, specYaml}`
 - Or use the visual builder: navigate to `/routines?edit=new`, paste YAML into the Spec tab, click Apply, then Save
 - Survives across server restarts (stored in `routines` table)
 
 ### Verify it ran
 ```bash
 # Trigger manually
-curl -sX POST http://127.0.0.1:8787/api/routines/<routineId>/run
+curl -sX POST http://127.0.0.1:1701/api/routines/<routineId>/run
 
 # Wait a few seconds, then check the latest run
-curl -s "http://127.0.0.1:8787/api/routines/<routineId>/runs?limit=1"
+curl -s "http://127.0.0.1:1701/api/routines/<routineId>/runs?limit=1"
 
 # And the per-step breakdown
-curl -s "http://127.0.0.1:8787/api/routines/<routineId>/runs/<runId>/steps"
+curl -s "http://127.0.0.1:1701/api/routines/<routineId>/runs/<runId>/steps"
 ```
 
 Failing steps show `error` / `stderrExcerpt`. The most common first-run failures: undeclared state key, agent prompt arg-cap overflow, missing webhook secret env.

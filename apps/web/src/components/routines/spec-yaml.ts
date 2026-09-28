@@ -146,7 +146,7 @@ export function scaffoldStep(
 				content: "# {{ run.date }}\n\n",
 			};
 		case "http":
-			return { id, type: "http", method: "GET", url: "http://127.0.0.1:8787/api/tasks" };
+			return { id, type: "http", method: "GET", url: "http://127.0.0.1:1701/api/tasks" };
 		case "deck":
 			switch (presetAction ?? "create_inbox_item") {
 				case "create_inbox_item":

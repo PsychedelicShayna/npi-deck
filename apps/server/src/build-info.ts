@@ -15,8 +15,8 @@
  */
 
 import * as fs from "node:fs";
-import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+
+import { buildInfoFile, DECK_ROOT } from "./assets.ts";
 
 import packageJson from "../package.json" with { type: "json" };
 
@@ -35,8 +35,7 @@ function resolveBuildSha(): string | null {
 	const envSha = process.env.NPI_DECK_BUILD_SHA?.trim();
 	if (envSha) return envSha;
 
-	const here = path.dirname(fileURLToPath(import.meta.url));
-	const buildInfoPath = path.join(here, "..", ".buildinfo");
+	const buildInfoPath = buildInfoFile();
 	try {
 		if (fs.existsSync(buildInfoPath)) {
 			const parsed = JSON.parse(fs.readFileSync(buildInfoPath, "utf-8")) as {
@@ -52,9 +51,9 @@ function resolveBuildSha(): string | null {
 
 	// Git fallback (synchronous, runs once at boot). Bun.spawnSync keeps us off
 	// node:child_process and avoids the Windows quoting traps that plague
-	// `cmd /c git ...`. Repo root is two levels up from apps/server/src.
+	// `cmd /c git ...`.
 	try {
-		const repoRoot = path.resolve(here, "..", "..", "..");
+		const repoRoot = DECK_ROOT;
 		const proc = Bun.spawnSync({
 			cmd: ["git", "rev-parse", "HEAD"],
 			cwd: repoRoot,

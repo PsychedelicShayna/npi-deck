@@ -23,15 +23,10 @@ export interface ManagedEnvFile {
 	lines: EnvLine[];
 }
 
-export function getDataDir(): string {
-	const explicit = process.env.NPI_DECK_DATA_DIR?.trim();
-	if (explicit) return path.resolve(explicit);
-	if (process.platform === "win32") {
-		const local = process.env.LOCALAPPDATA?.trim() || path.join(os.homedir(), "AppData", "Local");
-		return path.join(local, "npi-deck");
-	}
-	const xdg = process.env.XDG_CONFIG_HOME?.trim();
-	return path.join(xdg ? path.resolve(xdg) : path.join(os.homedir(), ".config"), "npi-deck");
+/** The deck's single data dir: `NPI_DECK_HOME`, else `~/.npi-deck`. Holds the managed .env, the db, backend trees and run state. */
+export function getDataDir(env: NodeJS.ProcessEnv = process.env): string {
+	const explicit = env.NPI_DECK_HOME?.trim();
+	return explicit ? path.resolve(explicit) : path.join(os.homedir(), ".npi-deck");
 }
 
 export function getManagedEnvPath(): string {

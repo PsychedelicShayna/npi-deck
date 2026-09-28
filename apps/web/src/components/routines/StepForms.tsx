@@ -179,7 +179,7 @@ export function HttpStepForm({ step, onChange }: FormProps<"http">) {
 					<TextInput
 						value={step.url}
 						onChange={(v) => patch({ url: v })}
-						placeholder="http://127.0.0.1:8787/api/tasks"
+						placeholder="http://127.0.0.1:1701/api/tasks"
 						mono
 					/>
 				</Field>

@@ -1,26 +1,12 @@
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
 import type { BridgeInfo, BridgeLogLine, BridgeName, BridgeStatus } from "@npi-deck/protocol";
 
+import { telegramBridgeEntry } from "./assets.ts";
 import { logger } from "./log.ts";
 import { resolveBunExecutable } from "./runtime-bun.ts";
 
 const log = logger("bridges");
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-
-/**
- * Resolved path to the telegram bridge entry. In dev the server runs from
- * `apps/server/src/`, so the bridge entry sits four hops away. In production
- * builds (server bundled into `dist/`) the operator can override via
- * `OMP_BRIDGE_TELEGRAM_ENTRY`.
- */
-function defaultTelegramEntry(): string {
-	const override = process.env.OMP_BRIDGE_TELEGRAM_ENTRY?.trim();
-	if (override) return path.resolve(override);
-	return path.resolve(here, "..", "..", "bridges", "telegram", "src", "index.ts");
-}
 
 interface BridgeSpec {
 	name: BridgeName;
@@ -247,7 +233,7 @@ export function buildDefaultBridgeSupervisor(): BridgeSupervisor {
 		{
 			name: "telegram",
 			label: "Telegram",
-			entry: defaultTelegramEntry(),
+			entry: telegramBridgeEntry(),
 			requiredEnv: ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS"],
 		},
 	]);

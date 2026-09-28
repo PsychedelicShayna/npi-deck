@@ -15,13 +15,15 @@
  *
  * Disable with `NPI_DECK_INSTALL_STARTER_EXTENSIONS=0`.
  *
- * Path resolution mirrors StarterSkillsInstaller.
+ * The source dir comes from `starterExtensionsDir()` (assets.ts;
+ * `NPI_DECK_STARTER_EXTENSIONS_DIR` overrides).
  */
 
 import { existsSync } from "node:fs";
 import { cp, readdir, stat } from "node:fs/promises";
 import * as path from "node:path";
 
+import { starterExtensionsDir } from "./assets.ts";
 import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
 
@@ -38,7 +40,7 @@ export async function installStarterExtensions(): Promise<StarterExtensionInstal
 		return { installed: [], skipped: [] };
 	}
 
-	const sourceDir = resolveStarterSourceDir();
+	const sourceDir = starterExtensionsDir();
 	if (!sourceDir) {
 		log.warn("no starter-extensions source dir found; skipping");
 		return { installed: [], skipped: [] };
@@ -93,22 +95,6 @@ export async function installStarterExtensions(): Promise<StarterExtensionInstal
 	}
 
 	return { installed, skipped };
-}
-
-function resolveStarterSourceDir(): string | undefined {
-	const override = process.env.NPI_DECK_STARTER_EXTENSIONS_DIR;
-	if (override && existsSync(override)) return override;
-
-	const candidates = [
-		path.resolve(import.meta.dir, "..", "..", "..", "starter-extensions"),
-		path.resolve(import.meta.dir, "..", "..", "starter-extensions"),
-		path.resolve(import.meta.dir, "..", "starter-extensions"),
-		path.resolve(process.cwd(), "starter-extensions"),
-	];
-	for (const c of candidates) {
-		if (existsSync(c)) return c;
-	}
-	return undefined;
 }
 
 // Re-export the async dir check for tests / external callers.

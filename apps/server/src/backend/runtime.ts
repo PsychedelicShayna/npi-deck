@@ -18,9 +18,10 @@
  * process; probing a candidate belongs in a child process (plan C3).
  */
 import { existsSync, readFileSync } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { parse as parseYaml } from "yaml";
+
+import { getDataDir } from "../env-store.ts";
 
 import {
 	MANIFEST,
@@ -95,10 +96,6 @@ export function formatDiagnostic(d: ManifestDiagnostic): string {
 	return `${what}${d.file ? ` (${d.file})` : ""}: ${d.reason}`;
 }
 
-export function npiDeckHome(env: NodeJS.ProcessEnv = process.env): string {
-	return env.NPI_DECK_HOME || path.join(os.homedir(), ".npi-deck");
-}
-
 interface BackendConfig {
 	backends?: Array<{ id?: unknown; path?: unknown }>;
 	activeBackend?: unknown;
@@ -123,7 +120,7 @@ function lookupBackend(config: BackendConfig, id: string, home: string): string 
 }
 
 export function resolveBackendSelection(env: NodeJS.ProcessEnv = process.env): BackendSelection {
-	const home = npiDeckHome(env);
+	const home = getDataDir(env);
 	const pinned = env.NPI_DECK_BACKEND?.trim();
 	if (pinned) {
 		if (path.isAbsolute(pinned)) return { id: null, path: pinned, source: "env" };

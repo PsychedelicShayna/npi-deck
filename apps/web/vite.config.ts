@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
-const SERVER_PORT = process.env.NPI_DECK_PORT ?? "8787";
+const SERVER_PORT = process.env.NPI_DECK_PORT ?? "1701";
 const SERVER_HOST = process.env.NPI_DECK_HOST ?? "127.0.0.1";
 const WEB_PORT = Number(process.env.NPI_DECK_WEB_PORT ?? "5173");
 

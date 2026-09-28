@@ -15,14 +15,14 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import { parse as parseYaml } from "yaml";
 
 import type { RoutineSpec } from "@npi-deck/protocol";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const TEMPLATES_DIR = path.join(here, "..", "templates");
+import { routineTemplatesDir } from "../assets.ts";
+
+const TEMPLATES_DIR = routineTemplatesDir();
 
 export interface TemplateSummary {
 	slug: string;

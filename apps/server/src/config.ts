@@ -1,6 +1,10 @@
-import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+
+import { webDistDir } from "./assets.ts";
+import { getDataDir } from "./env-store.ts";
+
+export const DEFAULT_PORT = 1701;
 
 export interface Config {
 	host: string;
@@ -31,57 +35,23 @@ export function splitList(value: string | undefined): string[] {
 		.filter(Boolean);
 }
 
-function resolveWebDist(): string | undefined {
-	const explicit = process.env.NPI_DECK_WEB_DIST?.trim();
-	const candidates = [
-		explicit,
-		// Common deployment layouts:
-		path.resolve(process.cwd(), "public"),
-		path.resolve(process.cwd(), "../web/dist"),
-		path.resolve(process.cwd(), "../../apps/web/dist"),
-	].filter((c): c is string => Boolean(c));
-	for (const c of candidates) {
-		try {
-			if (fs.statSync(c).isDirectory()) return c;
-		} catch {
-			// not found — try the next candidate
-		}
-	}
-	return undefined;
-}
-
 export function loadConfig(): Config {
 	const home = os.homedir();
 	const defaultCwd = process.env.NPI_DECK_DEFAULT_CWD?.trim() || home;
 	const extra = splitList(process.env.NPI_DECK_WORKSPACES);
-	const webDist = resolveWebDist();
+	const webDist = webDistDir();
+	const dbPath = path.resolve(process.env.NPI_DECK_DB_PATH?.trim() || path.join(getDataDir(), "deck.db"));
 
 	return {
 		host: process.env.NPI_DECK_HOST?.trim() || "127.0.0.1",
-		port: parseInt10(process.env.NPI_DECK_PORT, 8787),
+		port: parseInt10(process.env.NPI_DECK_PORT, DEFAULT_PORT),
 		defaultCwd: path.resolve(defaultCwd),
 		extraWorkspaces: extra.map((p) => path.resolve(p)),
 		webDist,
 		devMode: process.env.NODE_ENV !== "production",
 		// 5 minutes default. Set to 0 to disable reaping (kernels live until SIGINT).
 		idleTimeoutMs: parseInt10(process.env.NPI_DECK_IDLE_TIMEOUT_MS, 5 * 60_000),
-		dbPath: path.resolve(
-			process.env.NPI_DECK_DB_PATH?.trim() ||
-				process.env.NPI_DECK_DB?.trim() ||
-				path.join(process.cwd(), "data", "deck.db"),
-		),
-		uploadsRoot: path.resolve(
-			process.env.NPI_DECK_UPLOADS_ROOT?.trim() ||
-				path.join(
-					path.dirname(
-						path.resolve(
-							process.env.NPI_DECK_DB_PATH?.trim() ||
-								process.env.NPI_DECK_DB?.trim() ||
-								path.join(process.cwd(), "data", "deck.db"),
-						),
-					),
-					"uploads",
-				),
-		)
+		dbPath,
+		uploadsRoot: path.resolve(process.env.NPI_DECK_UPLOADS_ROOT?.trim() || path.join(path.dirname(dbPath), "uploads")),
 	};
 }

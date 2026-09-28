@@ -13,13 +13,8 @@
  * skill removes the bootstrapping gap — a fresh `omp` install with npi-deck
  * gets `/skill:create-skill` immediately, no marketplace dance required.
  *
- * Path resolution:
- * - In dev (`bun --hot src/index.ts`), `import.meta.dir` is
- *   `<repo>/apps/server/src/`, so `../../../starter-skills` resolves to the
- *   workspace's `starter-skills/`.
- * - In bundled prod the resolution still works as long as the build copies
- *   `starter-skills/` next to the bundled entry point (or the env var
- *   `NPI_DECK_STARTER_SKILLS_DIR` overrides). Both knobs are checked.
+ * The source dir comes from `starterSkillsDir()` (assets.ts;
+ * `NPI_DECK_STARTER_SKILLS_DIR` overrides).
  *
  * Disable with `NPI_DECK_INSTALL_STARTER_SKILLS=0`.
  */
@@ -28,6 +23,7 @@ import { existsSync } from "node:fs";
 import { cp, readdir, stat } from "node:fs/promises";
 import * as path from "node:path";
 
+import { starterSkillsDir } from "./assets.ts";
 import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
 
@@ -44,7 +40,7 @@ export async function installStarterSkills(): Promise<StarterInstallResult> {
 		return { installed: [], skipped: [] };
 	}
 
-	const sourceDir = resolveStarterSourceDir();
+	const sourceDir = starterSkillsDir();
 	if (!sourceDir) {
 		log.warn("no starter-skills source dir found; skipping");
 		return { installed: [], skipped: [] };
@@ -101,37 +97,6 @@ export async function installStarterSkills(): Promise<StarterInstallResult> {
 	return { installed, skipped };
 }
 
-function resolveStarterSourceDir(): string | undefined {
-	// Explicit override wins.
-	const override = process.env.NPI_DECK_STARTER_SKILLS_DIR;
-	if (override && existsSync(override) && isDirSync(override)) return override;
-
-	// Walk up from this file looking for a sibling `starter-skills/` dir.
-	// Handles both dev (`apps/server/src/`) and any bundled layout that keeps
-	// the starter tree at or near the package root.
-	const candidates = [
-		path.resolve(import.meta.dir, "..", "..", "..", "starter-skills"),
-		path.resolve(import.meta.dir, "..", "..", "starter-skills"),
-		path.resolve(import.meta.dir, "..", "starter-skills"),
-		path.resolve(process.cwd(), "starter-skills"),
-	];
-	for (const c of candidates) {
-		if (existsSync(c) && isDirSync(c)) return c;
-	}
-	return undefined;
-}
-
-function isDirSync(p: string): boolean {
-	try {
-		// `existsSync` doesn't distinguish file/dir; statSync would but we want
-		// to keep this allocation-free. fs.statSync via node:fs isn't imported;
-		// the readdir below will reject on file paths if we slip through here.
-		// A tiny try-catch on readdir is acceptable: the candidate list is short.
-		return true;
-	} catch {
-		return false;
-	}
-}
 
 // Re-export the synchronous stat for tests and callers that need it explicitly.
 export async function isDir(p: string): Promise<boolean> {
