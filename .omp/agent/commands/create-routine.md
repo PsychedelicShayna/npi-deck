@@ -138,7 +138,7 @@ Pick ONE path:
 - File: `apps/server/src/templates/<slug>.yaml`
 - Loaded at server boot, available to all installs
 - Required when the routine is part of the product itself (daily-briefing, observer-daily, etc)
-- Server must restart to pick up template changes: restart `bun run dev:server` (or `bash Start-OMP-Deck.sh`)
+- Server must restart to pick up template changes: restart `bun run dev:server`, or Settings → Restart under the `npi-deck` launcher
 
 ### B. User routine (lives in this user's DB)
 - POST `http://127.0.0.1:1701/api/routines` with `{name, description, specYaml}`

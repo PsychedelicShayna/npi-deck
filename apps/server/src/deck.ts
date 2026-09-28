@@ -1,11 +1,9 @@
-// MUST be first — patches Bun.spawn to redirect python.exe → pythonw.exe on
-// Windows so the eval-py kernel doesn't pop a console window. See the file's
-// own docblock for the full rationale and shape.
-import "./silence-python.ts";
-import { loadManagedEnvIntoProcess } from "./env-store.ts";
-
-loadManagedEnvIntoProcess();
-
+/**
+ * The deck server as a function. `startDeck()` does everything the process
+ * needs (managed env, generation marker, backend, db, listener) and returns a
+ * handle; importing this module has no side effects. `index.ts` is the thin
+ * process entry, and a future `npi deck` subcommand can call this directly.
+ */
 import type { Server, ServerWebSocket } from "bun";
 import * as path from "node:path";
 
@@ -13,8 +11,11 @@ import { InProcessAgentBridge } from "./bridge/in-process.ts";
 import { RoutinesRunner } from "./routines-runner.ts";
 import { closeDb, openDb } from "./db/index.ts";
 import { loadConfig } from "./config.ts";
+import { loadManagedEnvIntoProcess } from "./env-store.ts";
+import { initializeOwnedGeneration, stopOwnedProcesses, sweepOwnedProcesses } from "./owned-process.ts";
+import { launcherFromEnv, RESTART_EXIT_CODE, watchLauncher } from "./owned/launcher.ts";
+import { workRegistry } from "./work-registry.ts";
 import { logger } from "./log.ts";
-import { resolveBunExecutable } from "./runtime-bun.ts";
 import { buildRouter } from "./routes.ts";
 import { serveUpload } from "./routes-uploads.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
@@ -36,8 +37,27 @@ import type { RestartServerResponse } from "@npi-deck/protocol";
 
 const log = logger("server");
 
-async function main(): Promise<void> {
+export interface StartDeckOptions {
+	/** Overrides NPI_DECK_HOST. */
+	host?: string;
+	/** Overrides NPI_DECK_PORT. */
+	port?: number;
+	/** Stop and exit on SIGINT/SIGTERM. Default true. */
+	handleSignals?: boolean;
+}
+
+export interface DeckHandle {
+	/** Base URL the listener is bound to. */
+	url: string;
+	/** Graceful shutdown; idempotent. Does not exit the process. */
+	stop(reason?: string): Promise<void>;
+}
+
+export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle> {
+	loadManagedEnvIntoProcess();
 	const config = loadConfig();
+	if (opts.host !== undefined) config.host = opts.host;
+	if (opts.port !== undefined) config.port = opts.port;
 	log.info(`npi-deck server starting`, {
 		host: config.host,
 		port: config.port,
@@ -45,6 +65,11 @@ async function main(): Promise<void> {
 		webDist: config.webDist,
 		devMode: config.devMode,
 	});
+
+	// Kill what an earlier generation left behind and mark everything this
+	// process spawns from here on (no-orphans layer 2). MUST precede any spawn.
+	initializeOwnedGeneration();
+	await sweepOwnedProcesses();
 
 	// Load the NeoPi backend before anything touches the SDK. Degraded
 	// (backendless) mode is W12; until then a missing or incomplete backend
@@ -63,8 +88,7 @@ async function main(): Promise<void> {
 			}
 		}
 	} catch (err) {
-		log.error(`cannot load the NeoPi backend: ${(err as Error).message ?? err}`);
-		process.exit(1);
+		throw new Error(`cannot load the NeoPi backend: ${(err as Error).message ?? err}`);
 	}
 
 	// Tell the maintenance-gate extension (~/.omp/agent/extensions/maintenance-gate)
@@ -74,7 +98,7 @@ async function main(): Promise<void> {
 	// that the upstream detector looks for. Routine agent subprocesses inherit
 	// this env via Bun.spawn defaults, so a single set here covers both surfaces.
 	//
-	// Honors NPI_DECK_MAINTENANCE_GATE_DISABLED (set via Settings → Orientation):
+	// Honors NPI_DECK_MAINTENANCE_GATE_DISABLED (set via Settings → Starters):
 	// when truthy we don't set the org root, so even an unaltered installed copy
 	// of the extension stays inactive. The extension itself also checks the flag.
 	const gateDisabledRaw = (process.env.NPI_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
@@ -135,7 +159,7 @@ async function main(): Promise<void> {
 		marketplaceService,
 		skillsService,
 		kbService,
-		{ restartServer: () => scheduleRestart(server) },
+		{ restartServer: () => scheduleRestart(stop) },
 	);
 	const skillsWatcherDispose = startSkillsWatcher(config);
 	const kbWatcherDispose = startKbWatcher(kbService);
@@ -199,90 +223,69 @@ async function main(): Promise<void> {
 
 	log.info(`listening on http://${server.hostname}:${server.port}`);
 
-	let shuttingDown = false;
-	async function safeShutdown(reason: string): Promise<void> {
-		if (shuttingDown) return;
-		shuttingDown = true;
+	let stopping: Promise<void> | undefined;
+	function stop(reason = "stop"): Promise<void> {
+		stopping ??= shutdown(reason);
+		return stopping;
+	}
+	// Order (R23): close admissions, stop the listener, drain work, reap owned
+	// processes, then release the SDK and the db.
+	async function shutdown(reason: string): Promise<void> {
 		log.info(`shutdown via ${reason}`);
-		try {
-			routinesRunner.dispose();
-		} catch (err) {
-			log.error(`runner dispose threw`, err);
-		}
-		try {
-			skillsWatcherDispose();
-		} catch (err) {
-			log.error(`skills watcher dispose threw`, err);
-		}
-		try {
-			kbWatcherDispose();
-		} catch (err) {
-			log.error(`kb watcher dispose threw`, err);
-		}
-		try {
-			await supervisor.shutdown();
-		} catch (err) {
-			log.error(`bridge supervisor shutdown threw`, err);
-		}
-		try {
-			await bridge.dispose();
-		} catch (err) {
-			log.error(`bridge dispose threw`, err);
-		}
-		try {
-			closeDb();
-		} catch (err) {
-			log.error(`db close threw`, err);
+		const steps: Array<[string, () => unknown]> = [
+			["work admissions close", () => workRegistry.closeAdmissions()],
+			["runner close admissions", () => routinesRunner.closeAdmissions()],
+			["listener stop", () => server.stop(true)],
+			["skills watcher dispose", () => skillsWatcherDispose()],
+			["kb watcher dispose", () => kbWatcherDispose()],
+			["runner dispose", () => routinesRunner.dispose()],
+			["owned processes stop", () => stopOwnedProcesses()],
+			["bridge supervisor shutdown", () => supervisor.shutdown()],
+			["bridge dispose", () => bridge.dispose()],
+			["db close", () => closeDb()],
+		];
+		for (const [name, step] of steps) {
+			try {
+				await step();
+			} catch (err) {
+				log.error(`${name} threw`, err);
+			}
 		}
 	}
 
-	process.once("SIGINT", () => {
-		void safeShutdown("SIGINT").then(() => {
-			server.stop(true);
-			process.exit(0);
+	if (opts.handleSignals !== false) {
+		for (const signal of ["SIGINT", "SIGTERM"] as const) {
+			process.once(signal, () => {
+				void stop(signal).then(() => process.exit(0));
+			});
+		}
+	}
+
+	// Under the launcher, a dead launcher means nobody is watching: stop, and
+	// under systemd the unit's cgroup is emptied as this process exits.
+	const launcher = launcherFromEnv();
+	if (launcher) {
+		watchLauncher(launcher, () => {
+			log.warn(`launcher pid ${launcher.pid} is gone; shutting down`);
+			void stop("launcher gone").then(() => process.exit(0));
 		});
-	});
-	process.once("SIGTERM", () => {
-		void safeShutdown("SIGTERM").then(() => {
-			server.stop(true);
-			process.exit(0);
-		});
-	});
-	// Last-resort safety net for non-signal exit paths (Bun crash, unhandled
-	// rejection escalated to abort, etc). beforeExit fires when the loop drains.
-	process.on("beforeExit", () => {
-		void safeShutdown("beforeExit");
-	});
+	}
+
+	return { url: `http://${server.hostname}:${server.port}`, stop };
 }
 
-function scheduleRestart(server: Server<ConnectionData>): RestartServerResponse {
-	// `process.execPath` directly here would suffer the same staleness issue
-	// as the bridge supervisor (issue #6 — user's bun moves between deck
-	// start and restart). Route through the shared resolver which falls back
-	// to a PATH lookup if the captured execPath is gone.
-	const cmd = [resolveBunExecutable(), ...process.argv.slice(1)];
-	const cwd = process.cwd();
+/**
+ * A restart is the process exiting with the reserved status; the launcher's
+ * supervisor (systemd `RestartForceExitStatus`, or the `--no-systemd` loop)
+ * starts the next generation. Without a launcher there is nobody to do that.
+ */
+function scheduleRestart(stop: (reason: string) => Promise<void>): RestartServerResponse {
+	if (!launcherFromEnv()) {
+		return { ok: false, message: "Restart needs the npi-deck launcher; this server was started directly. Restart it yourself." };
+	}
 	setTimeout(() => {
-		log.info(`restart requested`, { cmd });
-		try {
-			server.stop(true);
-		} catch (err) {
-			log.warn(`server stop before restart failed`, err);
-		}
-		const env = Object.fromEntries(
-			Object.entries(process.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-		);
-		const child = Bun.spawn({
-			cmd,
-			cwd,
-			env,
-			stdin: "ignore",
-			stdout: "inherit",
-			stderr: "inherit",
-			detached: true,
-		});
-		child.unref();
-		setTimeout(() => process.exit(0), 80);
+		log.info(`restart requested; exiting with ${RESTART_EXIT_CODE}`);
+		void stop("restart").then(() => process.exit(RESTART_EXIT_CODE));
 	}, 100);
 	return { ok: true, message: "Restart scheduled" };
 }
@@ -295,11 +298,6 @@ const LANDING_HTML = `<!doctype html>
 <p>Backend is running. The browser UI is served by the <code>@npi-deck/web</code> Vite dev server (typically <a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a> in dev), or the built static assets in production.</p>
 <p>API base: <code>/api</code> &nbsp;&nbsp; WebSocket: <code>/ws</code></p>
 </body></html>`;
-
-main().catch((err) => {
-	log.error(`fatal`, err);
-	process.exit(1);
-});
 
 async function serveStatic(req: Request, root: string): Promise<Response> {
 	const url = new URL(req.url);

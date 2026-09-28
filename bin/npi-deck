@@ -1,0 +1,11 @@
+#!/bin/sh
+# npi-deck launcher entry. Symlink it into PATH:
+#   ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck
+# The real script lives in scripts/npi-deck.ts; this wrapper only resolves
+# the checkout through the symlink and hands over the process (exec keeps
+# the pid, which the worker watches as NPI_DECK_LAUNCHER_PID).
+set -eu
+self=$(readlink -f -- "$0")
+root=$(dirname -- "$(dirname -- "$self")")
+command -v bun >/dev/null 2>&1 || { echo "npi-deck: bun is not on PATH" >&2; exit 127; }
+exec bun "$root/scripts/npi-deck.ts" "$@"
