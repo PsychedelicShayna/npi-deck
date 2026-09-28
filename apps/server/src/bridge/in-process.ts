@@ -37,6 +37,7 @@ import { workRegistry } from "../work-registry.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import { SubagentTree } from "./subagent-tree.ts";
+import { McpAllowlistError } from "./types.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
@@ -132,8 +133,8 @@ export class InProcessAgentBridge implements AgentBridge {
 		// this instance only; a deck allowlist must never write user config.yml.
 		const settings = await sdk().Settings.loadIsolated({ cwd, agentDir: sdk().getAgentDir() });
 		if (mcpServersAllowed !== undefined) {
-			if (mcpServersAllowed.some(name => !name || /[*?[\]{}]/.test(name))) {
-				throw new Error("MCP allowlist requires configured literal server names (no glob metacharacters)");
+			if (mcpServersAllowed.some(name => !name || name !== name.trim() || /[,*?[\]{}]/.test(name))) {
+				throw new McpAllowlistError("MCP allowlist requires configured literal server names (no glob metacharacters)");
 			}
 			if (mcpServersAllowed.length && !hasFeature("mcp-allowlist")) {
 				throw new Error("MCP allowlist requires backend support for mcp.includeServers (neopi#120)");
@@ -171,7 +172,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			});
 		} catch (error) {
 			if (hasFeature("mcp-allowlist") && error instanceof feature("mcp-allowlist").MCPUnknownServerError) {
-				throw new Error(`MCP allowlist names no available server: ${error.serverNames.join(", ")}`, { cause: error });
+				throw new McpAllowlistError(`MCP allowlist names no available server: ${error.serverNames.join(", ")}`, { cause: error });
 			}
 			if (hasFeature("multi-root") && error instanceof feature("multi-root").AgentIdConflictError) {
 				throw new Error(`NeoPi agent ID ${JSON.stringify(error.agentId)} is already held by a live session`, { cause: error });

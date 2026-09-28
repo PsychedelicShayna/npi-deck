@@ -92,6 +92,11 @@ export interface RuntimeEnvUpdate {
 	idleTimeoutMs?: number;
 }
 
+/** Invalid per-session MCP selection; callers can return a client error. */
+export class McpAllowlistError extends Error {
+	override name = "McpAllowlistError";
+}
+
 export interface CreateSessionOpts {
 	cwd: string;
 	model?: ModelRef;
