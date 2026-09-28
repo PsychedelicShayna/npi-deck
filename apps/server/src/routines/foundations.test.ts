@@ -2,8 +2,8 @@ import { afterEach, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RoutineSpec } from "@npi-deck/protocol";
-import { openDb, closeDb } from "../db/index.ts";
-import { createV1Routine, listRuns } from "../db/routines.ts";
+import { openDb, closeDb, getDb } from "../db/index.ts";
+import { createRoutine, createV1Routine, getRoutine, listRuns } from "../db/routines.ts";
 import { RoutinesRunner } from "../routines-runner.ts";
 import { initializeOwnedGeneration, stopOwnedProcesses } from "../owned-process.ts";
 
@@ -94,4 +94,82 @@ test("continue ignores retry policy and cancellation during retry backoff preven
 	await running;
 	expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toHaveLength(2);
 	expect(listRuns(retry.id)[0]?.abortReason).toBe("cancelled");
+});
+
+test("multi-cron next run remains the earliest after a manual run", async () => {
+	setup();
+	const s = spec([{ id: "fast", type: "run", command: "true" }]);
+	s.trigger = [{ cron: "0 0 1 1 *" }, { cron: "* * * * *" }];
+	const r = routine(s);
+	runner!.schedule(r);
+	const before = getRoutine(r.id)?.nextRunAt;
+	expect(before).toBeDefined();
+	expect(new Date(before!).getTime() - Date.now()).toBeLessThan(61_000);
+	await runner!.fire(r.id);
+	const after = getRoutine(r.id)?.nextRunAt;
+	expect(after).toBeDefined();
+	expect(new Date(after!).getTime() - Date.now()).toBeLessThan(61_000);
+});
+
+test("legacy shell routines also queue before spawning and drain on shutdown", async () => {
+	setup();
+	const marker = path.join(home, "legacy");
+	const release = path.join(home, "release");
+	const r = createRoutine({ name: "legacy", cron: "", actionKind: "bash",
+		actionBody: `echo start >> '${marker}'; until test -f '${release}'; do sleep .05; done; echo end >> '${marker}'` });
+	getDb().prepare("UPDATE routines SET concurrency = 'queue' WHERE id = ?").run(r.id);
+	const first = runner!.fire(r.id);
+	for (let i = 0; i < 60 && !fs.existsSync(marker); i++) await Bun.sleep(25);
+	expect(fs.existsSync(marker)).toBe(true);
+	const second = runner!.fire(r.id);
+	await Bun.sleep(80);
+	expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toEqual(["start"]);
+	fs.writeFileSync(release, "");
+	await Promise.all([first, second]);
+	expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toEqual(["start", "end", "start", "end"]);
+	expect(runner!.busy).toBe(false);
+});
+
+test("skip leaves only the admitted run executing; parallel admits both", async () => {
+	setup();
+	const marker = path.join(home, "modes");
+	const release = path.join(home, "release");
+	const command = `echo start >> '${marker}'; until test -f '${release}'; do sleep .05; done; echo end >> '${marker}'`;
+	const skip = routine(spec([{ id: "hold", type: "run", command }], "skip"));
+	const first = runner!.fire(skip.id);
+	for (let i = 0; i < 60 && !fs.existsSync(marker); i++) await Bun.sleep(25);
+	await runner!.fire(skip.id);
+	expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toEqual(["start"]);
+	expect(listRuns(skip.id).some((run) => run.abortReason === "concurrency_skipped")).toBe(true);
+	fs.writeFileSync(release, "");
+	await first;
+	fs.unlinkSync(release);
+	fs.writeFileSync(marker, "");
+	const parallel = routine(spec([{ id: "hold", type: "run", command }], "parallel"));
+	const a = runner!.fire(parallel.id);
+	const b = runner!.fire(parallel.id);
+	for (let i = 0; i < 80 && fs.readFileSync(marker, "utf8").trim().split("\n").filter(Boolean).length < 2; i++) await Bun.sleep(25);
+	expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toEqual(["start", "start"]);
+	fs.writeFileSync(release, "");
+	await Promise.all([a, b]);
+	expect(runner!.busy).toBe(false);
+});
+
+test("cancel-previous kills the running child before the replacement finishes", async () => {
+	setup();
+	const marker = path.join(home, "cancel");
+	const release = path.join(home, "release");
+	const r = routine(spec([{ id: "hold", type: "run",
+		command: `echo start >> '${marker}'; until test -f '${release}'; do sleep .05; done; echo end >> '${marker}'`,
+	}], "cancel-previous"));
+	const first = runner!.fire(r.id);
+	for (let i = 0; i < 60 && !fs.existsSync(marker); i++) await Bun.sleep(25);
+	expect(fs.existsSync(marker)).toBe(true);
+	fs.writeFileSync(release, "");
+	const second = runner!.fire(r.id);
+	await Promise.all([first, second]);
+	const lines = fs.readFileSync(marker, "utf8").trim().split("\n");
+	expect(lines.filter((line) => line === "start")).toHaveLength(2);
+	expect(listRuns(r.id).some((run) => run.abortReason === "cancelled")).toBe(true);
+	expect(runner!.busy).toBe(false);
 });

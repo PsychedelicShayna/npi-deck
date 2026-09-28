@@ -141,7 +141,7 @@ export class RoutinesRunner {
 		if (routine.specVersion === 1 && routine.specYaml) {
 			await this.fireV1(routine, trigger, payload);
 		} else {
-			await this.fireV0(routine, trigger === "cron" || trigger === "manual" ? trigger : "manual");
+			await this.fireV0(routine, trigger === "cron" || trigger === "manual" ? trigger : "manual", payload);
 		}
 
 		const entries = this.crons.get(routineId) ?? [];
@@ -153,23 +153,40 @@ export class RoutinesRunner {
 		});
 	}
 
-	private async fireV0(routine: Routine, trigger: "cron" | "manual"): Promise<void> {
+	private async fireV0(routine: Routine, trigger: "cron" | "manual", payload: Record<string, unknown>): Promise<void> {
 		if (!routine.actionKind || routine.actionBody === undefined) {
 			log.warn(`V0 routine ${routine.id} missing action_kind/action_body`);
 			return;
 		}
-		const run = startRun(routine.id, trigger);
-		const cwd =
-			routine.actionCwd && routine.actionCwd.trim()
-				? routine.actionCwd
-				: process.cwd();
-		log.info(`firing V0 routine ${routine.name} (${routine.actionKind})`);
-		try {
-			const result = await runV0Action(routine.actionKind, routine.actionBody, cwd);
-			finishRun(run.id, result);
-		} catch (err) {
-			finishRun(run.id, { error: String(err) });
+		const run = startRun(routine.id, trigger, JSON.stringify(payload));
+		const decision = this.concurrency.decide(routine.id, run.id, routine.concurrency);
+		if (decision.kind === "skip") {
+			finalizeRun(run.id, { endedAt: new Date().toISOString(), abortedAt: new Date().toISOString(), abortReason: "concurrency_skipped" });
+			return;
 		}
+		if (decision.kind === "cancel") decision.toCancel.abort();
+		const key = `${routine.id}:${run.id}`;
+		const releaseWork = workRegistry.admit(decision.kind === "queue" ? "routine-queued" : "routine-run", key);
+		const finished = (async () => {
+			if (decision.kind === "queue") await decision.release;
+			if (decision.abort.signal.aborted) {
+				finalizeRun(run.id, { endedAt: new Date().toISOString(), abortedAt: new Date().toISOString(), abortReason: "cancelled" });
+				return;
+			}
+			if (decision.kind === "queue") workRegistry.transition("routine-queued", "routine-run", key);
+			const cwd = routine.actionCwd?.trim() || process.cwd();
+			log.info(`firing V0 routine ${routine.name} (${routine.actionKind})`);
+			try {
+				const result = await runV0Action(routine.actionKind!, routine.actionBody!, cwd, decision.abort.signal);
+				finishRun(run.id, result);
+			} catch (err) {
+				finishRun(run.id, { error: String(err) });
+			} finally {
+				this.concurrency.finish(routine.id, run.id);
+			}
+		})();
+		this.runs.set(key, { abort: decision.abort, finished });
+		try { await finished; } finally { this.runs.delete(key); releaseWork(); }
 	}
 
 	private async fireV1(
@@ -215,6 +232,7 @@ export class RoutinesRunner {
 				finalizeRun(run.id, { endedAt: new Date().toISOString(), abortedAt: new Date().toISOString(), abortReason: "cancelled" });
 				return;
 			}
+			if (decision.kind === "queue") workRegistry.transition("routine-queued", "routine-run", key);
 			log.info(`firing V1 routine ${routine.name} (${spec.steps.length} steps, trigger=${trigger})`);
 			const config = loadConfig();
 			try {
@@ -259,6 +277,7 @@ async function runV0Action(
 	kind: RoutineActionKind,
 	body: string,
 	cwd: string,
+	signal: AbortSignal,
 ): Promise<{ exitCode?: number; stdoutExcerpt: string; stderrExcerpt: string; error?: string }> {
 	const cmd = buildV0Cmd(kind, body);
 	if (!cmd) {
@@ -267,6 +286,9 @@ async function runV0Action(
 	const proc = spawnOwned(cmd, {
 		cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true,
 	});
+	const onAbort = () => { void terminateOwned(proc); };
+	signal.addEventListener("abort", onAbort, { once: true });
+	if (signal.aborted) onAbort();
 	const timer = setTimeout(() => { void terminateOwned(proc); }, MAX_RUNTIME_MS);
 	timer.unref?.();
 	const [stdout, stderr, exitCode] = await Promise.all([
@@ -275,6 +297,7 @@ async function runV0Action(
 		proc.exited,
 	]);
 	clearTimeout(timer);
+	signal.removeEventListener("abort", onAbort);
 	return {
 		exitCode: typeof exitCode === "number" ? exitCode : undefined,
 		stdoutExcerpt: stdout,

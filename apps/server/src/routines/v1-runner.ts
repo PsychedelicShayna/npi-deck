@@ -35,6 +35,7 @@ import { broadcastBus } from "../broadcast-bus.ts";
 import { notificationService } from "../notifications/index.ts";
 import { finalizeRun, finishStepRun, insertSkippedStepRun, startStepRun } from "../db/routine-step-runs.ts";
 import { logger } from "../log.ts";
+import { workRegistry } from "../work-registry.ts";
 import { accumulate, checkBudget, newBudgetState } from "./budget.ts";
 import { evaluate } from "./sandbox.ts";
 import { executeAgentStep } from "./steps/agent.ts";
@@ -219,12 +220,14 @@ export async function runV1Pipeline(input: {
 				timedOut = true;
 				result = { status: "aborted", stdoutExcerpt: "", stderrExcerpt: "", error: "step timed out", durationMs: 0 };
 			} else {
+				const releaseStep = workRegistry.admit("routine-step", `${runId}:${step.id}:${attempt}`);
 				const timer = setTimeout(() => { timedOut = true; stepAbort.abort(); }, remainingMs);
 				try {
 					result = await dispatchStep(step, context, stepAbort.signal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox);
 				} finally {
 					clearTimeout(timer);
 					abortSignal.removeEventListener("abort", onAbort);
+					releaseStep();
 				}
 				if (timedOut) result = { ...result, status: "aborted", error: "step timed out" };
 			}

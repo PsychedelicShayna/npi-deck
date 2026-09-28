@@ -11,6 +11,11 @@ export const workRegistry = {
 		items.set(key, { kind, id });
 		return () => { items.delete(key); };
 	},
+	transition(from: WorkKind, to: WorkKind, id: string): void {
+		const item = items.get(`${from}:${id}`);
+		if (!item) throw new Error(`work not admitted: ${from}:${id}`);
+		item.kind = to;
+	},
 	closeAdmissions(): void { closed = true; },
 	get busy(): boolean { return items.size > 0; },
 	snapshot(): WorkItem[] { return [...items.values()]; },
