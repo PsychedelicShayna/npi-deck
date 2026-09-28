@@ -104,6 +104,23 @@ export function buildRouter(
 		}
 	});
 
+	// Read-only transcript of a persisted session. Never creates or resumes an
+	// SDK session and spawns nothing: browsing the sidebar must not start MCP
+	// or LSP servers (no-orphans guarantee). 404 unless `path` is a session
+	// NeoPi lists, so this can't read arbitrary files.
+	app.get("/sessions/transcript", async (c) => {
+		const sessionPath = c.req.query("path");
+		if (!sessionPath) return c.json({ error: "path is required" }, 400);
+		try {
+			const transcript = await bridge.readTranscript(sessionPath);
+			if (!transcript) return c.json({ error: "unknown session" }, 404);
+			return c.json(transcript);
+		} catch (err) {
+			log.error(`readTranscript failed`, err);
+			return c.json({ error: String(err) }, 500);
+		}
+	});
+
 	app.post("/sessions", async (c) => {
 		let body: CreateSessionRequest;
 		try {

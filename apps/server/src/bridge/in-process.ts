@@ -22,7 +22,10 @@ import type {
 	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
+	SessionTranscriptResponse,
 } from "@npi-deck/protocol";
+
+import * as path from "node:path";
 
 import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
@@ -162,6 +165,26 @@ export class InProcessAgentBridge implements AgentBridge {
 			? await sdk().SessionManager.list(opts.cwd)
 			: await sdk().SessionManager.listAll();
 		return raw.map((r: any) => summarize(r));
+	}
+
+	async readTranscript(sessionPath: string): Promise<SessionTranscriptResponse | undefined> {
+		const resolved = path.resolve(sessionPath);
+		const known = (await sdk().SessionManager.listAll()).find((s) => path.resolve(s.path) === resolved);
+		if (!known) return undefined;
+		// A read-only open: no breadcrumb write, and a missing or empty file
+		// throws instead of being materialized as a fresh session. Nothing is
+		// appended, so NeoPi's deferred migration rewrite never runs.
+		const manager = await sdk().SessionManager.open(resolved, undefined, undefined, {
+			suppressBreadcrumb: true,
+			throwIfMissing: true,
+		});
+		return {
+			sessionId: manager.getSessionId(),
+			path: resolved,
+			cwd: known.cwd,
+			...(known.title ? { title: known.title } : {}),
+			messages: manager.buildSessionContext({ transcript: true }).messages as unknown as AgentMessageJson[],
+		};
 	}
 
 	private ensureModelRegistry(): Promise<ModelRegistry> {

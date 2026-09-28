@@ -22,6 +22,8 @@ export function ChatHeader() {
 
 function Inner({ session }: { session: SessionUi }) {
 	const renameSession = useStore((s) => s.renameSession);
+	const resumeSession = useStore((s) => s.resumeSession);
+	const [resuming, setResuming] = useState(false);
 	const createSession = useStore((s) => s.createSession);
 	const selectSession = useStore((s) => s.selectSession);
 	const defaultCwd = useStore((s) => s.defaultCwd);
@@ -78,7 +80,39 @@ function Inner({ session }: { session: SessionUi }) {
 	return (
 		<div className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-paper px-4">
 			{/* Live indicator + name */}
-			<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="live session" />
+			{session.readOnly ? (
+				<>
+					<span
+						className="shrink-0 rounded border border-line px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-ink-3"
+						title="Read from the session file. Nothing is running; Resume (or sending a message) starts the session."
+					>
+						read-only
+					</span>
+					<button
+						type="button"
+						disabled={resuming}
+						onClick={() => {
+							setResuming(true);
+							resumeSession(session.sessionId)
+								.catch((err) => alert(`Failed to resume: ${String(err)}`))
+								.finally(() => setResuming(false));
+						}}
+						className="btn-ghost h-6 shrink-0 px-1.5 text-xs"
+					>
+						{resuming ? "Resuming…" : "Resume"}
+					</button>
+				</>
+			) : (
+				<span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="live session" />
+			)}
+			{session.backgroundJobsUnavailable ? (
+				<span
+					className="shrink-0 rounded border border-warn/50 bg-warn/10 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-warn"
+					title="Only the first live chat gets NeoPi's background-job manager until neopi#121. Background bash/task work in this chat is refused, and the refusal is shown as the tool's error."
+				>
+					limited: no background jobs until neopi#121
+				</span>
+			) : null}
 			{session.planMode?.enabled ? (
 				<span
 					className="inline-flex shrink-0 items-center gap-1 rounded border border-thinking/40 bg-thinking/10 px-1.5 py-0.5 text-2xs uppercase tracking-meta text-thinking"
@@ -130,8 +164,10 @@ function Inner({ session }: { session: SessionUi }) {
 			) : (
 				<button
 					type="button"
-					onClick={() => setEditing(true)}
-					title="Click to rename"
+					onClick={() => {
+						if (!session.readOnly) setEditing(true);
+					}}
+					title={session.readOnly ? undefined : "Click to rename"}
 					className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-ink hover:text-accent"
 				>
 					{session.sessionName || `Untitled · ${shortId(session.sessionId)}`}
@@ -155,7 +191,7 @@ function Inner({ session }: { session: SessionUi }) {
 				{shortPath(session.cwd, 36)}
 			</span>
 
-			{session.model ? (
+			{session.model && !session.readOnly ? (
 				<button
 					type="button"
 					onClick={() => setModelOpen(true)}

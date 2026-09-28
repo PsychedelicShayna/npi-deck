@@ -7,6 +7,7 @@ import type {
 	ListSlashCommandsResponse,
 	ListWorkspacesResponse,
 	ModelRef,
+	SessionTranscriptResponse,
 } from "@npi-deck/protocol";
 
 const BASE = "/api";
@@ -38,6 +39,10 @@ export const api = {
 	listSessions(cwd?: string): Promise<ListSessionsResponse> {
 		const q = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
 		return request<ListSessionsResponse>(`/sessions${q}`);
+	},
+	/** Read-only transcript of a persisted session; creates no SDK session. */
+	getTranscript(path: string): Promise<SessionTranscriptResponse> {
+		return request<SessionTranscriptResponse>(`/sessions/transcript?path=${encodeURIComponent(path)}`);
 	},
 	createSession(body: CreateSessionRequest): Promise<CreateSessionResponse> {
 		return request<CreateSessionResponse>("/sessions", {

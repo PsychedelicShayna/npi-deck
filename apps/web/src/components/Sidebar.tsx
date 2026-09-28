@@ -12,6 +12,7 @@ export function Sidebar() {
 	const refreshSessions = useStore((s) => s.refreshSessions);
 	const refreshWorkspaces = useStore((s) => s.refreshWorkspaces);
 	const createSession = useStore((s) => s.createSession);
+	const openTranscript = useStore((s) => s.openTranscript);
 	const selectSession = useStore((s) => s.selectSession);
 
 	const [selectedCwd, setSelectedCwd] = useState<string | "">("");
@@ -36,20 +37,19 @@ export function Sidebar() {
 		}
 	}
 
-	async function handleResume(p: string): Promise<void> {
-		setCreating(true);
+	// Opening a persisted session only reads its file; nothing is spawned
+	// until the user resumes it or sends a message (no-orphans guarantee).
+	async function handleOpen(p: string): Promise<void> {
 		try {
-			await createSession({ cwd: cwdInUse, resumeFromPath: p });
+			await openTranscript(p);
 		} catch (err) {
 			console.error(err);
-			alert(`Failed to resume: ${String(err)}`);
-		} finally {
-			setCreating(false);
+			alert(`Failed to open session: ${String(err)}`);
 		}
 	}
 
-	const liveSessions = Object.values(sessionsById);
-	const persisted = filtered.filter((s) => !sessionsById[s.id]);
+	const liveSessions = Object.values(sessionsById).filter((s) => !s.readOnly);
+	const persisted = filtered.filter((s) => !sessionsById[s.id] || sessionsById[s.id]?.readOnly);
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
@@ -130,7 +130,7 @@ export function Sidebar() {
 						title={s.title || formatSessionId(s.id)}
 						subtitle={`${shortPath(s.cwd, 26)} · ${s.messageCount}m`}
 						meta={formatRelative(s.updatedAt || s.createdAt)}
-						onClick={() => void handleResume(s.path)}
+						onClick={() => void handleOpen(s.path)}
 					/>
 				))}
 

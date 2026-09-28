@@ -11,6 +11,7 @@ import type {
 	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
+	SessionTranscriptResponse,
 } from "@npi-deck/protocol";
 
 /**
@@ -23,6 +24,11 @@ export interface AgentBridge {
 	resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle>;
 	getSession(sessionId: string): SessionHandle | undefined;
 	listSessions(opts: { cwd?: string }): Promise<SessionSummary[]>;
+	/**
+	 * A persisted session's transcript, read from its file without creating
+	 * an SDK session. Undefined when `sessionPath` is not a listed session.
+	 */
+	readTranscript(sessionPath: string): Promise<SessionTranscriptResponse | undefined>;
 	/** Pin a session against the idle reaper while a client is subscribed. */
 	trackSubscriberAdded(sessionId: string, connectionId: string): void;
 	/** Drop a subscriber; once subscribers hit zero and idle window elapses, the reaper claims it. */

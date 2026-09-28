@@ -160,6 +160,14 @@ interface StoreState {
 	refreshWorkspaces(): Promise<void>;
 	refreshSessions(cwd?: string): Promise<void>;
 	createSession(opts: { cwd: string; resumeFromPath?: string }): Promise<string>;
+	/**
+	 * Show a persisted session read-only, straight from its file. No SDK
+	 * session starts (so no MCP/LSP processes) until `resumeSession` or the
+	 * first send.
+	 */
+	openTranscript(path: string): Promise<void>;
+	/** Turn the active read-only transcript into a live session. */
+	resumeSession(id: string): Promise<string>;
 	selectSession(id: string): void;
 	sendPrompt(text: string, images?: import("@npi-deck/protocol").ImageAttachment[]): void;
 	abort(): void;
@@ -272,15 +280,49 @@ export const useStore = create<StoreState>()(
 			// Subscribe immediately; reducer will hydrate from the `subscribed` snapshot.
 			get().ws?.send({ type: "subscribe", sessionId: created.sessionId });
 			get().subscribed.add(created.sessionId);
-			set({ activeId: created.sessionId });
+			set((s) => {
+				// A resumed read-only transcript is live now; keep showing it
+				// until the snapshot replaces it, but stop treating it as read-only.
+				const prev = s.sessionsById[created.sessionId];
+				return prev?.readOnly
+					? { activeId: created.sessionId, sessionsById: { ...s.sessionsById, [created.sessionId]: { ...prev, readOnly: undefined } } }
+					: { activeId: created.sessionId };
+			});
 			// Background-refresh sidebar to reflect the new entry.
 			void get().refreshSessions();
 			void get().refreshWorkspaces();
 			return created.sessionId;
 		},
 
+		async openTranscript(path) {
+			const live = Object.values(get().sessionsById).find((s) => s.sessionFile === path && !s.readOnly);
+			if (live) {
+				get().selectSession(live.sessionId);
+				return;
+			}
+			const t = await api.getTranscript(path);
+			const ui = initSession({
+				sessionId: t.sessionId,
+				sessionFile: t.path,
+				...(t.title ? { sessionName: t.title } : {}),
+				cwd: t.cwd,
+				isStreaming: false,
+				messages: t.messages,
+				todoPhases: [],
+			});
+			ui.readOnly = { path: t.path };
+			set((s) => ({ sessionsById: { ...s.sessionsById, [t.sessionId]: ui }, activeId: t.sessionId }));
+		},
+
+		async resumeSession(id) {
+			const ro = get().sessionsById[id];
+			if (!ro?.readOnly) return id;
+			return get().createSession({ cwd: ro.cwd, resumeFromPath: ro.readOnly.path });
+		},
+
 		selectSession(id: string) {
 			set({ activeId: id });
+			if (get().sessionsById[id]?.readOnly) return;
 			if (!get().subscribed.has(id)) {
 				get().ws?.send({ type: "subscribe", sessionId: id });
 				get().subscribed.add(id);
@@ -290,6 +332,14 @@ export const useStore = create<StoreState>()(
 		sendPrompt(text, images) {
 			const id = get().activeId;
 			if (!id) return;
+			// First send in a read-only transcript resumes it, then sends.
+			if (get().sessionsById[id]?.readOnly) {
+				void get()
+					.resumeSession(id)
+					.then(() => get().sendPrompt(text, images))
+					.catch((err) => console.error("resume before send failed", err));
+				return;
+			}
 			const frame: Parameters<NonNullable<StoreState["ws"]>["send"]>[0] = images && images.length > 0
 				? { type: "prompt", sessionId: id, text, images }
 				: { type: "prompt", sessionId: id, text };
@@ -324,10 +374,12 @@ export const useStore = create<StoreState>()(
 		},
 
 		async disposeSession(id: string) {
-			try {
-				await api.disposeSession(id);
-			} catch (err) {
-				console.warn("dispose failed", err);
+			if (!get().sessionsById[id]?.readOnly) {
+				try {
+					await api.disposeSession(id);
+				} catch (err) {
+					console.warn("dispose failed", err);
+				}
 			}
 			set((s) => {
 				const next = { ...s.sessionsById };

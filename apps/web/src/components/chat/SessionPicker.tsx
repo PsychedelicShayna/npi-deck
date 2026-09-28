@@ -18,6 +18,7 @@ export function SessionPicker() {
 	const sessions = useStore((s) => s.sessions);
 	const sessionsById = useStore((s) => s.sessionsById);
 	const createSession = useStore((s) => s.createSession);
+	const openTranscript = useStore((s) => s.openTranscript);
 	const selectSession = useStore((s) => s.selectSession);
 	const refreshSessions = useStore((s) => s.refreshSessions);
 
@@ -26,10 +27,10 @@ export function SessionPicker() {
 	const cwdInUse = selectedCwd || defaultCwd;
 
 	const recent = useMemo(() => {
-		const live = Object.values(sessionsById);
+		const live = Object.values(sessionsById).filter((s) => !s.readOnly);
 		// Persisted rows, freshest first, that aren't already loaded in memory.
 		const persisted = sessions
-			.filter((s) => !sessionsById[s.id])
+			.filter((s) => !sessionsById[s.id] || sessionsById[s.id]?.readOnly)
 			.sort((a, b) => (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt))
 			.slice(0, 6);
 		return { live, persisted };
@@ -47,13 +48,14 @@ export function SessionPicker() {
 		}
 	}
 
+	// Opens read-only; the SDK session starts on Resume or the first send.
 	async function resume(s: SessionSummary): Promise<void> {
 		setBusy(true);
 		try {
-			await createSession({ cwd: cwdInUse, resumeFromPath: s.path });
+			await openTranscript(s.path);
 		} catch (err) {
 			console.error(err);
-			alert(`Failed to resume: ${String(err)}`);
+			alert(`Failed to open session: ${String(err)}`);
 		} finally {
 			setBusy(false);
 		}
