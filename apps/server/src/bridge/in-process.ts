@@ -119,8 +119,6 @@ export class InProcessAgentBridge implements AgentBridge {
 	/** Shared SDK model registry, lazily constructed on first session create. */
 	private modelRegistry: ModelRegistry | undefined;
 	private modelRegistryPromise: Promise<ModelRegistry> | undefined;
-	/** One picker lease per workspace (resolved cwd); released on dispose. */
-	private mixtureWorkspaces = new Map<string, Promise<MixtureRoster | undefined>>();
 	/** Bumped per SDK session this bridge creates; makes every live generation's agentId unique. */
 	private generation = 0;
 
@@ -136,9 +134,12 @@ export class InProcessAgentBridge implements AgentBridge {
 	async createSession(opts: CreateSessionOpts): Promise<SessionHandle> {
 		const release = workRegistry.admit("session", `create:${crypto.randomUUID()}`);
 		try {
-			const sessionManager = sdk().SessionManager.create(opts.cwd);
-			const handle = await this.open(opts.cwd, sessionManager, opts.model, opts.mcpServersAllowed, true);
-			log.info(`created session ${handle.sessionId} cwd=${opts.cwd}`);
+			// One absolute cwd for the session manager, settings, the SDK session and
+			// the deck's mixture lease, so NeoPi and the deck probe the same scope.
+			const cwd = path.resolve(opts.cwd);
+			const sessionManager = sdk().SessionManager.create(cwd);
+			const handle = await this.open(cwd, sessionManager, opts.model, opts.mcpServersAllowed, true);
+			log.info(`created session ${handle.sessionId} cwd=${cwd}`);
 			return handle;
 		} finally { release(); }
 	}
@@ -166,11 +167,13 @@ export class InProcessAgentBridge implements AgentBridge {
 		const core = sdk();
 		const settings = await core.Settings.loadIsolated({ cwd, agentDir: core.getAgentDir() });
 		// createAgentSession resolves an explicit model before it retains its own
-		// mixture workspace, so this workspace's mixtures must already be registered.
+		// mixture workspace, so hold this workspace's scope across session creation.
 		// A mixture another workspace registered on the shared registry is refused.
+		let mixtureLease: MixtureRoster | undefined;
 		if (model?.provider === "mixture") {
-			const roster = await this.ensureMixtures(modelRegistry, cwd);
-			if (!roster?.find(model.id)) {
+			mixtureLease = await this.leaseMixtures(modelRegistry, cwd);
+			if (!mixtureLease?.find(model.id)) {
+				mixtureLease?.release();
 				throw new Error(`mixture/${model.id} is not defined in ${cwd}`);
 			}
 		}
@@ -252,6 +255,9 @@ export class InProcessAgentBridge implements AgentBridge {
 				throw new Error(`NeoPi agent ID ${JSON.stringify(error.agentId)} is already held by a live session`, { cause: error });
 			}
 			throw error;
+		} finally {
+			// The session now holds its own scope for this workspace (or failed).
+			mixtureLease?.release();
 		}
 
 		const session = result.session;
@@ -417,42 +423,42 @@ export class InProcessAgentBridge implements AgentBridge {
 	async listModels(opts: { sessionId?: string } = {}): Promise<ModelInfo[]> {
 		const registry = await this.ensureModelRegistry();
 		const handle = opts.sessionId ? this.active.get(opts.sessionId)?.handle : undefined;
-		const roster = await this.ensureMixtures(registry, handle?.cwd ?? process.cwd());
-		const current = handle?.snapshot().model;
-		// The shared registry lists the union of every held workspace's mixtures;
-		// show only the ones this workspace defines (and can run).
-		return registry.getAll()
-			.filter((model) => model.api !== "mixture" || roster?.find(model.id) !== undefined)
-			.map((model) => modelInfoFromSdk(model as unknown as SdkModel, registry, current));
+		const lease = await this.leaseMixtures(registry, handle?.cwd ?? process.cwd());
+		try {
+			const current = handle?.snapshot().model;
+			// The shared registry lists the union of every held workspace's mixtures;
+			// show only the ones this workspace defines (and can run).
+			return registry.getAll()
+				.filter((model) => model.api !== "mixture" || lease?.find(model.id) !== undefined)
+				.map((model) => modelInfoFromSdk(model as unknown as SdkModel, registry, current));
+		} finally {
+			lease?.release();
+		}
 	}
 
 	/**
-	 * NeoPi registers mixture-of-agents models (`mixture/<name>`, from the
-	 * MIXTURES.toml search path of a workspace) while some owner holds that
-	 * workspace's scope; sessions hold theirs for their lifetime. The deck holds
-	 * one per workspace too, so the picker lists mixtures before any chat is
-	 * open. Discovery reads config files only and spawns nothing; the read-only
-	 * settings loader keeps opening the picker from writing the user's config.
+	 * Hold one workspace's mixture scope for the duration of a single request.
+	 * NeoPi registers `mixture/<name>` models while some owner holds that scope.
+	 * With a live chat in the workspace this returns the scope that chat already
+	 * holds; otherwise it discovers MIXTURES.toml afresh with current settings.
+	 * Callers must release it: a held picker scope would keep reserving its
+	 * mixture names against other workspaces. Discovery reads config files only;
+	 * the read-only settings loader never writes the user's config.
 	 */
-	private ensureMixtures(registry: ModelRegistry, cwd: string): Promise<MixtureRoster | undefined> {
-		if (!hasFeature("mixtures")) return Promise.resolve(undefined);
+	private async leaseMixtures(registry: ModelRegistry, cwd: string): Promise<MixtureRoster | undefined> {
+		if (!hasFeature("mixtures")) return undefined;
 		const key = path.resolve(cwd);
-		let held = this.mixtureWorkspaces.get(key);
-		if (!held) {
-			held = (async () => {
-				const agentDir = sdk().getAgentDir();
-				const settings = await sdk().Settings.loadReadOnly({ cwd: key, agentDir });
-				const workspace = await feature("mixtures").MixtureWorkspace.retain(`npi-deck:model-picker:${key}`, { cwd: key, agentDir, registry, settings });
-				return { find: (name: string) => workspace.scope.find(name), release: () => workspace.release() };
-			})().catch((err) => {
-				// retain drops its own hold when discovery fails; retry on the next call.
-				this.mixtureWorkspaces.delete(key);
-				log.warn(`mixture discovery failed for ${key}; picker lists no mixtures there`, err);
-				return undefined;
-			});
-			this.mixtureWorkspaces.set(key, held);
+		try {
+			const agentDir = sdk().getAgentDir();
+			const settings = await sdk().Settings.loadReadOnly({ cwd: key, agentDir });
+			// A unique owner per request: concurrent requests must not release each other's hold.
+			const workspace = await feature("mixtures").MixtureWorkspace.retain(`npi-deck:request:${crypto.randomUUID()}`, { cwd: key, agentDir, registry, settings });
+			return { find: (name: string) => workspace.scope.find(name), release: () => workspace.release() };
+		} catch (err) {
+			// retain drops its own hold when discovery fails.
+			log.warn(`mixture discovery failed for ${key}; no mixtures listed there`, err);
+			return undefined;
 		}
-		return held;
 	}
 
 	async dispose(): Promise<void> {
@@ -468,8 +474,6 @@ export class InProcessAgentBridge implements AgentBridge {
 		);
 		await Promise.all(disposals);
 		this.active.clear();
-		for (const held of this.mixtureWorkspaces.values()) (await held)?.release();
-		this.mixtureWorkspaces.clear();
 	}
 
 	/** Called by the WS hub when a connection subscribes. Pin the session against the reaper. */
@@ -654,7 +658,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			cwd,
 			sessionId,
 			getModelRegistry: () => this.ensureModelRegistry(),
-			getMixtureRoster: (registry) => this.ensureMixtures(registry, cwd),
+			leaseMixtures: (registry) => this.leaseMixtures(registry, cwd),
 			planBridge,
 			onDispose: () => {
 				uiBridge.dispose();
@@ -872,7 +876,7 @@ export class InProcessSessionHandle implements SessionHandle {
 	private session: AgentSession;
 	private readonly sessionManager: SessionManager;
 	private readonly modelRegistryRef: () => Promise<ModelRegistry>;
-	private readonly mixtureRoster: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
+	private readonly mixtureLease: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
 	private readonly planBridge: PlanModeBridge;
 	private listeners = new Set<EventListener>();
 	private onDisposeCallback: () => void;
@@ -898,8 +902,8 @@ export class InProcessSessionHandle implements SessionHandle {
 		cwd: string;
 		sessionId: string;
 		getModelRegistry: () => Promise<ModelRegistry>;
-		/** This session's workspace mixtures; absent in tests that never select one. */
-		getMixtureRoster?: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
+		/** Request-scoped lease on this session's workspace mixtures; absent in tests that never select one. */
+		leaseMixtures?: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
 		planBridge: PlanModeBridge;
 		onDispose: () => void;
 	}) {
@@ -908,7 +912,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		this.cwd = args.cwd;
 		this.sessionId = args.sessionId;
 		this.modelRegistryRef = args.getModelRegistry;
-		this.mixtureRoster = args.getMixtureRoster ?? (async () => undefined);
+		this.mixtureLease = args.leaseMixtures ?? (async () => undefined);
 		this.planBridge = args.planBridge;
 		this.onDisposeCallback = args.onDispose;
 	}
@@ -1044,9 +1048,21 @@ export class InProcessSessionHandle implements SessionHandle {
 
 	async setModel(ref: ModelRef): Promise<void> {
 		const registry = await this.modelRegistryRef();
-		if (ref.provider === "mixture" && !(await this.mixtureRoster(registry))?.find(ref.id)) {
-			throw new Error(`mixture/${ref.id} is not defined in ${this.cwd}`);
+		const lease = ref.provider === "mixture" ? await this.mixtureLease(registry) : undefined;
+		try {
+			if (ref.provider === "mixture" && !lease?.find(ref.id)) {
+				throw new Error(`mixture/${ref.id} is not defined in ${this.cwd}`);
+			}
+			await this.applyModel(registry, ref);
+		} finally {
+			lease?.release();
 		}
+		// Synthetic event so WS subscribers refresh the session header's model
+		// label without waiting for the next assistant turn.
+		this.emit({ type: "session_updated", snapshot: this.snapshot() } as unknown as AgentSessionEventJson);
+	}
+
+	private async applyModel(registry: ModelRegistry, ref: ModelRef): Promise<void> {
 		const model = registry.find(ref.provider, ref.id);
 		if (!model) throw new Error(`unknown model: ${ref.provider}/${ref.id}`);
 		if (!registry.hasConfiguredAuth(model)) {
@@ -1059,9 +1075,6 @@ export class InProcessSessionHandle implements SessionHandle {
 			throw new Error("session.setModel is not available on this SDK build");
 		}
 		await s.setModel(model);
-		// Synthetic event so WS subscribers refresh the session header's model
-		// label without waiting for the next assistant turn.
-		this.emit({ type: "session_updated", snapshot: this.snapshot() } as unknown as AgentSessionEventJson);
 	}
 
 	async dispatchDeckSlashCommand(text: string): Promise<SlashDispatchResult> {
