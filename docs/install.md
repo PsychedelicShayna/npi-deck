@@ -48,12 +48,17 @@ bun scripts/neopi-setup.ts <sha>      # another commit
 bun scripts/neopi-setup.ts --path DIR # an existing NeoPi tree, prepared in place
 ```
 
+If dependencies are already provisioned in the target tree, pass
+`--skip-install` to avoid any package-manager operation. The script checks that
+the coding-agent workspace link resolves inside that tree; the caller remains
+responsible for matching the tree's lockfile and dependency versions.
+
 The script:
 
 1. Adds a detached worktree at `~/.npi-deck/neopi/<sha>` from the NeoPi
    checkout (`--source`, or `NPI_DECK_NEOPI_SOURCE`).
-2. Runs `bun install --frozen-lockfile --ignore-scripts` and `gen:tool-views`
-   inside it.
+2. Runs `bun install --frozen-lockfile --ignore-scripts` unless
+   `--skip-install` was passed, then runs `gen:tool-views` inside the tree.
 3. Links in a prebuilt `pi_natives` addon whose version sentinel matches the
    tree's `packages/natives` version. It searches `--native-dir` (repeatable)
    or `NPI_DECK_NATIVE_DIRS` (`:`-separated). `--copy` copies the file

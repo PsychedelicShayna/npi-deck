@@ -13,10 +13,11 @@
  *   --copy                copy the addon into the tree instead of symlinking it
  *   --build-native        run the tree's build:native when no matching addon is found
  *   --tsconfig            write tsconfig.neopi.json even when the tree is not the pinned commit
+ *   --skip-install        use an already prepared node_modules; no package fetch/install
  *
  * Env NPI_DECK_HOME overrides ~/.npi-deck.
  *
- * Steps: worktree (idempotent) → bun install --frozen-lockfile --ignore-scripts → gen:tool-views →
+ * Steps: worktree (idempotent) → frozen install (unless skipped) → gen:tool-views →
  * native addon with a verified version sentinel → register in <home>/config.yml → tsconfig.neopi.json.
  */
 import {
@@ -91,6 +92,7 @@ const { values: opts, positionals } = parseArgs({
 		"native-dir": { type: "string", multiple: true },
 		copy: { type: "boolean", default: false },
 		"build-native": { type: "boolean", default: false },
+		"skip-install": { type: "boolean", default: false },
 		tsconfig: { type: "boolean", default: false },
 		help: { type: "boolean", short: "h", default: false },
 	},
@@ -134,9 +136,19 @@ if (opts.path) {
 }
 const shortSha = capture(["git", "-C", tree, "rev-parse", "--short=10", "HEAD"]) ?? fullSha.slice(0, 10);
 
-// ---- 2. Dependencies and generated sources ---------------------------------
-step("installing the tree's dependencies");
-run(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], tree);
+// A caller can reuse a known dependency tree without contacting any package registry.
+// Require the local workspace package to resolve into this tree, not an older pin.
+if (opts["skip-install"]) {
+	const workspace = path.join(tree, "node_modules/@oh-my-pi/pi-coding-agent");
+	if (!existsSync(path.join(tree, "node_modules")) || !existsSync(workspace) ||
+		realpathSync(workspace) !== path.join(tree, "packages/coding-agent")) {
+		die("--skip-install requires prepared node_modules with workspace links into this tree");
+	}
+	step("reusing prepared dependencies (--skip-install)");
+} else {
+	step("installing the tree's dependencies");
+	run(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], tree);
+}
 step("generating tool views");
 run(["bun", "run", "gen:tool-views"], tree);
 
