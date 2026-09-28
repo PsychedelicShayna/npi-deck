@@ -18,7 +18,7 @@ afterEach(() => {
 	server = null;
 });
 
-function fakeDeck(script: Script, idleTimeoutMs?: number): DeckClient {
+function fakeDeck(script: Script, idleTimeoutMs?: number, onFrame?: (frame: { type: string; approved?: boolean; feedback?: string }) => ServerFrame[]): DeckClient {
 	server = Bun.serve({
 		port: 0,
 		fetch(req, srv) {
@@ -27,11 +27,12 @@ function fakeDeck(script: Script, idleTimeoutMs?: number): DeckClient {
 		},
 		websocket: {
 			message(ws, raw) {
-				const frame = JSON.parse(String(raw)) as { type: string; sessionId: string; text?: string };
+				const frame = JSON.parse(String(raw)) as { type: string; sessionId: string; text?: string; approved?: boolean; feedback?: string };
 				if (frame.type === "subscribe") {
 					ws.send(JSON.stringify({ type: "subscribed", sessionId: frame.sessionId, snapshot: {} }));
 					return;
 				}
+				for (const out of onFrame?.(frame) ?? []) ws.send(JSON.stringify(out));
 				if (frame.type === "prompt") {
 					for (const out of script(frame.text ?? "")) ws.send(JSON.stringify(out));
 				}
@@ -78,6 +79,20 @@ describe("DeckClient.promptSession", () => {
 		);
 		expect(await deck.promptSession({ sessionId: SESSION, text: "/task list", onText: () => {} })).toBe("No tasks.");
 		expect(await deck.promptSession({ sessionId: SESSION, text: "hi", onText: () => {} })).toBe("hello");
+	});
+
+	test("rejects an unreviewable proposal instead of hanging the Telegram turn", async () => {
+		const sent: Array<{ type: string; approved?: boolean; feedback?: string }> = [];
+		const deck = fakeDeck(() => [{
+			type: "plan_proposed", sessionId: SESSION, proposalId: "p-1", planFilePath: "local://greeting-plan.md",
+			planContent: "# Greeting", suggestedTitle: "greeting",
+		}], 500, frame => {
+			sent.push(frame);
+			return frame.type === "plan_response" ? [assistant("Open the plan in the web UI."), event({ type: "agent_end" })] : [];
+		});
+		expect(await deck.promptSession({ sessionId: SESSION, text: "plan", onText: () => {} })).toBe("Open the plan in the web UI.");
+		expect(sent.some(frame => frame.type === "plan_response" && frame.approved === false && frame.feedback?.includes("web UI"))).toBe(true);
+		expect(sent.some(frame => frame.type === "set_plan_mode")).toBe(true);
 	});
 
 	test("a prompt that never completes fails after the idle timeout", async () => {

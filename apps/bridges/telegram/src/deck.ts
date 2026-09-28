@@ -85,6 +85,20 @@ export class DeckClient {
 					finish(new Error("deck websocket sent invalid json"));
 					return;
 				}
+				if (frame.type === "plan_proposed" && frame.sessionId === args.sessionId) {
+					// Telegram has no approval card. Release the blocked tool call
+					// rather than leave the chat waiting for the WS idle timeout.
+					ws.send(JSON.stringify({
+						type: "plan_response", sessionId: args.sessionId, proposalId: frame.proposalId,
+						approved: false, feedback: "Telegram cannot review plans. Tell the user to review this plan in the deck web UI.",
+					}));
+					ws.send(JSON.stringify({ type: "set_plan_mode", sessionId: args.sessionId, enabled: false }));
+					return;
+				}
+				if (frame.type === "subscribed" && frame.sessionId === args.sessionId && frame.snapshot.pendingPlanApproval) {
+					finish(new Error("Plan review is pending in the deck web UI; respond there before sending another Telegram prompt."));
+					return;
+				}
 				if (frame.type === "subscribed" && frame.sessionId === args.sessionId && !promptSent) {
 					promptSent = true;
 					ws.send(
