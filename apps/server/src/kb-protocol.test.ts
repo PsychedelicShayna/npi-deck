@@ -1,10 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
+import type { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 
+import { loadBackend, sdk } from "./backend/runtime.ts";
 import { KbProtocolHandler } from "./kb-protocol.ts";
 
 const ENV_KEYS = ["OMP_DECK_KB_ROOT", "HOME", "USERPROFILE"];
@@ -12,6 +13,10 @@ const ENV_KEYS = ["OMP_DECK_KB_ROOT", "HOME", "USERPROFILE"];
 let saved: Record<string, string | undefined>;
 let kbRoot: string;
 let router: InternalUrlRouter;
+
+beforeAll(async () => {
+	await loadBackend();
+});
 
 beforeEach(() => {
 	saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -37,13 +42,13 @@ beforeEach(() => {
 	);
 	writeFileSync(path.join(kbRoot, "tools", "x.md"), "x\n", "utf8");
 
-	InternalUrlRouter.resetForTests();
-	router = InternalUrlRouter.instance();
+	sdk().InternalUrlRouter.resetForTests();
+	router = sdk().InternalUrlRouter.instance();
 	router.register(new KbProtocolHandler());
 });
 
 afterEach(() => {
-	InternalUrlRouter.resetForTests();
+	sdk().InternalUrlRouter.resetForTests();
 	for (const k of ENV_KEYS) {
 		if (saved[k] === undefined) delete process.env[k];
 		else process.env[k] = saved[k];

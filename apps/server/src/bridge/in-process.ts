@@ -1,13 +1,5 @@
-import {
-	createAgentSession,
-	ModelRegistry,
-	SessionManager,
-	settings as ompSettings,
-	type AgentSession,
-} from "@oh-my-pi/pi-coding-agent";
-import { getEnvApiKey } from "@oh-my-pi/pi-ai";
-import { runExtensionCompact, runExtensionSetModel } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler";
-import { getSessionSlashCommands } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler";
+import type { AgentSession, CreateAgentSessionResult, ModelRegistry, SessionManager } from "@oh-my-pi/pi-coding-agent";
+import { sdk } from "../backend/runtime.ts";
 // `Model` is owned by `@oh-my-pi/pi-ai`, a transitive dep we don't bring in
 // directly. Treat it as opaque at the bridge boundary — we only ever pass it
 // back into the SDK's own methods.
@@ -18,7 +10,6 @@ type SdkModel = {
 	contextWindow?: number;
 	input?: unknown[];
 };
-import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
 import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
@@ -102,9 +93,9 @@ export class InProcessAgentBridge implements AgentBridge {
 	}
 
 	async createSession(opts: CreateSessionOpts): Promise<SessionHandle> {
-		const sessionManager = SessionManager.create(opts.cwd);
+		const sessionManager = sdk().SessionManager.create(opts.cwd);
 		const modelRegistry = await this.ensureModelRegistry();
-		const result = await createAgentSession({
+		const result = await sdk().createAgentSession({
 			cwd: opts.cwd,
 			sessionManager,
 			modelRegistry,
@@ -146,10 +137,10 @@ export class InProcessAgentBridge implements AgentBridge {
 	}
 
 	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
-		const sessionManager = await SessionManager.open(opts.sessionPath);
+		const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
 		const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
 		const modelRegistry = await this.ensureModelRegistry();
-		const result = await createAgentSession({
+		const result = await sdk().createAgentSession({
 			cwd,
 			sessionManager,
 			modelRegistry,
@@ -172,8 +163,8 @@ export class InProcessAgentBridge implements AgentBridge {
 
 	async listSessions(opts: { cwd?: string }): Promise<SessionSummary[]> {
 		const raw = opts.cwd
-			? await SessionManager.list(opts.cwd)
-			: await SessionManager.listAll();
+			? await sdk().SessionManager.list(opts.cwd)
+			: await sdk().SessionManager.listAll();
 		return raw.map((r: any) => summarize(r));
 	}
 
@@ -355,8 +346,8 @@ export class InProcessAgentBridge implements AgentBridge {
 			getActiveTools: () => s.getActiveToolNames(),
 			getAllTools: () => s.getAllToolNames(),
 			setActiveTools: (toolNames: string[]) => s.setActiveToolsByName(toolNames),
-			getCommands: () => getSessionSlashCommands(s as never),
-			setModel: (model: unknown) => runExtensionSetModel(s as never, model as never),
+			getCommands: () => sdk().getSessionSlashCommands(s as never),
+			setModel: (model: unknown) => sdk().runExtensionSetModel(s as never, model as never),
 			getThinkingLevel: () => s.thinkingLevel,
 			setThinkingLevel: (level: unknown) => s.setThinkingLevel(level),
 			getSessionName: () => s.sessionManager.getSessionName(),
@@ -374,7 +365,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			getContextUsage: () => s.getContextUsage(),
 			getSystemPrompt: () => s.systemPrompt,
 			compact: (instructionsOrOptions: unknown) =>
-				runExtensionCompact(s as never, instructionsOrOptions as never),
+				sdk().runExtensionCompact(s as never, instructionsOrOptions as never),
 		};
 
 		try {
@@ -393,7 +384,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		session: AgentSession,
 		cwd: string,
 		sessionManager: SessionManager,
-		setToolUIContext: import("@oh-my-pi/pi-coding-agent").CreateAgentSessionResult["setToolUIContext"],
+		setToolUIContext: CreateAgentSessionResult["setToolUIContext"],
 	): InProcessSessionHandle {
 		const sessionId = (session as any).sessionId as string;
 		const uiBridge = new ExtensionUIBridge(sessionId);
@@ -807,7 +798,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		const runtime = {
 			session: this.session,
 			sessionManager: this.sessionManager,
-			settings: ompSettings,
+			settings: sdk().settings,
 			cwd: this.cwd,
 			output: (line: string) => {
 				if (line) chunks.push(line);
@@ -817,6 +808,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		};
 		let result: unknown;
 		try {
+			const { executeAcpBuiltinSlashCommand } = sdk();
 			result = await executeAcpBuiltinSlashCommand(text, runtime as unknown as Parameters<typeof executeAcpBuiltinSlashCommand>[1]);
 		} catch (err) {
 			const message = `Slash command error: ${String((err as Error).message ?? err)}`;
@@ -966,11 +958,11 @@ export class InProcessSessionHandle implements SessionHandle {
 		targetIdx: number,
 		replace: { text: string; images?: import("@omp-deck/protocol").ImageAttachment[] } | undefined,
 	): Promise<void> {
-		const sdk = this.session as unknown as {
+		const queueApi = this.session as unknown as {
 			popLastQueuedMessage?: () => string | undefined;
 			isStreaming?: boolean;
 		};
-		if (typeof sdk.popLastQueuedMessage !== "function") {
+		if (typeof queueApi.popLastQueuedMessage !== "function") {
 			throw new Error("session.popLastQueuedMessage is not available on this SDK build");
 		}
 		// Capture survivors with original ids preserved. The edited entry
@@ -995,7 +987,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		// Synchronously drain the SDK queue. popLastQueuedMessage is sync;
 		// no microtask boundary inside this loop.
 		while (this.queuedMessageCount() > 0) {
-			sdk.popLastQueuedMessage();
+			queueApi.popLastQueuedMessage();
 		}
 		// Kick off re-enqueues synchronously so each `session.prompt` sync
 		// prelude sees `isStreaming = true`. Collect promises; await later.
@@ -1027,21 +1019,21 @@ export class InProcessSessionHandle implements SessionHandle {
 	}
 
 	private readLastQueuedText(behavior: "steer" | "followUp"): string | undefined {
-		const sdk = this.session as unknown as {
+		const queueApi = this.session as unknown as {
 			getQueuedMessages?: () => { steering: string[]; followUp: string[] };
 		};
-		if (typeof sdk.getQueuedMessages !== "function") return undefined;
-		const q = sdk.getQueuedMessages();
+		if (typeof queueApi.getQueuedMessages !== "function") return undefined;
+		const q = queueApi.getQueuedMessages();
 		const bucket = behavior === "steer" ? q.steering : q.followUp;
 		return bucket[bucket.length - 1];
 	}
 
 	private readQueuedTextsByBehavior(): { steering: string[]; followUp: string[] } {
-		const sdk = this.session as unknown as {
+		const queueApi = this.session as unknown as {
 			getQueuedMessages?: () => { steering: string[]; followUp: string[] };
 		};
-		if (typeof sdk.getQueuedMessages !== "function") return { steering: [], followUp: [] };
-		return sdk.getQueuedMessages();
+		if (typeof queueApi.getQueuedMessages !== "function") return { steering: [], followUp: [] };
+		return queueApi.getQueuedMessages();
 	}
 
 	/**
@@ -1246,7 +1238,7 @@ function modelInfoFromSdk(
 	//     — see credential-quality.ts and issue #4.
 	let isAvailable = hasAuth;
 	if (isAvailable && !usingOAuth) {
-		const envValue = getEnvApiKey(provider);
+		const envValue = sdk().getEnvApiKey(provider);
 		// Only suppress when the env-var IS the credential. An empty env var
 		// with `hasConfiguredAuth=true` means auth came from somewhere else
 		// (auth.db non-OAuth entry, keyless provider, foundry, etc.) — trust

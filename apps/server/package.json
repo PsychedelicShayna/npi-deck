@@ -8,7 +8,7 @@
 		"dev": "bun --hot src/index.ts",
 		"start": "bun src/index.ts",
 		"build": "bun build src/index.ts --target=bun --outdir=dist --minify",
-		"typecheck": "tsc --noEmit",
+		"typecheck": "bun ../../scripts/check-sdk-imports.ts && bun ../../scripts/tsgo.ts --noEmit -p .",
 		"test": "bun test"
 	},
 	"dependencies": {

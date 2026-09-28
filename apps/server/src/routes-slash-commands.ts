@@ -3,8 +3,7 @@ import * as path from "node:path";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 
 import { Hono } from "hono";
-import { ACP_BUILTIN_SLASH_COMMANDS } from "@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins";
-import { BUILTIN_SLASH_COMMAND_DEFS } from "@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry";
+import { sdk } from "./backend/runtime.ts";
 import type {
 	ListSlashCommandsResponse,
 	SlashCommand,
@@ -165,6 +164,7 @@ function parseFrontmatter(text: string): {
  */
 function loadBuiltinSlashCommands(): SlashCommand[] {
 	const out: SlashCommand[] = [];
+	const { ACP_BUILTIN_SLASH_COMMANDS, BUILTIN_SLASH_COMMAND_DEFS } = sdk();
 	const acpEnabled = new Set<string>(ACP_BUILTIN_SLASH_COMMANDS.map((c) => c.name));
 	for (const def of BUILTIN_SLASH_COMMAND_DEFS) {
 		// Skip TUI-only commands (selectors, wizards) — they'd land in the

@@ -4,14 +4,9 @@ import type {
 	MarketplaceCatalogEntry,
 	MarketplaceSource,
 } from "@omp-deck/protocol";
-import {
-	MarketplaceManager,
-	getInstalledPluginsRegistryPath,
-	getMarketplacesCacheDir,
-	getMarketplacesRegistryPath,
-	getPluginsCacheDir,
-	parsePluginId,
-} from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
+import type { MarketplaceManager } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
+
+import { sdk } from "./backend/runtime.ts";
 
 import { logger } from "./log.ts";
 
@@ -27,6 +22,13 @@ export class MarketplaceService {
 
 	private getManager(): MarketplaceManager {
 		if (this.manager) return this.manager;
+		const {
+			MarketplaceManager,
+			getInstalledPluginsRegistryPath,
+			getMarketplacesCacheDir,
+			getMarketplacesRegistryPath,
+			getPluginsCacheDir,
+		} = sdk();
 		this.manager = new MarketplaceManager({
 			marketplacesRegistryPath: getMarketplacesRegistryPath(),
 			installedRegistryPath: getInstalledPluginsRegistryPath(),
@@ -47,7 +49,7 @@ export class MarketplaceService {
 		const summaries = await mgr.listInstalledPlugins();
 		const installed: InstalledPluginInfo[] = [];
 		for (const summary of summaries) {
-			const parsed = parsePluginId(summary.id);
+			const parsed = sdk().parsePluginId(summary.id);
 			if (!parsed) continue;
 			for (const entry of summary.entries) {
 				installed.push({
@@ -75,7 +77,7 @@ export class MarketplaceService {
 
 		const installed: InstalledPluginInfo[] = [];
 		for (const summary of installedSummaries) {
-			const parsed = parsePluginId(summary.id);
+			const parsed = sdk().parsePluginId(summary.id);
 			if (!parsed) continue;
 			for (const entry of summary.entries) {
 				installed.push({

@@ -18,8 +18,8 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import * as path from "node:path";
 
-import { loadCapability } from "@oh-my-pi/pi-coding-agent/capability";
-import { skillCapability, type Skill as SdkSkill } from "@oh-my-pi/pi-coding-agent/capability/skill";
+import type { Skill as SdkSkill } from "@oh-my-pi/pi-coding-agent/capability/skill";
+import { sdk } from "./backend/runtime.ts";
 
 import type {
 	ListSkillsResponse,
@@ -83,6 +83,7 @@ export class SkillsService {
 		const resolvedCwd = cwd?.trim() || this.config.defaultCwd;
 		const pluginIndex = await this.buildPluginIndex();
 
+		const { loadCapability, skillCapability } = sdk();
 		const result = await loadCapability<SdkSkill>(skillCapability.id, { cwd: resolvedCwd });
 
 		const skills: SkillSummary[] = [];

@@ -25,7 +25,7 @@ import { existsSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { getPluginsCacheDir } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
+import { sdk } from "./backend/runtime.ts";
 
 import { broadcastBus } from "./broadcast-bus.ts";
 import type { Config } from "./config.ts";
@@ -52,7 +52,7 @@ export function startSkillsWatcher(config: Config): () => void {
 		// project cwds get coverage by the manual-refetch path via WS.
 		path.join(config.defaultCwd, ".omp", "skills"),
 		// Marketplace plugin cache (Claude-plugin format)
-		getPluginsCacheDir(),
+		sdk().getPluginsCacheDir(),
 	];
 
 	const watchers: FSWatcher[] = [];

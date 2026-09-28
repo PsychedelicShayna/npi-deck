@@ -18,16 +18,15 @@ import { resolveBunExecutable } from "./runtime-bun.ts";
 import { buildRouter } from "./routes.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
 import { SkillsService } from "./skills-service.ts";
 import { startSkillsWatcher } from "./skills-watcher.ts";
 import { KbService, resolveKbRoot } from "./kb-service.ts";
 import { startKbWatcher } from "./kb-watcher.ts";
-import { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls";
 import { KbProtocolHandler } from "./kb-protocol.ts";
 import { installStarterSkills } from "./starter-skills.ts";
 import { installStarterExtensions } from "./starter-extensions.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
+import { formatDiagnostic, loadBackend, sdk } from "./backend/runtime.ts";
 import {
 	BrowserNotificationChannel,
 	notificationService,
@@ -45,6 +44,27 @@ async function main(): Promise<void> {
 		webDist: config.webDist,
 		devMode: config.devMode,
 	});
+
+	// Load the NeoPi backend before anything touches the SDK. Degraded
+	// (backendless) mode is W12; until then a missing or incomplete backend
+	// is fatal, with every missing manifest export named.
+	try {
+		const backend = await loadBackend();
+		log.info(`NeoPi backend loaded`, {
+			path: backend.identity.path,
+			version: backend.identity.version,
+			commit: backend.identity.commit,
+			source: backend.selection.source,
+		});
+		for (const [name, status] of Object.entries(backend.features)) {
+			if (!status.available) {
+				log.warn(`backend feature ${name} unavailable: ${status.diagnostics.map(formatDiagnostic).join("; ")}`);
+			}
+		}
+	} catch (err) {
+		log.error(`cannot load the NeoPi backend: ${(err as Error).message ?? err}`);
+		process.exit(1);
+	}
 
 	// Tell the maintenance-gate extension (~/.omp/agent/extensions/maintenance-gate)
 	// that every session this server spawns IS a deck-managed org root, regardless
@@ -67,17 +87,18 @@ async function main(): Promise<void> {
 	// configured KB root (OMP_DECK_KB_ROOT or ~/kb) is served over REST.
 	// MUST run before the first `createAgentSession` — the router is a
 	// process singleton consulted by the `read` tool on every call.
-	InternalUrlRouter.instance().register(new KbProtocolHandler());
+	sdk().InternalUrlRouter.instance().register(new KbProtocolHandler());
 
 	openDb({ path: config.dbPath });
 
-	// Initialize the SDK's global `theme` so tools that reference symbols
+	// Initialize pi-tui's global `theme` so tools that reference symbols
 	// (e.g. ask -> getDoneOptionLabel -> `theme.status.success`) don't throw
 	// "undefined is not an object (evaluating 'theme.status')" when invoked
 	// from the deck. `dark` is a built-in theme JSON so no filesystem touch.
 	// Without this the `ask` tool fails at the first `askSingleQuestion`
 	// call, even though the deck UI doesn't render any SDK glyphs.
 	try {
+		const { getThemeByName, setThemeInstance } = sdk();
 		const darkTheme = await getThemeByName("dark");
 		if (darkTheme) setThemeInstance(darkTheme);
 	} catch (err) {
