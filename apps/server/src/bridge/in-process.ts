@@ -152,7 +152,10 @@ export class InProcessAgentBridge implements AgentBridge {
 				if (a.handle.sessionFile === opts.sessionPath) return a.handle;
 			}
 			const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
-			const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
+			// Absolute, like createSession: the SDK session and the deck's mixture
+			// lease must probe the same MIXTURES.toml search path even when an
+			// older session header stored a relative cwd.
+			const cwd = path.resolve((sessionManager.getCwd?.() as string | undefined) ?? process.cwd());
 			const handle = await this.open(cwd, sessionManager, undefined, opts.mcpServersAllowed);
 			log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
 			return handle;
@@ -166,17 +169,6 @@ export class InProcessAgentBridge implements AgentBridge {
 		// user's NeoPi config or change their CLI sessions.
 		const core = sdk();
 		const settings = await core.Settings.loadIsolated({ cwd, agentDir: core.getAgentDir() });
-		// createAgentSession resolves an explicit model before it retains its own
-		// mixture workspace, so hold this workspace's scope across session creation.
-		// A mixture another workspace registered on the shared registry is refused.
-		let mixtureLease: MixtureRoster | undefined;
-		if (model?.provider === "mixture") {
-			mixtureLease = await this.leaseMixtures(modelRegistry, cwd);
-			if (!mixtureLease?.find(model.id)) {
-				mixtureLease?.release();
-				throw new Error(`mixture/${model.id} is not defined in ${cwd}`);
-			}
-		}
 		let deckDefaultModel: ReturnType<ModelRegistry["find"]>;
 		if (fresh && !model) {
 			deckDefaultModel = firstAuthenticatedModel(modelRegistry, DEFAULT_MODEL_CANDIDATES);
@@ -214,6 +206,17 @@ export class InProcessAgentBridge implements AgentBridge {
 		// config reload starts roster advisors or NeoPi's legacy "default"
 		// advisor; a selection turns the runtime on through the session API.
 		if (hasFeature("advisors")) feature("advisors").cfgAdvisorEnabled.override(settings, false);
+		// createAgentSession resolves an explicit model before it retains its own
+		// mixture workspace, so hold this workspace's scope across session creation.
+		// A mixture another workspace registered on the shared registry is refused.
+		let mixtureLease: MixtureRoster | undefined;
+		if (model?.provider === "mixture") {
+			mixtureLease = await this.leaseMixtures(modelRegistry, cwd);
+			if (!mixtureLease?.find(model.id)) {
+				mixtureLease?.release();
+				throw new Error(`mixture/${model.id} is not defined in ${cwd}`);
+			}
+		}
 		let result: CreateAgentSessionResult;
 		try {
 			result = await sdk().createAgentSession({
