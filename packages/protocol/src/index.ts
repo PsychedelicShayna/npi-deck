@@ -46,6 +46,8 @@ export interface CreateSessionRequest {
 	cwd: string;
 	resumeFromPath?: string;
 	model?: ModelRef;
+	/** Per-session literal MCP server names; absent inherits backend settings, [] disables MCP. */
+	mcpServersAllowed?: string[];
 }
 
 export interface CreateSessionResponse {

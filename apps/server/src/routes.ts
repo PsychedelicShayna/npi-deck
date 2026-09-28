@@ -137,14 +137,19 @@ export function buildRouter(
 			return c.json({ error: "invalid json body" }, 400);
 		}
 
+		if (body.mcpServersAllowed !== undefined &&
+			(!Array.isArray(body.mcpServersAllowed) || body.mcpServersAllowed.some(name => typeof name !== "string"))) {
+			return c.json({ error: "mcpServersAllowed must be an array of server names" }, 400);
+		}
 		const cwd = body.cwd?.trim() || config.defaultCwd;
 
 		try {
 			const handle = body.resumeFromPath
-				? await bridge.resumeSession({ sessionPath: body.resumeFromPath })
+				? await bridge.resumeSession({ sessionPath: body.resumeFromPath, mcpServersAllowed: body.mcpServersAllowed })
 				: await bridge.createSession({
 						cwd,
 						...(body.model ? { model: body.model } : {}),
+						mcpServersAllowed: body.mcpServersAllowed,
 					});
 			recordSessionBackend(handle.sessionFile);
 			const resp: CreateSessionResponse = {
