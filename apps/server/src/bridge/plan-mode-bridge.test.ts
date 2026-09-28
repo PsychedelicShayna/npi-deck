@@ -2,15 +2,23 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { loadBackend } from "../backend/runtime.ts";
-import { feature } from "../backend/runtime.ts";
+import { feature, loadBackend, resolveBackendSelection } from "../backend/runtime.ts";
 import { PlanModeBridge, type PlanModeSession } from "./plan-mode-bridge.ts";
 
+const backend = resolveBackendSelection();
 const root = await mkdtemp(path.join(os.tmpdir(), "deck-plan-test-"));
+const priorHome = process.env.HOME;
+const priorAgentDir = process.env.PI_CODING_AGENT_DIR;
 process.env.HOME = root;
 process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
-await loadBackend({ id: null, path: "/home/shayna/source/github/PsychedelicShayna/neopi", source: "env" });
-afterAll(async () => rm(root, { recursive: true, force: true }));
+await loadBackend(backend);
+afterAll(async () => {
+	if (priorHome === undefined) delete process.env.HOME;
+	else process.env.HOME = priorHome;
+	if (priorAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = priorAgentDir;
+	await rm(root, { recursive: true, force: true });
+});
 
 function fixture() {
 	const journal: Array<{ mode: string; data?: Record<string, unknown> }> = [];
