@@ -31,6 +31,7 @@ import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
 import { looksLikePlaceholderKey } from "../credential-quality.ts";
 import { notificationService } from "../notifications/index.ts";
+import { workRegistry } from "../work-registry.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import type {
@@ -60,6 +61,8 @@ interface Active {
 	 * The reaper never disposes a session while this is set.
 	 */
 	turnInFlight: boolean;
+	compacting: boolean;
+	releaseWork?: () => void;
 	/** Set of WS connection ids currently subscribed. Reaping requires zero subscribers. */
 	subscribers: Set<string>;
 	/** Per-session bridge from SDK `ExtensionUIContext` calls to deck WS frames. */
@@ -92,24 +95,28 @@ export class InProcessAgentBridge implements AgentBridge {
 	}
 
 	async createSession(opts: CreateSessionOpts): Promise<SessionHandle> {
-		const sessionManager = sdk().SessionManager.create(opts.cwd);
-		const handle = await this.open(opts.cwd, sessionManager, opts.model);
-		log.info(`created session ${handle.sessionId} cwd=${opts.cwd}`);
-		return handle;
+		const release = workRegistry.admit("session", `create:${crypto.randomUUID()}`);
+		try {
+			const sessionManager = sdk().SessionManager.create(opts.cwd);
+			const handle = await this.open(opts.cwd, sessionManager, opts.model);
+			log.info(`created session ${handle.sessionId} cwd=${opts.cwd}`);
+			return handle;
+		} finally { release(); }
 	}
 
 	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
-		// A session already live in this process is reused: a second SDK
-		// session on the same file would fork its state and start its MCP
-		// servers again.
-		for (const a of this.active.values()) {
-			if (a.handle.sessionFile === opts.sessionPath) return a.handle;
-		}
-		const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
-		const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
-		const handle = await this.open(cwd, sessionManager, undefined);
-		log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
-		return handle;
+		const release = workRegistry.admit("session", `resume:${crypto.randomUUID()}`);
+		try {
+			// A live session is reused rather than opening the same file twice.
+			for (const a of this.active.values()) {
+				if (a.handle.sessionFile === opts.sessionPath) return a.handle;
+			}
+			const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
+			const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
+			const handle = await this.open(cwd, sessionManager, undefined);
+			log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
+			return handle;
+		} finally { release(); }
 	}
 
 	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined): Promise<InProcessSessionHandle> {
@@ -428,6 +435,8 @@ export class InProcessAgentBridge implements AgentBridge {
 			onDispose: () => {
 				uiBridge.dispose();
 				planBridge.dispose();
+				const entry = this.active.get(sessionId);
+				entry?.releaseWork?.();
 				this.active.delete(sessionId);
 			},
 		});
@@ -439,7 +448,14 @@ export class InProcessAgentBridge implements AgentBridge {
 			const entry = this.active.get(sessionId);
 			if (entry) {
 				entry.lastActivityAt = Date.now();
-				entry.turnInFlight = nextTurnInFlight(entry.turnInFlight, event as { type?: string; isTerminal?: boolean });
+				const wasBusy = entry.turnInFlight || entry.compacting;
+				const next = nextTurnInFlight(entry.turnInFlight, event as { type?: string; isTerminal?: boolean });
+				if (type === "auto_compaction_start") entry.compacting = true;
+				if (type === "auto_compaction_end") entry.compacting = false;
+				const isBusy = next || entry.compacting;
+				if (!wasBusy && isBusy) entry.releaseWork = workRegistry.admit("session", sessionId);
+				else if (wasBusy && !isBusy) { entry.releaseWork?.(); entry.releaseWork = undefined; }
+				entry.turnInFlight = next;
 			}
 			// NeoPi's model_changed carries no payload; re-send the header fields
 			// so the UI follows model switches made by the agent or a slash command.
@@ -493,6 +509,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			unsubscribe,
 			lastActivityAt: Date.now(),
 			turnInFlight: false,
+			compacting: false,
 			subscribers: new Set(),
 			uiBridge,
 			planBridge,
