@@ -8,6 +8,7 @@ import type {
 	ListWorkspacesResponse,
 	ModelRef,
 	SessionTranscriptResponse,
+	SubagentTranscriptResponse,
 } from "@npi-deck/protocol";
 
 const BASE = "/api";
@@ -52,6 +53,12 @@ export const api = {
 	},
 	abortSession(id: string): Promise<{ ok: true }> {
 		return request(`/sessions/${encodeURIComponent(id)}/abort`, { method: "POST" });
+	},
+	getSubagentTranscript(sessionId: string, id: string, fromByte = 0): Promise<SubagentTranscriptResponse> {
+		return request(`/subagents/${encodeURIComponent(sessionId)}/${encodeURIComponent(id)}/transcript?fromByte=${fromByte}`);
+	},
+	abortSubagent(sessionId: string, id: string): Promise<{ ok: true }> {
+		return request(`/subagents/${encodeURIComponent(sessionId)}/${encodeURIComponent(id)}/abort`, { method: "POST" });
 	},
 	renameSession(id: string, name: string): Promise<{ ok: true; sessionId: string }> {
 		return request(`/sessions/${encodeURIComponent(id)}`, {

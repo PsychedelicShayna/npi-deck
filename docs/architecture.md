@@ -56,7 +56,7 @@ The WS hub maintains:
 
 - **Per-connection subscriptions** — `Set<sessionId>` per WS. Used to
   forward `session_event` frames + per-session bridge frames (UI dialog,
-  plan-mode).
+  plan-mode, subagent tree).
 - **A global connection set** — `Set<ServerWebSocket>`. Used for broadcast
   frames (`tasks_changed`, `skills_changed`, `kb_changed`, `heartbeat`,
   `notification`) sent to every open client.
@@ -66,6 +66,16 @@ producer side. Routes (`routes-tasks.ts`, `routes-skills.ts`, …) and deck
 slash commands (`deck-slash-commands.ts`) call
 `broadcastBus.broadcast(frame)`. The hub subscribes once at construction
 and relays to every open connection.
+
+Each in-process root subscribes to its own NeoPi `subagentEventBus` and joins
+task lifecycle/progress/event updates to the global `AgentRegistry` parentId
+chain. Only descendants of that root generation enter its `subagents_snapshot`
+frames. `GET /api/subagents/:sessionId/:id/transcript` reads the child JSONL
+incrementally; `POST /api/subagents/:sessionId/:id/abort` aborts the exact
+registered session and tombstones its ref. Both reject another session's child
+with 403. These routes do not resume parked agents or spawn a session while
+browsing. Subagents remain visible in the chat's collapsible read-only panel
+after completion; cross-process sessions are not part of this feature.
 
 ## Synthetic events
 

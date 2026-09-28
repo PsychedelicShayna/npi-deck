@@ -8,6 +8,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 ### Added
 
 - **`npi-deck` launcher** (#68, #72). `bin/npi-deck`, symlinked into `~/.local/bin`, starts the deck from any cwd. It builds the web bundle when stale and refuses a second instance. It runs the server as the systemd user service `npi-deck` in `neopi-deck.slice` with `KillMode=control-group`, so everything the server spawned dies with it, `kill -9` included. Ctrl-C on the launcher stops the unit, and the server stops if the launcher dies. Settings → Restart exits with status 75, which systemd restarts on. `--no-systemd` runs the server as a direct child under `setpriv --pdeathsig KILL`. Each server boot marks its descendants with `NPI_DECK_GEN`, and processes of dead generations are killed at the next boot and when the launcher's server is gone. See docs/install.md#the-npi-deck-launcher.
+- **Deck-hosted subagent tree** (#53). The chat panel shows each live root's nested child status and activity, opens an incremental read-only transcript, and confirms before aborting a child. Root-scoped WebSocket updates follow NeoPi's subagent bus and registry parent chain; transcript and abort routes reject another session's child with 403. Abort tombstones the exact registered agent and stops its work.
 
 ### Changed
 
