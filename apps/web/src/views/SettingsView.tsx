@@ -9,8 +9,6 @@ import type {
 	ListEnvSettingsResponse,
 	MaintenanceGateState,
 	NotificationLevel,
-	PreludeResponse,
-	StartCommand,
 } from "@npi-deck/protocol";
 import type { ProviderInfo } from "@npi-deck/protocol";
 
@@ -21,7 +19,7 @@ import { Modal } from "@/components/ui/Modal";
 import { OAuthFlowModal } from "@/components/settings/OAuthFlowModal";
 import { bridgesApi } from "@/lib/bridges-api";
 import { settingsApi } from "@/lib/settings-api";
-import { orientationApi } from "@/lib/orientation-api";
+import { startersApi } from "@/lib/starters-api";
 import { authApi } from "@/lib/auth-api";
 import { playNotificationTone } from "@/lib/audio";
 import { useNotificationPermission } from "@/lib/notifications";
@@ -33,7 +31,7 @@ const SECTIONS = [
 	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
 	{ id: "providers", label: "Providers", description: "OAuth sign-in and API-key state" },
 	{ id: "messaging", label: "Messaging", description: "Telegram and future chat bridges" },
-	{ id: "orientation", label: "Orientation", description: "Prelude, /start, maintenance gate" },
+	{ id: "starters", label: "Starters", description: "Opt-in starter extensions" },
 	{ id: "appearance", label: "Appearance", description: "Themes, colors, fonts" },
 	{ id: "workspaces", label: "Workspaces", description: "Pinned roots and display names" },
 	{ id: "notifications", label: "Notifications", description: "Idle alerts and quiet hours" },
@@ -88,8 +86,8 @@ export function SettingsView() {
 								<ProvidersSection />
 							) : selected === "messaging" ? (
 								<MessagingSection />
-							) : selected === "orientation" ? (
-								<OrientationSection />
+							) : selected === "starters" ? (
+								<StartersSection />
 							) : selected === "appearance" ? (
 								<AppearanceSection />
 							) : selected === "notifications" ? (
@@ -1134,264 +1132,20 @@ function ThemeSwatchStrip({ definition }: { definition: (typeof THEMES)[number] 
 }
 
 /**
- * Orientation section — surfaces the three artifacts that shape every deck
- * session so non-developer users can view and tweak them without touching
- * server source. See kb://system/imperatives-belong-in-orchestrator-not-prelude
- * for the prelude-vs-orchestrator architecture that motivated this surface.
+ * Starters section — config for opt-in starter extensions the deck manages.
+ * Today that is the maintenance gate.
  */
-function OrientationSection() {
+function StartersSection() {
 	return (
 		<div className="mx-auto max-w-5xl space-y-6">
 			<div>
-				<h1 className="text-xl font-semibold tracking-tight">Orientation</h1>
+				<h1 className="text-xl font-semibold tracking-tight">Starters</h1>
 				<p className="mt-1 max-w-3xl text-sm text-ink-3">
-					Three artifacts shape every deck session: the system-prompt prelude,
-					the <code className="font-mono text-xs">/start</code> orchestrator
-					fired on boot, and the maintenance-gate extension that nudges the
-					agent to capture work mid-session. Edit each in place; changes
-					take effect on the next session create (prelude) or the next slash
-					invocation (start) or the next gate evaluation (maintenance).
+					Opt-in starter extensions. Changes take effect on the extension&rsquo;s
+					next evaluation.
 				</p>
 			</div>
-			<PreludeCard />
-			<StartCommandCard />
 			<MaintenanceGateCard />
-		</div>
-	);
-}
-
-function PreludeCard() {
-	const [data, setData] = useState<PreludeResponse | null>(null);
-	const [draft, setDraft] = useState("");
-	const [loading, setLoading] = useState(true);
-	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | undefined>();
-	const [status, setStatus] = useState<string | undefined>();
-
-	async function refresh(): Promise<void> {
-		try {
-			const next = await orientationApi.getPrelude();
-			setData(next);
-			setDraft(next.override ?? next.default);
-			setError(undefined);
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setLoading(false);
-		}
-	}
-
-	useEffect(() => {
-		void refresh();
-	}, []);
-
-	const usingOverride = data ? data.override !== null : false;
-	const dirty = data ? draft !== (data.override ?? data.default) : false;
-
-	async function save(): Promise<void> {
-		setSaving(true);
-		try {
-			const next = await orientationApi.putPrelude({ value: draft });
-			setData(next);
-			setDraft(next.override ?? next.default);
-			setStatus("Saved. New sessions will use this prelude.");
-			setError(undefined);
-			window.setTimeout(() => setStatus(undefined), 3000);
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setSaving(false);
-		}
-	}
-
-	async function resetToDefault(): Promise<void> {
-		setSaving(true);
-		try {
-			const next = await orientationApi.putPrelude({ value: null });
-			setData(next);
-			setDraft(next.default);
-			setStatus("Override cleared. New sessions will use the bundled default.");
-			setError(undefined);
-			window.setTimeout(() => setStatus(undefined), 3000);
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setSaving(false);
-		}
-	}
-
-	return (
-		<div className="overflow-hidden rounded-md border border-line bg-paper">
-			<div className="border-b border-line bg-paper-2 px-3 py-2">
-				<div className="flex items-center gap-2">
-					<div className="meta">Prelude</div>
-					{usingOverride ? <Badge tone="accent">override</Badge> : <Badge tone="muted">default</Badge>}
-				</div>
-				<p className="mt-1 text-xs text-ink-3">
-					Prepended to every session&rsquo;s system prompt at{" "}
-					<code className="font-mono">createAgentSession</code>. Imperatives belong
-					in <code className="font-mono">/start</code>, not here&mdash; the prelude
-					is reference material that the orchestrator can rely on.
-				</p>
-				<div className="mt-1 font-mono text-2xs text-ink-3">
-					{data?.path ?? "..."}
-				</div>
-			</div>
-			<div className="space-y-3 p-4">
-				{error ? (
-					<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
-						{error}
-					</div>
-				) : null}
-				{status ? (
-					<div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 font-mono text-xs text-success">
-						{status}
-					</div>
-				) : null}
-				{loading ? (
-					<div className="text-sm text-ink-3">Loading...</div>
-				) : (
-					<>
-						<textarea
-							value={draft}
-							onChange={(e) => setDraft(e.target.value)}
-							spellCheck={false}
-							className="block min-h-[320px] w-full resize-y rounded-md border border-line bg-paper-2 px-3 py-2 font-mono text-xs leading-relaxed text-ink"
-						/>
-						<div className="flex flex-wrap items-center gap-2">
-							<Button size="sm" onClick={() => void save()} disabled={saving || !dirty}>
-								<Save className="h-3.5 w-3.5" />
-								Save
-							</Button>
-							<Button
-								size="sm"
-								variant="outline"
-								onClick={() => void resetToDefault()}
-								disabled={saving || !usingOverride}
-							>
-								<RotateCcw className="h-3.5 w-3.5" />
-								Reset to default
-							</Button>
-							{dirty ? (
-								<span className="font-mono text-2xs text-warn">Unsaved changes</span>
-							) : null}
-						</div>
-					</>
-				)}
-			</div>
-		</div>
-	);
-}
-
-function StartCommandCard() {
-	const [data, setData] = useState<StartCommand | null>(null);
-	const [description, setDescription] = useState("");
-	const [body, setBody] = useState("");
-	const [loading, setLoading] = useState(true);
-	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState<string | undefined>();
-	const [status, setStatus] = useState<string | undefined>();
-
-	async function refresh(): Promise<void> {
-		try {
-			const next = await orientationApi.getStartCommand();
-			setData(next);
-			setDescription(next.description);
-			setBody(next.body);
-			setError(undefined);
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setLoading(false);
-		}
-	}
-
-	useEffect(() => {
-		void refresh();
-	}, []);
-
-	const dirty = data ? description !== data.description || body !== data.body : false;
-
-	async function save(): Promise<void> {
-		setSaving(true);
-		try {
-			const next = await orientationApi.putStartCommand({ description, body });
-			setData(next);
-			setDescription(next.description);
-			setBody(next.body);
-			setStatus("Saved. Next /start invocation will use this body.");
-			setError(undefined);
-			window.setTimeout(() => setStatus(undefined), 3000);
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setSaving(false);
-		}
-	}
-
-	return (
-		<div className="overflow-hidden rounded-md border border-line bg-paper">
-			<div className="border-b border-line bg-paper-2 px-3 py-2">
-				<div className="flex items-center gap-2">
-					<div className="meta">/start orchestrator</div>
-					{data?.exists ? <Badge tone="default">on disk</Badge> : <Badge tone="warn">missing</Badge>}
-				</div>
-				<p className="mt-1 text-xs text-ink-3">
-					First user message fired on session boot. Re-read every invocation,
-					so saves take effect immediately. Numbered procedures here outrank
-					prelude imperatives by recency&mdash; put DO-THIS instructions in this
-					body, not in the prelude above.
-				</p>
-				<div className="mt-1 font-mono text-2xs text-ink-3">
-					{data?.path ?? "..."}
-				</div>
-			</div>
-			<div className="space-y-3 p-4">
-				{error ? (
-					<div className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
-						{error}
-					</div>
-				) : null}
-				{status ? (
-					<div className="rounded-md border border-success/30 bg-success/10 px-3 py-2 font-mono text-xs text-success">
-						{status}
-					</div>
-				) : null}
-				{loading ? (
-					<div className="text-sm text-ink-3">Loading...</div>
-				) : (
-					<>
-						<label className="block space-y-1">
-							<span className="meta">description</span>
-							<input
-								type="text"
-								value={description}
-								onChange={(e) => setDescription(e.target.value)}
-								placeholder="One-line summary (frontmatter description:)"
-								className="block w-full rounded-md border border-line bg-paper-2 px-3 py-2 font-mono text-xs text-ink"
-							/>
-						</label>
-						<label className="block space-y-1">
-							<span className="meta">body</span>
-							<textarea
-								value={body}
-								onChange={(e) => setBody(e.target.value)}
-								spellCheck={false}
-								className="block min-h-[280px] w-full resize-y rounded-md border border-line bg-paper-2 px-3 py-2 font-mono text-xs leading-relaxed text-ink"
-							/>
-						</label>
-						<div className="flex flex-wrap items-center gap-2">
-							<Button size="sm" onClick={() => void save()} disabled={saving || !dirty}>
-								<Save className="h-3.5 w-3.5" />
-								Save
-							</Button>
-							{dirty ? (
-								<span className="font-mono text-2xs text-warn">Unsaved changes</span>
-							) : null}
-						</div>
-					</>
-				)}
-			</div>
 		</div>
 	);
 }
@@ -1412,7 +1166,7 @@ function MaintenanceGateCard() {
 
 	async function refresh(): Promise<void> {
 		try {
-			const next = await orientationApi.getMaintenanceGate();
+			const next = await startersApi.getMaintenanceGate();
 			setData(next);
 			setDraft({
 				enabled: next.enabled,
@@ -1450,7 +1204,7 @@ function MaintenanceGateCard() {
 		}
 		setSaving(true);
 		try {
-			const next = await orientationApi.putMaintenanceGate({
+			const next = await startersApi.putMaintenanceGate({
 				enabled: draft.enabled,
 				minOpMsgs: parsedOp,
 				minReleaseAgeMs: parsedRel,

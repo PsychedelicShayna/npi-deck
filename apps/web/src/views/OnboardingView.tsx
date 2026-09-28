@@ -1,11 +1,10 @@
 /**
- * First-run wizard. Five steps:
+ * First-run wizard. Four steps:
  *
  *   1. Welcome           — value prop + intent
- *   2. Knowledge base    — scaffold ~/kb with README + system stubs
+ *   2. Knowledge base    — scaffold the kb root with a README
  *   3. Connect provider  — Claude / ChatGPT OAuth, or OpenRouter API key
- *   4. Auto-start prompt — write start.md + set NPI_DECK_AUTO_START
- *   5. Done              — handoff to chat
+ *   4. Done              — handoff to chat
  *
  * Every step is skippable; the wizard is escapable (top-right "Skip
  * setup" link nav to /). On any kind of completion (walked through OR
@@ -16,7 +15,7 @@
  * wizard manually from Settings doesn't pester.
  */
 import { useEffect, useState } from "react";
-import { BookOpen, CheckCircle2, ChevronRight, ExternalLink, KeyRound, Loader2, Sparkles, X } from "lucide-react";
+import { BookOpen, CheckCircle2, ChevronRight, ExternalLink, KeyRound, Loader2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import type { OnboardingState } from "@npi-deck/protocol";
@@ -29,13 +28,12 @@ import { settingsApi } from "@/lib/settings-api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
-type StepKey = "welcome" | "kb" | "provider" | "autostart" | "done";
+type StepKey = "welcome" | "kb" | "provider" | "done";
 
 const STEP_ORDER: ReadonlyArray<{ key: StepKey; title: string }> = [
 	{ key: "welcome", title: "Welcome" },
 	{ key: "kb", title: "Knowledge base" },
 	{ key: "provider", title: "Connect provider" },
-	{ key: "autostart", title: "Session greeting" },
 	{ key: "done", title: "All set" },
 ];
 
@@ -156,10 +154,7 @@ export function OnboardingView() {
 					{step === "provider" ? (
 						<Step3Provider state={state} onRefresh={refresh} onNext={next} />
 					) : null}
-					{step === "autostart" ? (
-						<Step4AutoStart state={state} onRefresh={refresh} onNext={next} />
-					) : null}
-					{step === "done" ? <Step5Done onFinish={() => void finish(false)} /> : null}
+					{step === "done" ? <Step4Done onFinish={() => void finish(false)} /> : null}
 				</div>
 			</main>
 		</div>
@@ -188,10 +183,6 @@ function Step1Welcome({ onNext }: { onNext: () => void }) {
 					<li className="flex items-start gap-2">
 						<KeyRound className="mt-px h-3.5 w-3.5 shrink-0 text-ink-3" />
 						<span>Connect a model provider so chat actually works</span>
-					</li>
-					<li className="flex items-start gap-2">
-						<Sparkles className="mt-px h-3.5 w-3.5 shrink-0 text-ink-3" />
-						<span>Optionally enable an auto-greeting on every new session</span>
 					</li>
 				</ul>
 				<p className="mt-3 text-2xs text-ink-3">
@@ -233,7 +224,7 @@ function Step2Kb({
 		setError(null);
 		try {
 			const target = pathValue.trim() || state.kbRoot;
-			// Seed README + system/ stubs at the user-provided path. The endpoint
+			// Seed the README at the user-provided path. The endpoint
 			// is idempotent on existing files. We deliberately don't call
 			// /api/kb/init because that only writes to the SERVER's resolved
 			// `NPI_DECK_KB_ROOT` — ignoring whatever the user just typed.
@@ -291,7 +282,7 @@ function Step2Kb({
 				<div className="mt-2 text-2xs text-ink-3">
 					{alreadyExists && !pathChanged
 						? "Already exists — scaffold will add starter files only if missing."
-						: "Will be created with a README and system/ stubs the agent reads at session start."}
+						: "Will be created with a starter README."}
 					{pathChanged ? (
 						<span className="ml-1 text-warn">
 							Path differs from server's resolved root; takes full effect after deck restart.
@@ -502,106 +493,9 @@ function ProviderTile({
 	);
 }
 
-// ─── Step 4: Auto-start prompt ──────────────────────────────────────────────
+// ─── Step 4: Done ───────────────────────────────────────────────────────────
 
-function Step4AutoStart({
-	state,
-	onRefresh,
-	onNext,
-}: {
-	state: OnboardingState;
-	onRefresh: () => Promise<void>;
-	onNext: () => void;
-}) {
-	const [busy, setBusy] = useState(false);
-	const [enabled, setEnabled] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	const alreadyExists = state.startCommandExists;
-
-	async function enable(): Promise<void> {
-		setBusy(true);
-		setError(null);
-		try {
-			// Write start.md
-			const res = await fetch("/api/orientation/start", {
-				method: "PUT",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({
-					description: "Orient on the current workspace and capabilities",
-					body: DEFAULT_START_BODY,
-				}),
-			});
-			if (!res.ok) throw new Error(`start.md write failed: ${res.status}`);
-			// Flip NPI_DECK_AUTO_START on
-			await settingsApi.patchEnv({ NPI_DECK_AUTO_START: "/start" });
-			setEnabled(true);
-			await onRefresh();
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setBusy(false);
-		}
-	}
-
-	return (
-		<div className="flex flex-col gap-5">
-			<div>
-				<h1 className="text-xl font-semibold text-ink">Session greeting</h1>
-				<p className="mt-2 text-sm text-ink-2">
-					When you start a new chat, the agent can automatically read your
-					knowledge base, query the local API for open tasks / inbox / routines,
-					and summarize where you are. Fires once per session.
-				</p>
-			</div>
-
-			<details className="rounded border border-line bg-paper-2 p-4">
-				<summary className="cursor-pointer text-xs text-ink-2">
-					Preview what the agent will do on each new session
-				</summary>
-				<pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap rounded bg-paper p-2 font-mono text-2xs text-ink-2">
-					{DEFAULT_START_BODY}
-				</pre>
-			</details>
-
-			{error ? (
-				<div className="rounded border border-danger/40 bg-danger/5 p-3 text-xs text-danger">
-					{error}
-				</div>
-			) : null}
-
-			<div className="flex items-center justify-between">
-				<button
-					type="button"
-					onClick={onNext}
-					className="text-xs text-ink-3 hover:text-ink"
-				>
-					Skip — empty composer is fine
-				</button>
-				<div className="flex items-center gap-2">
-					{enabled || alreadyExists ? (
-						<span className="flex items-center gap-1 text-xs text-success">
-							<CheckCircle2 className="h-4 w-4" /> Enabled
-						</span>
-					) : null}
-					{enabled || alreadyExists ? (
-						<Button onClick={onNext}>
-							Continue <ChevronRight className="ml-1 h-4 w-4" />
-						</Button>
-					) : (
-						<Button onClick={() => void enable()} disabled={busy}>
-							{busy ? "Enabling…" : "Enable auto-greeting"}
-						</Button>
-					)}
-				</div>
-			</div>
-		</div>
-	);
-}
-
-// ─── Step 5: Done ───────────────────────────────────────────────────────────
-
-function Step5Done({ onFinish }: { onFinish: () => void }) {
+function Step4Done({ onFinish }: { onFinish: () => void }) {
 	const createSession = useStore((s) => s.createSession);
 	const defaultCwd = useStore((s) => s.defaultCwd);
 
@@ -648,34 +542,3 @@ function Step5Done({ onFinish }: { onFinish: () => void }) {
 		</div>
 	);
 }
-
-// ─── Default start.md body ──────────────────────────────────────────────────
-
-/**
- * Static template — the agent re-fetches live state from the local API on
- * every fire, so this stays accurate as the deck grows (new tasks, new
- * routines, new inbox items). Users can edit the file directly afterwards.
- */
-const DEFAULT_START_BODY = `You are starting a new session inside npi-deck. Before responding to the user:
-
-1. **Read your context.** Fetch these kb files in parallel (skip any that 404):
-   - \`kb://system/working-voice.md\` — how the user prefers to communicate
-   - \`kb://system/deck-orientation.md\` — deck capabilities and patterns
-   - \`kb://system/projects-hub.md\` — active projects
-   - \`kb://system/org-system-hub.md\` — broader org context
-
-2. **Enumerate live workspace state.** From bash, in parallel:
-   - \`curl -s http://127.0.0.1:8787/api/tasks\` → kanban + open T-Ns
-   - \`curl -s http://127.0.0.1:8787/api/routines\` → enabled schedules
-   - \`curl -s "http://127.0.0.1:8787/api/inbox?includeProcessed=0"\` → unresolved captures
-
-3. **Summarize in 4-6 lines.** Use this shape:
-   - Open kanban (T-N + title)
-   - Anything blocked (flag prominently)
-   - Recent inbox worth reviewing
-   - Top focus for this session
-
-4. **End with** "Ready. What's next?" — then wait.
-
-If the local API is unreachable, just greet the user and ask what they want to work on.
-`;
