@@ -42,6 +42,13 @@ async function inspect(tree: string): Promise<ProbeResult> {
 	const { features, values } = await resolveManifest(tree, MANIFEST);
 	const failed = Object.values(features).flatMap(f => f.tier === "required" ? f.diagnostics : []);
 	if (failed.length) throw new Error(`missing required SDK surface: ${failed.map(formatDiagnostic).join("; ")}`);
+	if (features["build-identity"].available) {
+		const info = values.get("build-identity")?.BUILD_INFO as { version?: unknown; gitSha?: unknown; dirty?: unknown } | undefined;
+		if (info?.gitSha !== commit || info.version !== values.get("core")?.VERSION) {
+			throw new Error(`NeoPi BUILD_INFO disagrees with source tree ${commit}: ${JSON.stringify(info)}`);
+		}
+		if (info.dirty !== false) throw new Error(`NeoPi source tree has tracked changes or unknown dirty state: ${JSON.stringify(info)}`);
+	}
 	return { ok: true, pinned: commit === pin, identity: { path: tree, commit, version: typeof values.get("core")?.VERSION === "string" ? values.get("core")!.VERSION as string : null }, features };
 }
 

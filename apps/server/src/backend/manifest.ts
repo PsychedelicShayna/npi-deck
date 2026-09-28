@@ -176,6 +176,12 @@ export const MANIFEST = {
 			retainMixtureCatalog: op("@oh-my-pi/pi-coding-agent/moa/registration", "retainMixtureCatalog"),
 		},
 	},
+	/** neopi#122: runtime-snapshotted source identity; git remains the fallback for older trees. */
+	"build-identity": {
+		tier: "optional-feature",
+		consumers: ["backend/probe.ts", "backend/contract.ts"],
+		exports: { BUILD_INFO: op(CODING_AGENT, "BUILD_INFO") },
+	},
 	/** neopi#120: per-session MCP filtering and typed unknown-server errors. */
 	"mcp-allowlist": {
 		tier: "optional-feature",

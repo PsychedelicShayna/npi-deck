@@ -109,6 +109,7 @@ const advisors = feature("advisors");
 const mixtures = feature("mixtures");
 const mcp = feature("mcp-allowlist");
 const multiRoot = feature("multi-root");
+const build = feature("build-identity");
 
 await check("manifest: every feature available", [], () => {
 	const missing = Object.entries(backend.features).flatMap(([, f]) => f.diagnostics);
@@ -142,6 +143,12 @@ await check("manifest: missing export/module produce named diagnostics", [], asy
 await check("identity: VERSION, agent dir isolation", ["VERSION", "getAgentDir"], () => {
 	assert(core.getAgentDir() === agentDir, `getAgentDir() = ${core.getAgentDir()}, expected ${agentDir}`);
 	return `VERSION ${core.VERSION}, commit ${backend.identity.commit}, agentDir isolated`;
+});
+await check("identity: BUILD_INFO snapshots the source tree", ["BUILD_INFO"], () => {
+	const info = build.BUILD_INFO;
+	assert(info.gitSha === backend.identity.commit, `BUILD_INFO gitSha ${info.gitSha} != ${backend.identity.commit}`);
+	assert(info.version === core.VERSION && info.dirty === false, `unexpected BUILD_INFO ${JSON.stringify(info)}`);
+	return `${info.version} ${info.gitSha} dirty=${info.dirty}`;
 });
 
 await check("theme: pi-tui instance initialized for ask", ["getThemeByName", "setThemeInstance"], async () => {
