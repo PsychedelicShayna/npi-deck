@@ -62,8 +62,10 @@ test("deadline kills shell grandchild and records timeout", async () => {
 	expect(Date.now() - start).toBeLessThan(4000);
 	const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
 	await Bun.sleep(100);
-	const status = fs.existsSync(`/proc/${pid}/stat`) ? fs.readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1]?.[0] : undefined;
-	expect(status === undefined || status === "Z").toBe(true);
+	const ps = Bun.spawnSync(["ps", "-p", String(pid), "-o", "stat="], { stdout: "pipe", stderr: "ignore" });
+	const status = new TextDecoder().decode(ps.stdout).trim();
+	// PID 1 may take a moment to reap a killed child; a zombie has no executable process.
+	expect(status === "" || status.startsWith("Z")).toBe(true);
 	expect(listRuns(r.id)[0]?.abortReason).toBe("timeout");
 });
 

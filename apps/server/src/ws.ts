@@ -5,6 +5,7 @@ import type { AgentBridge } from "./bridge/types.ts";
 import { broadcastBus } from "./broadcast-bus.ts";
 import { logger } from "./log.ts";
 import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
+import { workRegistry } from "./work-registry.ts";
 const log = logger("ws");
 
 /** Per-connection state. */
@@ -247,6 +248,13 @@ export class WsHub {
 				error: `prompt failed: ${String(err)}`,
 			});
 		};
+		let release: () => void;
+		try {
+			release = workRegistry.admit("prompt", `${frame.sessionId}:${crypto.randomUUID()}`);
+		} catch (err) {
+			sendError(err);
+			return;
+		}
 		if (frame.text.startsWith("/")) {
 			const consumed = (output: string): void => {
 				send(ws, { type: "prompt_consumed", sessionId: frame.sessionId, output });
@@ -264,10 +272,10 @@ export class WsHub {
 							return handle.prompt(frame.text, opts);
 						});
 				})
-				.catch(sendError);
+				.catch(sendError).finally(release);
 			return;
 		}
-		handle.prompt(frame.text, opts).catch(sendError);
+		handle.prompt(frame.text, opts).catch(sendError).finally(release);
 	}
 
 	private async handleAbort(ws: ServerWebSocket<ConnectionData>, sessionId: string): Promise<void> {

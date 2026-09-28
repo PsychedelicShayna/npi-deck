@@ -3,6 +3,7 @@ import type { BridgeLogsResponse, BridgeName, ListBridgesResponse } from "@npi-d
 
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import { logger } from "./log.ts";
+import { workRegistry } from "./work-registry.ts";
 
 const log = logger("routes:bridges");
 
@@ -30,7 +31,8 @@ export function buildBridgesRouter(supervisor: BridgeSupervisor): Hono {
 		const name = parseBridgeName(c.req.param("name"));
 		if (!name) return c.json({ error: "unknown bridge" }, 404);
 		try {
-			return c.json(await supervisor.start(name));
+			const release = workRegistry.admit("bridge", `${name}:start:${crypto.randomUUID()}`);
+			try { return c.json(await supervisor.start(name)); } finally { release(); }
 		} catch (err) {
 			log.warn(`start ${name} failed`, err);
 			return c.json({ error: String((err as Error).message ?? err) }, 400);
@@ -41,7 +43,8 @@ export function buildBridgesRouter(supervisor: BridgeSupervisor): Hono {
 		const name = parseBridgeName(c.req.param("name"));
 		if (!name) return c.json({ error: "unknown bridge" }, 404);
 		try {
-			return c.json(await supervisor.stop(name));
+			const release = workRegistry.admit("bridge", `${name}:stop:${crypto.randomUUID()}`);
+			try { return c.json(await supervisor.stop(name)); } finally { release(); }
 		} catch (err) {
 			log.warn(`stop ${name} failed`, err);
 			return c.json({ error: String((err as Error).message ?? err) }, 500);
@@ -52,7 +55,8 @@ export function buildBridgesRouter(supervisor: BridgeSupervisor): Hono {
 		const name = parseBridgeName(c.req.param("name"));
 		if (!name) return c.json({ error: "unknown bridge" }, 404);
 		try {
-			return c.json(await supervisor.restart(name));
+			const release = workRegistry.admit("bridge", `${name}:restart:${crypto.randomUUID()}`);
+			try { return c.json(await supervisor.restart(name)); } finally { release(); }
 		} catch (err) {
 			log.warn(`restart ${name} failed`, err);
 			return c.json({ error: String((err as Error).message ?? err) }, 400);

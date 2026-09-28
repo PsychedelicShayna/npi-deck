@@ -34,6 +34,7 @@ import { broadcastBus } from "./broadcast-bus.ts";
 import { getDeckAuthStorage, getDeckModelRegistry } from "./auth-singleton.ts";
 import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
+import { workRegistry } from "./work-registry.ts";
 
 /**
  * ES2023-safe deferred helper. `Promise.withResolvers` is ES2024; the deck's
@@ -83,6 +84,7 @@ interface ActiveFlow {
 	startedAt: number;
 	/** Server-side max-lifetime timer; cleared on natural completion. */
 	expirationTimer: ReturnType<typeof setTimeout>;
+	releaseWork: () => void;
 }
 
 // One in-flight flow per provider — second `start` 409s while the first is
@@ -216,6 +218,7 @@ export function buildAuthOAuthRouter(): Hono {
 			status: "awaiting-consent",
 			startedAt: Date.now(),
 			expirationTimer: setTimeout(() => undefined, 0),
+			releaseWork: workRegistry.admit("oauth", flowId),
 		};
 		clearTimeout(flow.expirationTimer);
 		// Real lifetime timer: force-cancel if the flow hasn't naturally
@@ -304,6 +307,7 @@ export function buildAuthOAuthRouter(): Hono {
 				clearTimeout(flow.expirationTimer);
 				flows.delete(provider);
 				flowsById.delete(flowId);
+				flow.releaseWork();
 			});
 		// Keep the unhandled-rejection inspector quiet — we attached handlers above.
 		loginPromise.catch(() => {});

@@ -1,5 +1,5 @@
 /** Process-wide in-flight work ledger for shutdown and backend-switch admission. */
-export type WorkKind = "session" | "subagent" | "routine-queued" | "routine-run" | "routine-step" | "process" | "oauth" | "bridge";
+export type WorkKind = "session" | "prompt" | "subagent" | "routine-queued" | "routine-run" | "routine-step" | "process" | "oauth" | "bridge";
 export interface WorkItem { kind: WorkKind; id: string }
 const items = new Map<string, WorkItem>();
 let closed = false;
