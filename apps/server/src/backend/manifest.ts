@@ -30,6 +30,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace": typeof import("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace");
 	"@oh-my-pi/pi-coding-agent/internal-urls": typeof import("@oh-my-pi/pi-coding-agent/internal-urls");
 	"@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents": typeof import("@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents");
+	"@oh-my-pi/pi-coding-agent/moa/registration": typeof import("@oh-my-pi/pi-coding-agent/moa/registration");
 	"@oh-my-pi/pi-coding-agent/plan-mode/approved-plan": typeof import("@oh-my-pi/pi-coding-agent/plan-mode/approved-plan");
 	"@oh-my-pi/pi-coding-agent/registry/agent-lifecycle": typeof import("@oh-my-pi/pi-coding-agent/registry/agent-lifecycle");
 	"@oh-my-pi/pi-coding-agent/registry/agent-registry": typeof import("@oh-my-pi/pi-coding-agent/registry/agent-registry");
@@ -154,6 +155,14 @@ export const MANIFEST = {
 			resolveAdvisorConfigEditPath: op("@oh-my-pi/pi-coding-agent/advisor/config", "resolveAdvisorConfigEditPath"),
 			loadWatchdogConfigFile: op("@oh-my-pi/pi-coding-agent/advisor/config", "loadWatchdogConfigFile"),
 			saveWatchdogConfigFile: op("@oh-my-pi/pi-coding-agent/advisor/config", "saveWatchdogConfigFile"),
+		},
+	},
+	/** W3: mixture-of-agents models (`mixture/<name>`) listed in the model picker without a live session. */
+	mixtures: {
+		tier: "optional-feature",
+		consumers: ["bridge/in-process.ts"],
+		exports: {
+			retainMixtureCatalog: op("@oh-my-pi/pi-coding-agent/moa/registration", "retainMixtureCatalog"),
 		},
 	},
 	/** W7c: routine agent steps spawn the tree's CLI in `--mode json`. */

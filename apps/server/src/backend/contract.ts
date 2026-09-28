@@ -105,6 +105,7 @@ const core = sdk();
 const planMode = feature("plan-mode");
 const subagents = feature("subagent-tree");
 const advisors = feature("advisors");
+const mixtures = feature("mixtures");
 
 await check("manifest: every feature available", [], () => {
 	const missing = Object.entries(backend.features).flatMap(([, f]) => f.diagnostics);
@@ -165,6 +166,36 @@ await check("auth: storage, registry, env key, oauth providers", ["discoverAuthS
 	const stored = registry.authStorage.credentials.all();
 	assert(Object.keys(stored).length === 0, `isolated auth store not empty: ${Object.keys(stored).join(",")}`);
 	return `${providers.length} OAuth providers; credentials.all() empty; model registry resolves ${cheapModel.provider}/${cheapModel.id}`;
+});
+
+await check("mixtures: catalog registers MIXTURES.toml models without a session", ["retainMixtureCatalog"], async () => {
+	const file = path.join(agentDir, "MIXTURES.toml");
+	await Bun.write(
+		file,
+		[
+			"[[mixtures]]",
+			'name = "deck-contract"',
+			'entry = "writer"',
+			"[[mixtures.members]]",
+			'id = "writer"',
+			'model = "openrouter/openai/gpt-4o-mini"',
+			'system_prompt = "Draft."',
+			"tools = false",
+			"",
+		].join("\n"),
+	);
+	try {
+		const settings = await core.Settings.loadIsolated({ cwd: agentDir, agentDir });
+		const catalog = await mixtures.retainMixtureCatalog("contract", { cwd: agentDir, agentDir, registry, settings });
+		const model = registry.find("mixture", "deck-contract");
+		assert(model, "mixture/deck-contract not registered");
+		assert(model.api === "mixture", `api = ${model.api}`);
+		catalog.release("contract");
+		assert(!registry.find("mixture", "deck-contract"), "mixture still registered after the last release");
+		return "mixture/deck-contract registered with api=mixture, unregistered on release";
+	} finally {
+		rmSync(file, { force: true });
+	}
 });
 
 async function newSession(cwd: string, extra: Partial<CreateAgentSessionOptions> = {}) {

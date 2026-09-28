@@ -82,10 +82,13 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 					return a.label.localeCompare(b.label);
 				}),
 				hasCurrent: items.some((m) => m.isCurrent),
+				isMixture: items.some((m) => m.isMixture),
 			}))
 			.sort((a, b) => {
 				if (a.hasCurrent && !b.hasCurrent) return -1;
 				if (!a.hasCurrent && b.hasCurrent) return 1;
+				// Mixtures are the user's own compositions; list them before the catalog.
+				if (a.isMixture !== b.isMixture) return a.isMixture ? -1 : 1;
 				return a.provider.localeCompare(b.provider);
 			});
 	}, [models, query, showUnauth]);
@@ -170,7 +173,7 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 				{grouped.map((g) => (
 					<div key={g.provider} className="border-b border-line last:border-b-0">
 						<div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-paper-2 px-3 py-1.5">
-							<div className="meta">{g.provider}</div>
+							<div className="meta">{g.isMixture ? "mixtures of agents" : g.provider}</div>
 							<div className="text-2xs text-ink-3">{g.items.length}</div>
 						</div>
 						<ul>
@@ -200,6 +203,11 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 														{model.label}
 													</span>
 													{model.isCurrent ? <Badge tone="accent">active</Badge> : null}
+													{model.isMixture ? (
+														<Badge tone="accent" title="NeoPi mixture of agents: several member models behind one id">
+															MoA
+														</Badge>
+													) : null}
 													{model.isSubscription ? (
 														<Badge tone="success" title="Subscription provider — uses OAuth, no API key required">
 															subscription

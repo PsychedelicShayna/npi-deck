@@ -216,6 +216,8 @@ export interface ModelInfo {
 	isCurrent?: boolean;
 	/** Optional UX hint: input modalities the provider supports for this model. */
 	inputModes?: Array<"text" | "image">;
+	/** A NeoPi mixture-of-agents model (`mixture/<name>`): several member models behind one id. */
+	isMixture?: boolean;
 }
 
 export interface ListModelsResponse {

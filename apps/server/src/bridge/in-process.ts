@@ -1,5 +1,5 @@
 import type { AgentSession, CreateAgentSessionResult, ModelRegistry, SessionManager } from "@oh-my-pi/pi-coding-agent";
-import { sdk } from "../backend/runtime.ts";
+import { feature, hasFeature, sdk } from "../backend/runtime.ts";
 // `Model` is owned by `@oh-my-pi/pi-ai`, a transitive dep we don't bring in
 // directly. Treat it as opaque at the bridge boundary — we only ever pass it
 // back into the SDK's own methods.
@@ -9,6 +9,7 @@ type SdkModel = {
 	provider: string | { toString(): string };
 	contextWindow?: number;
 	input?: unknown[];
+	api?: string;
 };
 import type {
 	AgentMessageJson,
@@ -73,6 +74,8 @@ export class InProcessAgentBridge implements AgentBridge {
 	/** Shared SDK model registry, lazily constructed on first session create. */
 	private modelRegistry: ModelRegistry | undefined;
 	private modelRegistryPromise: Promise<ModelRegistry> | undefined;
+	/** Set once the deck holds NeoPi's mixture catalog on the shared registry. */
+	private mixturesRetained: Promise<void> | undefined;
 	/** Bumped per SDK session this bridge creates; makes every live generation's agentId unique. */
 	private generation = 0;
 
@@ -174,8 +177,32 @@ export class InProcessAgentBridge implements AgentBridge {
 
 	async listModels(opts: { sessionId?: string } = {}): Promise<ModelInfo[]> {
 		const registry = await this.ensureModelRegistry();
+		await this.ensureMixtures(registry);
 		const current = opts.sessionId ? this.active.get(opts.sessionId)?.handle.snapshot().model : undefined;
 		return registry.getAll().map((model) => modelInfoFromSdk(model as unknown as SdkModel, registry, current));
+	}
+
+	/**
+	 * NeoPi registers mixture-of-agents models (`mixture/<name>`, from
+	 * MIXTURES.toml) on the model registry only while some owner holds its
+	 * mixture catalog; sessions hold it for their lifetime. The deck holds it
+	 * too, so the picker lists mixtures before any chat is open. Discovery
+	 * reads config files only and spawns nothing.
+	 */
+	private ensureMixtures(registry: ModelRegistry): Promise<void> {
+		if (!hasFeature("mixtures")) return Promise.resolve();
+		this.mixturesRetained ??= feature("mixtures")
+			.retainMixtureCatalog("npi-deck:model-picker", {
+				cwd: process.cwd(),
+				agentDir: sdk().getAgentDir(),
+				registry,
+				settings: sdk().settings,
+			})
+			.then(
+				() => {},
+				(err) => log.warn("mixture discovery failed; picker lists no mixtures", err),
+			);
+		return this.mixturesRetained;
 	}
 
 	async dispose(): Promise<void> {
@@ -1249,6 +1276,7 @@ function modelInfoFromSdk(
 	if (Array.isArray(model.input) && model.input.length > 0) {
 		info.inputModes = model.input.filter((m: unknown): m is "text" | "image" => m === "text" || m === "image");
 	}
+	if (model.api === "mixture") info.isMixture = true;
 	if (current && current.provider === info.provider && current.id === info.id) {
 		info.isCurrent = true;
 	}
