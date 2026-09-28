@@ -38,12 +38,14 @@ class StubSession {
 		return this.#steering.length + this.#followUp.length;
 	}
 
-	async prompt(text: string, opts?: { streamingBehavior?: "steer" | "followUp" }): Promise<void> {
+	/** Mirrors NeoPi: a queued prompt was forwarded to the agent, so `true`. */
+	async prompt(text: string, opts?: { streamingBehavior?: "steer" | "followUp" }): Promise<boolean> {
 		if (!this.isStreaming) {
 			throw new Error("StubSession.prompt called while not streaming (no model wired)");
 		}
 		if (opts?.streamingBehavior === "steer") this.#steering.push({ text });
 		else this.#followUp.push({ text });
+		return true;
 	}
 
 	getQueuedMessages(): { steering: string[]; followUp: string[] } {
@@ -110,6 +112,15 @@ describe("InProcessSessionHandle queue shadow", () => {
 		expect(snap[0]?.behavior).toBe("followUp");
 		const types = emitted.map((e) => (e as { type?: string }).type);
 		expect(types).toEqual(["prompt_queued", "queue_state"]);
+	});
+
+	test("prompt() handled locally while streaming shows no queued bubble", async () => {
+		const { handle, session, emitted } = makeHandle();
+		// NeoPi returns false when an extension command consumed the input: nothing was queued.
+		session.prompt = async () => false;
+		await handle.prompt("/local-command");
+		expect(handle.getQueueSnapshot()).toEqual([]);
+		expect(emitted).toEqual([]);
 	});
 
 	test("cancelQueuedById removes a middle entry and preserves order + ids", async () => {
