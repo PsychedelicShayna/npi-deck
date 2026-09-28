@@ -23,8 +23,8 @@ export interface LiveAdvisorStatus {
 	/** `configured`: advisors are switched on for this session. */
 	overview: { configured: boolean; advisors: Array<{ name: string; status: AdvisorRuntimeStatus; yielded: boolean }> };
 	stats: { active: boolean; cost: number; advisors: Array<{ name: string; status: AdvisorRuntimeStatus; cost: number; tokens: { total: number }; model?: { provider: string; id: string } }> };
-	/** Advisors chosen for this session in the deck; `null` when the chat never chose. */
-	selection: string[] | null;
+	/** Advisors chosen for this chat in the deck; empty until the chat picks. */
+	selection: string[];
 	notes: AdvisorNote[];
 	events: Array<{ type: "advisor_cost_changed" | "advisor_yielded"; timestamp: number }>;
 }

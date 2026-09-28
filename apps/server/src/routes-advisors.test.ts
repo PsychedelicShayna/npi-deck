@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
-import { loadBackend, resolveBackendSelection } from "./backend/runtime.ts";
+import { feature, loadBackend, resolveBackendSelection } from "./backend/runtime.ts";
 import { buildAdvisorsRouter } from "./routes-advisors.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
@@ -97,6 +97,30 @@ test("enabled toggle writes the advisor's winning WATCHDOG scope only", async ()
 	expect(roster.map(a => [a.name, a.enabled])).toEqual([["Velvet", false], ["Rook", true]]);
 
 	expect((await toggle("Nobody", true)).status).toBe(404);
+});
+
+test("enabled toggle never reports success the roster does not show", async () => {
+	const userFile = path.join(agentDir, "WATCHDOG.yml");
+	await rm(path.join(project, "WATCHDOG.yml"), { force: true });
+	await writeFile(userFile, "advisors:\n  - name: Velvet\n    instructions: Keep it tidy\n");
+	// Another editor sets Velvet's key between the route's load and its save;
+	// NeoPi's save keeps a field changed on disk since the load.
+	const api = feature("advisors");
+	const save = api.saveWatchdogConfigFile;
+	api.saveWatchdogConfigFile = async (file, doc) => {
+		await writeFile(userFile, "advisors:\n  - name: Velvet\n    instructions: Keep it tidy\n    enabled: true\n");
+		return save(file, doc);
+	};
+	try {
+		const response = await request("/advisors/watchdog/enabled", json("PATCH", { cwd: project, name: "Velvet", enabled: false }));
+		const onDisk = (await readFile(userFile, "utf8")).includes("enabled: false") ? false : true;
+		// Baseline-aware NeoPi (the pinned tree) keeps the external value; older trees overwrite it.
+		expect(response.status).toBe(onDisk === false ? 200 : 409);
+		expect((await response.json() as ToggledAdvisors).merged.advisors.find(a => a.name === "Velvet")?.enabled).toBe(onDisk);
+		expect(roster.find(a => a.name === "Velvet")?.enabled).toBe(onDisk);
+	} finally {
+		api.saveWatchdogConfigFile = save;
+	}
 });
 
 test("model role saves via locked settings without dropping unrelated keys", async () => {

@@ -65,7 +65,11 @@ export function AdvisorsView() {
 			const { file } = await advisorsApi.setRosterEnabled(config.cwd, name, enabled);
 			await reload(config.cwd);
 			setNotice(`${name}: wrote enabled: ${enabled} to ${file} and applied it to live sessions.`);
-		} catch (e) { setError(String(e)); }
+		} catch (e) {
+			// Show what the files say now; a refused toggle may follow an external edit.
+			await reload(config.cwd);
+			setError(String(e));
+		}
 		finally { setBusy(false); }
 	}
 	function sourceScope(source: string | null | undefined): string {

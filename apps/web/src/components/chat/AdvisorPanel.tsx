@@ -92,7 +92,7 @@ export function AdvisorPanel({ sessionId }: { sessionId: string }) {
 	if (!visible || !status) return null;
 
 	const liveNames = new Set(status.overview.advisors.filter(a => a.status !== "paused").map(a => a.name));
-	const shown = status.overview.advisors.filter(a => liveNames.has(a.name) || status.selection?.includes(a.name));
+	const shown = status.overview.advisors.filter(a => liveNames.has(a.name) || status.selection.includes(a.name));
 	const idle = status.overview.advisors.filter(a => !shown.includes(a));
 	const counts = SEVERITIES.map(s => ({ ...s, count: notes.filter(n => n.severity === s.key).length })).filter(s => s.count > 0);
 	const unseen = notes.filter(n => n.timestamp > memory.seenThrough).length;

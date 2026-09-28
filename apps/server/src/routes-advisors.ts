@@ -153,7 +153,13 @@ export function buildAdvisorsRouter(bridge: AgentBridge, config: import("./confi
 				await api.saveWatchdogConfigFile(source.file, source.doc);
 				// A user or ancestor file can feed sessions outside this project.
 				await applyToSessions(sessions, api);
-				return c.json({ file: source.file, merged: await discovery(api, cwd) });
+				// NeoPi's save keeps fields edited on disk since the load, so a
+				// concurrent external edit can win; report what the roster now says.
+				const merged = await discovery(api, cwd);
+				const winner = merged.advisors.find(advisor => api.slugifyAdvisorName(advisor.name) === slug);
+				if ((winner?.enabled !== false) !== enabled || winner?.source !== source.file)
+					return c.json({ error: `${source.file} changed while saving; ${JSON.stringify(name)} is not ${enabled ? "enabled" : "disabled"}. Reload and try again.`, file: source.file, merged }, 409);
+				return c.json({ file: source.file, merged });
 			});
 		} catch (err) { log.warn("toggle watchdog advisor failed", err); return c.json({ error: errorText(err) }, 500); }
 	});

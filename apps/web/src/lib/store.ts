@@ -582,7 +582,10 @@ function handleFrame(
 					...s.sessionsById,
 					[frame.sessionId]: { ...initSession(frame.snapshot), backendLastRan: s.backend
 						? { path: s.backend.path, commit: s.backend.commit }
-						: s.sessionsById[frame.sessionId]?.backendLastRan },
+						: s.sessionsById[frame.sessionId]?.backendLastRan,
+						// Advisor events sent while this client was away are not replayed;
+						// every (re)subscribe tells the advisor panel to refetch.
+						advisorActivity: (s.sessionsById[frame.sessionId]?.advisorActivity ?? 0) + 1 },
 				},
 			}));
 			return;

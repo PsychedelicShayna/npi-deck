@@ -98,12 +98,14 @@ interface Active {
 	advisorNotes: Array<{ advisor: string; severity: "nit" | "concern" | "blocker"; note: string; timestamp: number }>;
 	advisorEvents: Array<{ type: "advisor_cost_changed" | "advisor_yielded"; timestamp: number }>;
 	/**
-	 * Advisor names chosen for this live session in the deck. When set, it
-	 * overrides every roster entry's `enabled` so only these advisors run, and
-	 * each WATCHDOG re-apply keeps it. `undefined` leaves NeoPi's roster and
-	 * `advisor.enabled` defaults in charge. Never written to WATCHDOG.
+	 * Advisor names chosen for this live session in the deck; empty until the
+	 * chat picks. It overrides every roster entry's `enabled` so only these
+	 * advisors run, and each WATCHDOG re-apply and settings reload keeps it.
+	 * Never written to WATCHDOG.
 	 */
-	advisorSelection?: string[];
+	advisorSelection: string[];
+	/** The last applied roster contains at least one selected advisor. */
+	advisorsRunnable: boolean;
 }
 
 export class InProcessAgentBridge implements AgentBridge {
@@ -202,6 +204,11 @@ export class InProcessAgentBridge implements AgentBridge {
 			}
 			if (mcpServersAllowed.length) feature("mcp-allowlist").cfgMcpIncludeServers.override(settings, mcpServersAllowed);
 		}
+		// Deck chats run only the advisors picked for them. Pin the session's
+		// advisor switch off so neither `advisor.enabled` at open nor a later
+		// config reload starts roster advisors or NeoPi's legacy "default"
+		// advisor; a selection turns the runtime on through the session API.
+		if (hasFeature("advisors")) feature("advisors").cfgAdvisorEnabled.override(settings, false);
 		let result: CreateAgentSessionResult;
 		try {
 			result = await sdk().createAgentSession({
@@ -256,6 +263,9 @@ export class InProcessAgentBridge implements AgentBridge {
 		}
 		await this.wireExtensionRunner(session);
 		const handle = this.attach(session, cwd, sessionManager, result.setToolUIContext, hasFeature("subagent-tree") ? result.subagentEventBus : undefined);
+		// A new or resumed chat starts with an empty selection: nothing may run.
+		const entry = this.active.get(sessionId);
+		if (entry) this.enforceAdvisorSelection(entry);
 		await handle.restorePlanMode();
 		return handle;
 	}
@@ -265,19 +275,26 @@ export class InProcessAgentBridge implements AgentBridge {
 		return this.active.get(sessionId)?.handle;
 	}
 
+	/**
+	 * Stop a session's advisors unless its selection has something to run.
+	 * NeoPi falls back to a legacy "default" advisor when an enabled session's
+	 * roster is empty, so an enabled runtime without a runnable selection is
+	 * never left in place.
+	 */
+	private enforceAdvisorSelection(entry: Active): void {
+		if (!entry.advisorsRunnable && entry.session.isAdvisorEnabled()) entry.session.setAdvisorEnabled(false);
+	}
+
 	advisorSession(id: string) {
 		const entry = this.active.get(id);
 		if (!entry) return undefined;
 		const applyRoster = (config: DiscoveredAdvisors) => {
 			const selection = entry.advisorSelection;
-			const advisors = selection ? config.advisors.map(advisor => ({ ...advisor, enabled: selection.includes(advisor.name) })) : config.advisors;
-			// An enabled session with an empty or all-disabled roster falls back
-			// to NeoPi's legacy "default" advisor, so a selection with nothing
-			// left to run stops the session's advisors instead.
-			const run = selection ? advisors.some(advisor => advisor.enabled) : undefined;
-			if (run === false) entry.session.setAdvisorEnabled(false);
+			const advisors = config.advisors.map(advisor => ({ ...advisor, enabled: selection.includes(advisor.name) }));
+			entry.advisorsRunnable = advisors.some(advisor => advisor.enabled);
+			this.enforceAdvisorSelection(entry);
 			entry.session.applyAdvisorConfigs(advisors, config.sharedInstructions, config.sharedMaxNotesPerUpdate);
-			if (run === true && !entry.session.isAdvisorEnabled()) entry.session.setAdvisorEnabled(true);
+			if (entry.advisorsRunnable && !entry.session.isAdvisorEnabled()) entry.session.setAdvisorEnabled(true);
 		};
 		return {
 			cwd: entry.handle.cwd,
@@ -290,7 +307,7 @@ export class InProcessAgentBridge implements AgentBridge {
 				return {
 					overview: { ...overview, advisors: overview.advisors.map(stopped) },
 					stats: { ...stats, advisors: stats.advisors.map(stopped) },
-					selection: entry.advisorSelection ?? null,
+					selection: entry.advisorSelection,
 					notes: entry.advisorNotes,
 					events: entry.advisorEvents,
 				};
@@ -328,6 +345,10 @@ export class InProcessAgentBridge implements AgentBridge {
 			} catch (err) {
 				log.warn(`reload settings for session ${sessionId} failed`, err);
 				return { sessionId, cwd: entry.handle.cwd, settings, failed: true };
+			} finally {
+				// A reload can fire NeoPi's advisor-settings hook; only the chat's
+				// selection decides whether advisors run.
+				this.enforceAdvisorSelection(entry);
 			}
 		}));
 	}
@@ -719,6 +740,8 @@ export class InProcessAgentBridge implements AgentBridge {
 			subagents,
 			advisorNotes: [],
 			advisorEvents: [],
+			advisorSelection: [],
+			advisorsRunnable: false,
 		});
 		return handle;
 	}

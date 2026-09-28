@@ -266,9 +266,9 @@ export interface SessionUi {
 	 */
 	contextUsage?: import("@npi-deck/protocol").ContextUsage;
 	/**
-	 * Bumped when an advisor note reaches this chat or an advisor finishes a
-	 * review. The advisor panel refetches on change instead of polling while
-	 * it is hidden.
+	 * Bumped when an advisor note reaches this chat, an advisor finishes a
+	 * review, or the chat is (re)subscribed after a reconnect. The advisor
+	 * panel refetches on change instead of polling while it is hidden.
 	 */
 	advisorActivity?: number;
 

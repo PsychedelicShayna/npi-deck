@@ -78,3 +78,36 @@ test("first worker hello refetches lists discarded from pre-hello bootstrap", as
 		Object.assign(globalThis, original);
 	}
 });
+
+test("a same-worker reconnect resubscribes and invalidates advisor state missed offline", async () => {
+	const original = { WebSocket: globalThis.WebSocket, location: globalThis.location, fetch: globalThis.fetch };
+	useStore.getState().disconnect();
+	useStore.setState({ workerGeneration: undefined, sessionsById: {}, subscribed: new Set<string>() });
+	Object.assign(globalThis, {
+		WebSocket: FakeSocket,
+		location: { protocol: "http:", host: "localhost" },
+		fetch: async (url: string) => Response.json(url.includes("workspaces") ? { workspaces: [], defaultCwd: "/tmp" } : { sessions: [] }),
+	});
+	const hello = { type: "hello", workerGeneration: "same", backend: null, capabilities: [] };
+	const snapshot = { sessionId: "session-a", cwd: "/tmp", sessionFile: "/tmp/a.jsonl", isStreaming: false, messages: [], todoPhases: [], queuedPrompts: [] };
+	try {
+		useStore.getState().connect();
+		const first = sockets.at(-1)!;
+		first.emit("message", { ...hello, connectionId: "c1" });
+		useStore.getState().selectSession("session-a");
+		first.emit("message", { type: "subscribed", sessionId: "session-a", snapshot });
+		const before = useStore.getState().sessionsById["session-a"]?.advisorActivity;
+		// An advisor note lands while the socket is down; its event is never replayed.
+		first.emit("close");
+		useStore.getState().ws?.connect();
+		const next = sockets.at(-1)!;
+		next.emit("message", { ...hello, connectionId: "c2" });
+		expect(next.sent.map(frame => JSON.parse(frame))).toContainEqual({ type: "subscribe", sessionId: "session-a" });
+		next.emit("message", { type: "subscribed", sessionId: "session-a", snapshot });
+		const after = useStore.getState().sessionsById["session-a"]?.advisorActivity;
+		expect(after ?? 0).toBeGreaterThan(before ?? 0);
+	} finally {
+		useStore.getState().disconnect();
+		Object.assign(globalThis, original);
+	}
+});
