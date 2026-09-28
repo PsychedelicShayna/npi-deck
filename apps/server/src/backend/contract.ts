@@ -107,6 +107,8 @@ const planMode = feature("plan-mode");
 const subagents = feature("subagent-tree");
 const advisors = feature("advisors");
 const mixtures = feature("mixtures");
+const mcp = feature("mcp-allowlist");
+const multiRoot = feature("multi-root");
 
 await check("manifest: every feature available", [], () => {
 	const missing = Object.entries(backend.features).flatMap(([, f]) => f.diagnostics);
@@ -207,6 +209,7 @@ async function newSession(cwd: string, extra: Partial<CreateAgentSessionOptions>
 		modelRegistry: registry,
 		authStorage: registry.authStorage,
 		skipPythonPreflight: true,
+		agentId: `Contract-${path.basename(cwd)}`,
 		hasUI: false,
 		...(cheapModel ? { model: cheapModel } : {}),
 		...extra,
@@ -234,6 +237,58 @@ await check("sessions: create, list", ["createAgentSession", "SessionManager"], 
 	assert(listed.some((s) => s.path === sessionB!.sessionFile), "SessionManager.list misses the session");
 	assert(all.length >= 1, "SessionManager.listAll empty");
 	return `session ${sessionB.sessionId} persisted and listed`;
+});
+
+await check("multi-root: duplicate root identity leaves original registered", ["AgentIdConflictError"], async () => {
+	assert(sessionB, "no root session");
+	const existing = subagents.AgentRegistry.global().get("Contract-root-b");
+	assert(existing?.session === sessionB, "first root missing from registry");
+	const conflict = await newSession(mkdir("conflict"), { agentId: "Contract-root-b" }).then(
+		() => undefined, (error: unknown) => error,
+	);
+	assert(conflict instanceof multiRoot.AgentIdConflictError, `duplicate root did not throw AgentIdConflictError: ${String(conflict)}`);
+	assert(conflict.agentId === "Contract-root-b", `wrong conflicting ID: ${conflict.agentId}`);
+	assert(subagents.AgentRegistry.global().get("Contract-root-b") === existing, "conflict displaced original root");
+	return "duplicate root rejected; original registry ref unchanged";
+});
+
+await check("MCP: per-session override is non-persisting and rejects unknown names", [
+	"cfgMcpIncludeServers", "MCPUnknownServerError", "loadAllMCPConfigs",
+], async () => {
+	const cwd = mkdir("root-mcp");
+	mkdirSync(path.join(cwd, ".omp"), { recursive: true });
+	const server = path.join(backendPath, "packages/coding-agent/test/fixtures/mcp-marker-server.ts");
+	const markers = ["admitted", "excluded"].map(name => path.join(cwd, `ran-${name}`));
+	writeFileSync(path.join(cwd, ".omp", "mcp.json"), JSON.stringify({
+		mcpServers: Object.fromEntries(["admitted", "excluded"].map((name, i) => [
+			name, { command: process.execPath, args: [server, name, markers[i]] },
+		])),
+	}));
+	const discovered = await mcp.loadAllMCPConfigs(cwd, { includeServers: ["admitted"] });
+	assert(Object.keys(discovered.configs).join(",") === "admitted", "MCP discovery admitted the wrong servers");
+	const settings = await core.Settings.loadIsolated({ cwd, agentDir });
+	const configPath = path.join(agentDir, "config.yml");
+	const before = await Bun.file(configPath).exists() ? await Bun.file(configPath).text() : undefined;
+	mcp.cfgMcpIncludeServers.override(settings, ["admitted"]);
+	assert(mcp.cfgMcpIncludeServers.get(settings).join(",") === "admitted", "override did not take");
+	const allowed = (await newSession(cwd, { settings })).session;
+	try {
+		const deadline = Date.now() + 10_000;
+		while (!(await Bun.file(markers[0]!).exists()) && Date.now() < deadline) await Bun.sleep(50);
+		assert(await Bun.file(markers[0]!).exists(), "allowed MCP server was not spawned");
+		assert(!(await Bun.file(markers[1]!).exists()), "excluded MCP server was spawned");
+	} finally { await allowed.dispose(); }
+	const after = await Bun.file(configPath).exists() ? await Bun.file(configPath).text() : undefined;
+	assert(before === after, "MCP override persisted to shared config.yml");
+	const unknownSettings = await core.Settings.loadIsolated({ cwd, agentDir });
+	mcp.cfgMcpIncludeServers.override(unknownSettings, ["unknown"]);
+	const failure = await newSession(cwd, { agentId: "Contract-unknown", settings: unknownSettings }).then(
+		() => undefined, (error: unknown) => error,
+	);
+	assert(failure instanceof mcp.MCPUnknownServerError, `unknown MCP name was not typed: ${String(failure)}`);
+	assert(failure.serverNames.join(",") === "unknown", `unexpected unknown names: ${failure.serverNames}`);
+	assert(!(await Bun.file(markers[1]!).exists()), "unknown allowlist spawned excluded server");
+	return "allowed fixture process spawned; excluded never spawned; config unchanged; unknown ID rejected by typed error";
 });
 
 await check("commands: builtin registry, ACP dispatch, session commands", [
@@ -377,18 +432,17 @@ await check("subagents: transcript read and lifecycle release", [
 	const roles = transcript.messages.map((m) => (m as { role: string }).role);
 	assert(roles.join(",") === "user,assistant", `transcript roles: ${roles.join(",")}`);
 
-	const childId = "ContractChild";
-	const child = (await newSession(mkdir("child"), { agentId: childId, agentDisplayName: "Contract child" })).session;
-	const ref = subagents.AgentRegistry.global().get(childId);
-	assert(ref && ref.session === child, "child not registered under its agentId");
+	const rootId = "ContractChild";
+	const root = (await newSession(mkdir("child"), { agentId: rootId, agentDisplayName: "Contract root" })).session;
+	const ref = subagents.AgentRegistry.global().get(rootId);
+	assert(ref && ref.session === root, "root not registered under its agentId");
 	const lifecycle = subagents.AgentLifecycleManager.global();
-	lifecycle.adopt(childId, { idleTtlMs: 0 }, ref);
-	assert(lifecycle.has(childId, ref), "adopt did not take");
-	const released = await lifecycle.release(childId, ref, { tombstone: true });
-	const after = subagents.AgentRegistry.global().get(childId);
-	assert(released && after?.status === "aborted" && after.session === null, `after release: ${after?.status}`);
-	assert(child.isDisposed, "released child session not disposed");
-	return `transcript: ${transcript.messages.length} messages (user, assistant); child ${childId} released → aborted, detached, disposed`;
+	assert(lifecycle.adopt(rootId, { idleTtlMs: 0 }, ref) === false, "top-level root was adopted as a child");
+	const released = await lifecycle.release(rootId, ref);
+	const after = subagents.AgentRegistry.global().get(rootId);
+	assert(released && !after, "released root still registered");
+	assert(root.isDisposed, "released root session not disposed");
+	return `transcript: ${transcript.messages.length} messages (user, assistant); top-level adoption refused; ${rootId} released and disposed`;
 });
 
 async function advisorStatus(session: AgentSession): Promise<string> {
@@ -487,21 +541,21 @@ await check("fact: per-root settings isolation (Settings.loadIsolated)", ["Setti
 	bindRoleAdvisor(sessionB);
 	const sameInstance = sessionA.settings === isolated;
 	const before = { a: advisorModel(sessionA), b: advisorModel(sessionB), global: core.settings.getModelRole("advisor") };
-	isolated.setModelRole("advisor", altModel);
-	await isolated.flush();
+	const configPath = path.join(agentDir, "config.yml");
+	const configBefore = await Bun.file(configPath).exists() ? await Bun.file(configPath).text() : undefined;
+	advisors.cfgModelRoles.override(isolated, { ...advisors.cfgModelRoles.get(isolated), advisor: altModel });
 	await Bun.sleep(10);
 	const after = { a: advisorModel(sessionA), b: advisorModel(sessionB), global: core.settings.getModelRole("advisor") };
-	// A fresh load from disk shows whether the isolated write reached the shared user config.
 	const persisted = (await core.Settings.loadIsolated({ cwd: rootB, agentDir })).getModelRole("advisor");
+	const configAfter = await Bun.file(configPath).exists() ? await Bun.file(configPath).text() : undefined;
 	sessionA.setAdvisorEnabled(false);
 	sessionB.setAdvisorEnabled(false);
 	await sessionA.dispose();
-	const liveIsolated = sameInstance && after.a === altModel && after.b === before.b && after.global === before.global;
+	const liveIsolated = sameInstance && after.a === altModel && after.b === before.b && after.global === before.global
+		&& persisted === before.global && configBefore === configAfter;
 	facts["settings-isolation"] = {
-		value: liveIsolated
-			? `composes: the session uses the isolated instance and a change on it reaches only that session${persisted === altModel ? "; writes still persist to the shared user config.yml, so the next load of any root sees them" : ""}`
-			: "does not compose",
-		evidence: `session.settings === isolated: ${sameInstance}; advisor A ${before.a} → ${after.a}; advisor B ${before.b} → ${after.b}; global role ${before.global} → ${after.global}; fresh load: ${persisted}`,
+		value: liveIsolated ? "composes: non-persisting modelRoles override reaches only this root" : "does not compose",
+		evidence: `session.settings === isolated: ${sameInstance}; advisor A ${before.a} → ${after.a}; advisor B ${before.b} → ${after.b}; global role ${before.global} → ${after.global}; fresh load: ${persisted}; config.yml byte-identical: ${configBefore === configAfter}`,
 	};
 	return facts["settings-isolation"]!.evidence;
 });

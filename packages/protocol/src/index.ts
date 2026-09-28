@@ -681,9 +681,8 @@ export interface PendingPlanApprovalWire {
 export interface SessionSnapshot {
 	sessionId: string;
 	/**
-	 * True when NeoPi gave this session no async-job manager: only the first
-	 * top-level session in a process owns one until neopi#121 lands, so later
-	 * chats refuse background bash/task work. The UI shows a "limited" badge.
+	 * Legacy backends may give later roots no async-job manager. The UI shows
+	 * a "limited" badge only for those sessions; multi-root backends omit it.
 	 */
 	backgroundJobsUnavailable?: boolean;
 	sessionFile?: string;

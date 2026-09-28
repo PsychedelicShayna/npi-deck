@@ -1,19 +1,22 @@
 import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import * as path from "node:path";
-import { loadBackend } from "./backend/runtime.ts";
+import { tmpdir } from "node:os";
+import { loadBackend, resolveBackendSelection } from "./backend/runtime.ts";
 import { buildAdvisorsRouter } from "./routes-advisors.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
 
-const root = await mkdtemp(path.join(process.env.HOME ?? "/home/shayna/tmp", "deck-advisor-test-"));
+const root = await mkdtemp(path.join(tmpdir(), "deck-advisor-test-"));
 const agentDir = path.join(root, "agent");
 const project = path.join(root, "project");
 await mkdir(agentDir); await mkdir(project);
 process.env.PI_CODING_AGENT_DIR = agentDir;
 process.env.OMP_DECK_INSTALL_STARTER_SKILLS = "0";
 process.env.OMP_DECK_INSTALL_STARTER_EXTENSIONS = "0";
-await loadBackend({ id: null, path: process.env.NPI_DECK_BACKEND!, source: "env" });
+const backend = resolveBackendSelection();
+if (!backend) throw new Error("advisor tests require a configured NeoPi backend");
+await loadBackend(backend);
 const config: Config = { defaultCwd: project, extraWorkspaces: [], host: "127.0.0.1", port: 0, devMode: true, idleTimeoutMs: 0, dbPath: path.join(root, "db"), uploadsRoot: path.join(root, "uploads") };
 let enabled = false;
 let roster: Array<{ name: string; enabled?: boolean }> = [];

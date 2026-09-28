@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
-import * as path from "node:path";
 import { validateStructuredOutput, type RoutineStep } from "@npi-deck/protocol";
 import { spawnOwned, terminateOwned } from "../../owned-process.ts";
+import { feature } from "../../backend/runtime.ts";
 import { routineAgentCommand, routineAgentSupportsMcpAllowlist } from "../agent-command.ts";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
@@ -145,30 +144,21 @@ async function drainEvents(stream: ReadableStream<Uint8Array> | null, adapter: A
 	adapter.finish();
 }
 
-function mcpFlags(step: AgentStep, command: string[], cwd: string): string[] {
+async function mcpFlags(step: AgentStep, command: string[], cwd: string): Promise<string[]> {
 	const names = step.mcp_servers_allowed;
 	if (!names) return [];
 	if (!names.length) return ["--no-mcp"];
 	if (!routineAgentSupportsMcpAllowlist(command)) {
 		throw new Error("MCP allowlist requires a backend supporting mcp.includeServers and --mcp (neopi#120)");
 	}
-	const configured = new Set<string>();
-	for (const file of [path.join(process.env.PI_CODING_AGENT_DIR ?? path.join(process.env.HOME ?? "", ".omp", "agent"), "mcp.json"), path.join(cwd, ".omp", "mcp.json"), path.join(cwd, ".mcp.json")]) {
-		try {
-			const config: unknown = JSON.parse(readFileSync(file, "utf8"));
-			if (config && typeof config === "object" && "mcpServers" in config) {
-				for (const name of Object.keys((config as { mcpServers?: Record<string, unknown> }).mcpServers ?? {})) configured.add(name);
-			}
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-		}
-	}
 	for (const name of names) {
-		if (!name || /[*?\[\]{}]/.test(name) || !configured.has(name)) {
-			throw new Error(`MCP allowlist server ${JSON.stringify(name)} is not a configured literal server name`);
+		if (typeof name !== "string" || !name || name !== name.trim() || /[,*?[\]{}]/.test(name)) {
+			throw new Error(`MCP allowlist server ${JSON.stringify(name)} is not a literal server name expressible by --mcp`);
 		}
 	}
-	return names.flatMap(name => ["--mcp", name]);
+	const { unmatchedIncludes } = await feature("mcp-allowlist").loadAllMCPConfigs(cwd, { includeServers: names });
+	if (unmatchedIncludes?.length) throw new Error(`MCP allowlist names no available server: ${unmatchedIncludes.join(", ")}`);
+	return ["--mcp", names.join(",")];
 }
 
 export async function executeAgentStep(
@@ -197,9 +187,9 @@ export async function executeAgentStep(
 	};
 	try {
 		const command = pinnedCommand ?? routineAgentCommand([]);
-		const args = ["-p", "--mode", "json", ...(step.model ? ["--model", step.model] : []),
+		const args = ["-p", "--mode", "json", "--no-session", ...(step.model ? ["--model", step.model] : []),
 			...(step.skills_allowed ? step.skills_allowed.length ? ["--skills", step.skills_allowed.join(",")] : ["--no-skills"] : []),
-			...mcpFlags(step, command, defaultCwd), prompt];
+			...await mcpFlags(step, command, defaultCwd), prompt];
 		const proc = spawnOwned([...command, ...args], {
 			cwd: defaultCwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true,
 		});

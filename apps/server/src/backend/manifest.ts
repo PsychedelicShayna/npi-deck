@@ -32,6 +32,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace": typeof import("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace");
 	"@oh-my-pi/pi-coding-agent/internal-urls": typeof import("@oh-my-pi/pi-coding-agent/internal-urls");
+	"@oh-my-pi/pi-coding-agent/mcp/config": typeof import("@oh-my-pi/pi-coding-agent/mcp/config");
 	"@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents": typeof import("@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents");
 	"@oh-my-pi/pi-coding-agent/moa/registration": typeof import("@oh-my-pi/pi-coding-agent/moa/registration");
 	"@oh-my-pi/pi-coding-agent/plan-mode/approved-plan": typeof import("@oh-my-pi/pi-coding-agent/plan-mode/approved-plan");
@@ -173,6 +174,24 @@ export const MANIFEST = {
 		consumers: ["bridge/in-process.ts"],
 		exports: {
 			retainMixtureCatalog: op("@oh-my-pi/pi-coding-agent/moa/registration", "retainMixtureCatalog"),
+		},
+	},
+	/** neopi#120: per-session MCP filtering and typed unknown-server errors. */
+	"mcp-allowlist": {
+		tier: "optional-feature",
+		consumers: ["bridge/in-process.ts", "routines/steps/agent.ts"],
+		exports: {
+			cfgMcpIncludeServers: op(CODING_AGENT, "cfgMcpIncludeServers"),
+			MCPUnknownServerError: op(CODING_AGENT, "MCPUnknownServerError"),
+			loadAllMCPConfigs: op("@oh-my-pi/pi-coding-agent/mcp/config", "loadAllMCPConfigs"),
+		},
+	},
+	/** neopi#121: independent async-job domains and collision-safe root identities. */
+	"multi-root": {
+		tier: "optional-feature",
+		consumers: ["bridge/in-process.ts"],
+		exports: {
+			AgentIdConflictError: op(CODING_AGENT, "AgentIdConflictError"),
 		},
 	},
 	/** W7c: routine agent steps spawn the tree's CLI in `--mode json`. */

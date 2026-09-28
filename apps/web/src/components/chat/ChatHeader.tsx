@@ -108,9 +108,9 @@ function Inner({ session }: { session: SessionUi }) {
 			{session.backgroundJobsUnavailable ? (
 				<span
 					className="shrink-0 rounded border border-warn/50 bg-warn/10 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-warn"
-					title="Only the first live chat gets NeoPi's background-job manager until neopi#121. Background bash/task work in this chat is refused, and the refusal is shown as the tool's error."
+					title="This legacy backend has no background-job manager for this chat. Background bash/task work is unavailable here."
 				>
-					limited: no background jobs until neopi#121
+					limited: no background jobs
 				</span>
 			) : null}
 			{session.planMode?.enabled ? (

@@ -95,10 +95,14 @@ export interface RuntimeEnvUpdate {
 export interface CreateSessionOpts {
 	cwd: string;
 	model?: ModelRef;
+	/** Per-session MCP server names; absent inherits backend settings, [] disables MCP. */
+	mcpServersAllowed?: string[];
 }
 
 export interface ResumeSessionOpts {
 	sessionPath: string;
+	/** Per-session MCP server names; absent inherits backend settings, [] disables MCP. */
+	mcpServersAllowed?: string[];
 }
 
 export type EventListener = (event: AgentSessionEventJson) => void;

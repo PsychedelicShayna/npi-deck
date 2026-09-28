@@ -104,7 +104,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		const release = workRegistry.admit("session", `create:${crypto.randomUUID()}`);
 		try {
 			const sessionManager = sdk().SessionManager.create(opts.cwd);
-			const handle = await this.open(opts.cwd, sessionManager, opts.model);
+			const handle = await this.open(opts.cwd, sessionManager, opts.model, opts.mcpServersAllowed);
 			log.info(`created session ${handle.sessionId} cwd=${opts.cwd}`);
 			return handle;
 		} finally { release(); }
@@ -119,30 +119,45 @@ export class InProcessAgentBridge implements AgentBridge {
 			}
 			const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
 			const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
-			const handle = await this.open(cwd, sessionManager, undefined);
+			const handle = await this.open(cwd, sessionManager, undefined, opts.mcpServersAllowed);
 			log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
 			return handle;
 		} finally { release(); }
 	}
 
-	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined): Promise<InProcessSessionHandle> {
+	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed?: string[]): Promise<InProcessSessionHandle> {
 		const modelRegistry = await this.ensureModelRegistry();
 		const sessionId = sessionManager.getSessionId();
-		const result = await sdk().createAgentSession({
+		// Keep each root's effective workspace settings isolated. override() changes
+		// this instance only; a deck allowlist must never write user config.yml.
+		const settings = await sdk().Settings.loadIsolated({ cwd, agentDir: sdk().getAgentDir() });
+		if (mcpServersAllowed !== undefined) {
+			if (mcpServersAllowed.some(name => !name || /[*?[\]{}]/.test(name))) {
+				throw new Error("MCP allowlist requires configured literal server names (no glob metacharacters)");
+			}
+			if (mcpServersAllowed.length && !hasFeature("mcp-allowlist")) {
+				throw new Error("MCP allowlist requires backend support for mcp.includeServers (neopi#120)");
+			}
+			if (mcpServersAllowed.length) feature("mcp-allowlist").cfgMcpIncludeServers.override(settings, mcpServersAllowed);
+		}
+		let result: CreateAgentSessionResult;
+		try {
+			result = await sdk().createAgentSession({
 			cwd,
 			sessionManager,
 			modelRegistry,
+			settings,
 			authStorage: modelRegistry.authStorage,
 			// Skip eval-tool Python warmup on session create. On Windows this otherwise
 			// flashes a python.exe console window each turn-zero; on demand spawn is fine.
 			skipPythonPreflight: true,
+			enableMCP: mcpServersAllowed?.length === 0 ? false : undefined,
 			// Tell the SDK this session has a UI — gates the `ask` tool registration
 			// and any extension that calls `ctx.ui.*`. The actual ExtensionUIContext
 			// is installed via `setToolUIContext(...)` below.
 			hasUI: true,
-			// NeoPi defaults every top-level agentId to "Main" and its registry
-			// overwrites on collision (neopi#121), so two deck chats would
-			// clobber each other's entry. One id per live session generation.
+			// A unique root ID per live generation also scopes children and their
+			// artifacts on multi-root backends; legacy backends keep the same ID.
 			agentId: `deck-${sessionId}-${++this.generation}`,
 			agentDisplayName: sessionManager.getSessionName() ?? `chat ${sessionId.slice(0, 8)}`,
 			// `model` is a ModelRef ({provider,id}); the SDK's `model` option expects a
@@ -153,7 +168,16 @@ export class InProcessAgentBridge implements AgentBridge {
 						return m ? { model: m } : {};
 					})()
 				: {}),
-		});
+			});
+		} catch (error) {
+			if (hasFeature("mcp-allowlist") && error instanceof feature("mcp-allowlist").MCPUnknownServerError) {
+				throw new Error(`MCP allowlist names no available server: ${error.serverNames.join(", ")}`, { cause: error });
+			}
+			if (hasFeature("multi-root") && error instanceof feature("multi-root").AgentIdConflictError) {
+				throw new Error(`NeoPi agent ID ${JSON.stringify(error.agentId)} is already held by a live session`, { cause: error });
+			}
+			throw error;
+		}
 
 		const session = result.session;
 		const ext = result.extensionsResult;
@@ -830,9 +854,9 @@ export class InProcessSessionHandle implements SessionHandle {
 		const pendingPlan = this.planBridge.getPendingPlanApproval();
 		if (pendingPlan) snap.pendingPlanApproval = pendingPlan;
 		if (this.shadowQueue.length > 0) snap.queuedPrompts = [...this.shadowQueue];
-		// Only the first top-level NeoPi session in a process owns an async-job
-		// manager (neopi#121); later ones refuse background bash/task work.
-		if ("asyncJobManager" in s && s.asyncJobManager === undefined) snap.backgroundJobsUnavailable = true;
+		// Legacy backends limit async jobs to their first root. On multi-root
+		// backends each root owns its own manager, including later chats.
+		if (!hasFeature("multi-root") && "asyncJobManager" in s && s.asyncJobManager === undefined) snap.backgroundJobsUnavailable = true;
 		return snap;
 	}
 
