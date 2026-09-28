@@ -10,11 +10,12 @@
  * 54545/1455 ports, so manual paste is the only path that works for them —
  * see docs/oauth-deck-sdk-findings.md.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ServerFrame } from "@omp-deck/protocol";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { authApi } from "@/lib/auth-api";
+import { createOAuthFrameGate, type OAuthFrameGate } from "@/lib/oauth-flow";
 import { useStore } from "@/lib/store";
 
 interface Props {
@@ -49,7 +50,21 @@ export function OAuthFlowModal({ open, provider, providerName, onClose, onComple
 
 	const title = useMemo(() => `Sign in to ${providerName ?? provider ?? "provider"}`, [providerName, provider]);
 
-	// Kick off the flow when the modal opens.
+	// The server can broadcast a flow's first frames (consent, and a prompt
+	// from providers that ask synchronously) before the start response names
+	// the flow. Each flow gets a gate that buffers the provider's frames until
+	// `bind`, then passes only this flow's frames. The WS subscription is
+	// declared first so it is live before the start request goes out, and it
+	// survives reconnects without restarting the flow.
+	const gateRef = useRef<OAuthFrameGate | null>(null);
+	const onCompleteRef = useRef(onComplete);
+	onCompleteRef.current = onComplete;
+
+	useEffect(() => {
+		if (!open || !ws) return;
+		return ws.subscribe((frame: ServerFrame) => gateRef.current?.push(frame));
+	}, [open, ws]);
+
 	useEffect(() => {
 		if (!open || !provider) return;
 		let cancelled = false;
@@ -65,35 +80,13 @@ export function OAuthFlowModal({ open, provider, providerName, onClose, onComple
 		setShowManual(false);
 		setSubmittingManual(false);
 
-		void authApi
-			.startOAuth(provider)
-			.then((resp) => {
-				if (cancelled) return;
-				setFlowId(resp.flowId);
-				setConsentUrl(resp.url);
-				if (resp.instructions) setInstructions(resp.instructions);
-				setPhase("consent");
-			})
-			.catch((err) => {
-				if (cancelled) return;
-				setErrorMessage(err instanceof Error ? err.message : String(err));
-				setPhase("error");
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [open, provider]);
-
-	// Subscribe to WS frames for THIS flow.
-	useEffect(() => {
-		if (!open || !ws || !flowId) return;
-		const unsub = ws.subscribe((frame: ServerFrame) => {
-			if (!("flowId" in frame) || frame.flowId !== flowId) return;
+		const gate = createOAuthFrameGate(provider, (frame) => {
+			if (cancelled) return;
 			switch (frame.type) {
 				case "oauth_consent":
 					setConsentUrl(frame.url);
 					if (frame.instructions) setInstructions(frame.instructions);
-					setPhase("consent");
+					setPhase((p) => (p === "prompting" || p === "complete" || p === "error" ? p : "consent"));
 					return;
 				case "oauth_progress":
 					setProgress(frame.message);
@@ -110,7 +103,7 @@ export function OAuthFlowModal({ open, provider, providerName, onClose, onComple
 				case "oauth_complete":
 					setPhase("complete");
 					// Brief success state, then close.
-					setTimeout(() => onComplete(), 1200);
+					setTimeout(() => onCompleteRef.current(), 1200);
 					return;
 				case "oauth_failed":
 					setErrorMessage(frame.message);
@@ -118,11 +111,32 @@ export function OAuthFlowModal({ open, provider, providerName, onClose, onComple
 					return;
 			}
 		});
-		return unsub;
-	}, [open, ws, flowId, onComplete]);
+		gateRef.current = gate;
+
+		void authApi
+			.startOAuth(provider)
+			.then((resp) => {
+				if (cancelled) return;
+				setFlowId(resp.flowId);
+				setConsentUrl(resp.url);
+				if (resp.instructions) setInstructions(resp.instructions);
+				setPhase("consent");
+				gate.bind(resp.flowId);
+			})
+			.catch((err) => {
+				if (cancelled) return;
+				setErrorMessage(err instanceof Error ? err.message : String(err));
+				setPhase("error");
+			});
+		return () => {
+			cancelled = true;
+			if (gateRef.current === gate) gateRef.current = null;
+		};
+	}, [open, provider]);
 
 	function closeAndCancel(): void {
-		if (provider && flowId && phase !== "complete" && phase !== "error") {
+		// Cancel by provider even before the start response named the flow.
+		if (provider && phase !== "complete" && phase !== "error") {
 			void authApi.cancelOAuth(provider).catch(() => {});
 		}
 		onClose();
