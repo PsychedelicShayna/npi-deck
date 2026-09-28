@@ -701,6 +701,12 @@ export interface PendingPlanApprovalWire {
 /** Snapshot delivered when a client subscribes to an existing session. */
 export interface SessionSnapshot {
 	sessionId: string;
+	/**
+	 * True when NeoPi gave this session no async-job manager: only the first
+	 * top-level session in a process owns one until neopi#121 lands, so later
+	 * chats refuse background bash/task work. The UI shows a "limited" badge.
+	 */
+	backgroundJobsUnavailable?: boolean;
 	sessionFile?: string;
 	sessionName?: string;
 	cwd: string;

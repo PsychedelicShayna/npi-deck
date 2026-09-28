@@ -68,6 +68,8 @@ export class InProcessAgentBridge implements AgentBridge {
 	/** Shared SDK model registry, lazily constructed on first session create. */
 	private modelRegistry: ModelRegistry | undefined;
 	private modelRegistryPromise: Promise<ModelRegistry> | undefined;
+	/** Bumped per SDK session this bridge creates; makes every live generation's agentId unique. */
+	private generation = 0;
 
 	constructor(opts: {
 		idleTimeoutMs?: number;
@@ -80,9 +82,30 @@ export class InProcessAgentBridge implements AgentBridge {
 
 	async createSession(opts: CreateSessionOpts): Promise<SessionHandle> {
 		const sessionManager = sdk().SessionManager.create(opts.cwd);
+		const handle = await this.open(opts.cwd, sessionManager, opts.model);
+		log.info(`created session ${handle.sessionId} cwd=${opts.cwd}`);
+		return handle;
+	}
+
+	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
+		// A session already live in this process is reused: a second SDK
+		// session on the same file would fork its state and start its MCP
+		// servers again.
+		for (const a of this.active.values()) {
+			if (a.handle.sessionFile === opts.sessionPath) return a.handle;
+		}
+		const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
+		const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
+		const handle = await this.open(cwd, sessionManager, undefined);
+		log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
+		return handle;
+	}
+
+	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined): Promise<InProcessSessionHandle> {
 		const modelRegistry = await this.ensureModelRegistry();
+		const sessionId = sessionManager.getSessionId();
 		const result = await sdk().createAgentSession({
-			cwd: opts.cwd,
+			cwd,
 			sessionManager,
 			modelRegistry,
 			authStorage: modelRegistry.authStorage,
@@ -93,11 +116,16 @@ export class InProcessAgentBridge implements AgentBridge {
 			// and any extension that calls `ctx.ui.*`. The actual ExtensionUIContext
 			// is installed via `setToolUIContext(...)` below.
 			hasUI: true,
-			// `opts.model` is a ModelRef ({provider,id}); the SDK's `model` option expects a
+			// NeoPi defaults every top-level agentId to "Main" and its registry
+			// overwrites on collision (neopi#121), so two deck chats would
+			// clobber each other's entry. One id per live session generation.
+			agentId: `deck-${sessionId}-${++this.generation}`,
+			agentDisplayName: sessionManager.getSessionName() ?? `chat ${sessionId.slice(0, 8)}`,
+			// `model` is a ModelRef ({provider,id}); the SDK's `model` option expects a
 			// fully-shaped Model — resolve via the registry when present.
-			...(opts.model
+			...(model
 				? (() => {
-						const m = modelRegistry.find(opts.model!.provider, opts.model!.id);
+						const m = modelRegistry.find(model.provider, model.id);
 						return m ? { model: m } : {};
 					})()
 				: {}),
@@ -113,28 +141,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			log.info(`extension paths: ${ext.extensions.map(e => (e as { path?: string }).path ?? "<unknown>").join(" | ")}`);
 		}
 		await this.wireExtensionRunner(session);
-		const handle = this.attach(session, opts.cwd, sessionManager, result.setToolUIContext);
-		log.info(`created session ${handle.sessionId} cwd=${opts.cwd}`);
-		return handle;
-	}
-
-	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
-		const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
-		const cwd = (sessionManager.getCwd?.() as string | undefined) ?? process.cwd();
-		const modelRegistry = await this.ensureModelRegistry();
-		const result = await sdk().createAgentSession({
-			cwd,
-			sessionManager,
-			modelRegistry,
-			authStorage: modelRegistry.authStorage,
-			skipPythonPreflight: true,
-			hasUI: true,
-		});
-		const session = result.session;
-		const handle = this.attach(session, cwd, sessionManager, result.setToolUIContext);
-		await this.wireExtensionRunner(session);
-		log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
-		return handle;
+		return this.attach(session, cwd, sessionManager, result.setToolUIContext);
 	}
 
 
@@ -676,6 +683,9 @@ export class InProcessSessionHandle implements SessionHandle {
 		const pendingPlan = this.planBridge.getPendingPlanApproval();
 		if (pendingPlan) snap.pendingPlanApproval = pendingPlan;
 		if (this.shadowQueue.length > 0) snap.queuedPrompts = [...this.shadowQueue];
+		// Only the first top-level NeoPi session in a process owns an async-job
+		// manager (neopi#121); later ones refuse background bash/task work.
+		if ("asyncJobManager" in s && s.asyncJobManager === undefined) snap.backgroundJobsUnavailable = true;
 		return snap;
 	}
 
