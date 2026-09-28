@@ -1141,13 +1141,26 @@ export interface UpdateTaskRequest {
 	body?: string;
 	stateId?: string;
 	orderInState?: number;
-	cwd?: string;
+	/** `null` or blank clears the cwd (files the task as unassigned); omit to leave it unchanged. */
+	cwd?: string | null;
 	archived?: boolean;
 }
 
+/** A project on the kanban: every task sharing one `cwd`. */
+export interface TaskProject {
+	/** `null` is the bucket of tasks with no cwd. */
+	cwd: string | null;
+	/** Last path segment of `cwd`, or "Unassigned". */
+	label: string;
+	taskCount: number;
+}
+
 export interface ListTasksResponse {
+	/** Every project's tasks, or only one project's when `GET /api/tasks?cwd=` is given. */
 	tasks: Task[];
 	states: TaskState[];
+	/** Every project holding a task, regardless of the `cwd` filter. */
+	projects: TaskProject[];
 }
 
 export interface CreateTaskStateRequest {

@@ -10,7 +10,7 @@ interface Props {
 	task: Task | null;
 	states: TaskState[];
 	onClose: () => void;
-	onSave: (patch: { title?: string; body?: string; stateId?: string; cwd?: string }) => void;
+	onSave: (patch: { title?: string; body?: string; stateId?: string; cwd?: string | null }) => void;
 	onDelete: () => void;
 	onArchive: () => void;
 	onOpenInChat: () => void;
@@ -59,8 +59,9 @@ export function TaskModal({
 	}
 	function commitCwd(): void {
 		if (!task) return;
-		const next = cwd.trim() || undefined;
-		if ((task.cwd ?? "") !== (next ?? "")) onSave({ cwd: next });
+		// A blank field clears the cwd; `undefined` would be dropped by JSON and change nothing.
+		const next = cwd.trim() || null;
+		if ((task.cwd ?? null) !== next) onSave({ cwd: next });
 	}
 
 	const isArchived = Boolean(task.archivedAt);

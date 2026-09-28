@@ -1,6 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Task } from "@omp-deck/protocol";
+import { projectLabel } from "@/lib/kanban-project";
 import { formatBriefTime } from "@/lib/time";
 import { cn, truncate } from "@/lib/utils";
 
@@ -93,6 +94,9 @@ export function TaskCardBody({ task, lifted }: { task: Task; lifted: boolean }) 
 		>
 			<div className="flex items-baseline gap-2 font-mono text-[10px] uppercase tracking-meta text-ink-3">
 				<span>T-{task.displayId}</span>
+				<span className="min-w-0 truncate normal-case text-ink-4" title={task.cwd ?? "No project"}>
+					{projectLabel(task.cwd)}
+				</span>
 				{brief ? (
 					<time
 						dateTime={stamp}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
 	DndContext,
@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/sortable";
 import { Settings2 } from "lucide-react";
 
-import type { Task, TaskState } from "@omp-deck/protocol";
+import type { Task, TaskProject, TaskState } from "@omp-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Column } from "@/components/tasks/Column";
@@ -23,6 +23,14 @@ import { TaskCardBody } from "@/components/tasks/TaskCard";
 import { TaskModal } from "@/components/tasks/TaskModal";
 import { StateConfig } from "@/components/tasks/StateConfig";
 import { tasksApi } from "@/lib/tasks-api";
+import {
+	ALL_PROJECTS,
+	filterFromKey,
+	filterKey,
+	projectLabel,
+	toQueryCwd,
+	type ProjectFilter,
+} from "@/lib/kanban-project";
 import { useStore } from "@/lib/store";
 
 export function TasksView() {
@@ -35,6 +43,8 @@ export function TasksView() {
 
 	const [tasks, setTasks] = useState<Task[]>([]);
 	const [states, setStates] = useState<TaskState[]>([]);
+	const [projects, setProjects] = useState<TaskProject[]>([]);
+	const [projectFilter, setProjectFilter] = useState<ProjectFilter>(ALL_PROJECTS);
 	const [error, setError] = useState<string | undefined>();
 	const [loading, setLoading] = useState(true);
 
@@ -47,18 +57,24 @@ export function TasksView() {
 	const [draggingTask, setDraggingTask] = useState<Task | null>(null);
 	const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
 
+	// Only the latest request may land, so a slow response for the previous
+	// filter cannot repaint the board after the filter changed.
+	const refreshSeq = useRef(0);
 	const refresh = useCallback(async (): Promise<void> => {
+		const seq = ++refreshSeq.current;
 		try {
-			const data = await tasksApi.list();
+			const data = await tasksApi.list({ cwd: toQueryCwd(projectFilter) });
+			if (seq !== refreshSeq.current) return;
 			setTasks(data.tasks);
 			setStates(data.states);
+			setProjects(data.projects);
 			setError(undefined);
 		} catch (e) {
-			setError(String(e));
+			if (seq === refreshSeq.current) setError(String(e));
 		} finally {
-			setLoading(false);
+			if (seq === refreshSeq.current) setLoading(false);
 		}
-	}, []);
+	}, [projectFilter]);
 
 	useEffect(() => {
 		void refresh();
@@ -76,18 +92,21 @@ export function TasksView() {
 
 	// Deep-link support: `?open=<taskId>` (e.g. from "Promote to task" in the
 	// inbox) auto-opens the matching task once the list has loaded, then strips
-	// the param so back/forward navigation doesn't re-open it.
+	// the param so back/forward navigation doesn't re-open it. A task outside
+	// the current project filter widens the board to all projects first.
 	useEffect(() => {
 		const wantedId = searchParams.get("open");
-		if (!wantedId || tasks.length === 0) return;
+		if (!wantedId || loading) return;
 		const found = tasks.find((t) => t.id === wantedId);
-		if (found) {
-			setOpenTask(found);
-			const next = new URLSearchParams(searchParams);
-			next.delete("open");
-			setSearchParams(next, { replace: true });
+		if (!found) {
+			if (projectFilter.kind !== "all") setProjectFilter(ALL_PROJECTS);
+			return;
 		}
-	}, [searchParams, setSearchParams, tasks]);
+		setOpenTask(found);
+		const next = new URLSearchParams(searchParams);
+		next.delete("open");
+		setSearchParams(next, { replace: true });
+	}, [searchParams, setSearchParams, tasks, loading, projectFilter]);
 
 	const tasksByState = useMemo(() => {
 		const map: Record<string, Task[]> = {};
@@ -101,7 +120,9 @@ export function TasksView() {
 
 	async function onCreate(stateId: string, title: string): Promise<void> {
 		try {
-			const created = await tasksApi.create({ title, stateId });
+			// A card created while filtered to a project belongs to that project.
+			const cwd = projectFilter.kind === "cwd" ? projectFilter.cwd : undefined;
+			const created = await tasksApi.create({ title, stateId, ...(cwd ? { cwd } : {}) });
 			setTasks((prev) => [...prev, created]);
 		} catch (e) {
 			setError(String(e));
@@ -277,6 +298,7 @@ export function TasksView() {
 							<div className="text-xs text-ink-3">
 								{tasks.length} task{tasks.length === 1 ? "" : "s"} · {states.length} columns
 							</div>
+							<ProjectFilterSelect projects={projects} value={projectFilter} onChange={setProjectFilter} />
 							<button
 								type="button"
 								onClick={() => {
@@ -389,6 +411,49 @@ export function TasksView() {
 				onOpenInChat={() => openTask && void openInChat(openTask)}
 			/>
 		</>
+	);
+}
+
+/**
+ * Project filter for the global board. Options list every project from the
+ * server (unfiltered), and the current selection stays listed even when its
+ * last task has moved away, so the select never silently jumps to "All".
+ */
+function ProjectFilterSelect({
+	projects,
+	value,
+	onChange,
+}: {
+	projects: TaskProject[];
+	value: ProjectFilter;
+	onChange: (next: ProjectFilter) => void;
+}) {
+	const options = [...projects];
+	if (value.kind === "cwd" && !options.some((p) => p.cwd === value.cwd)) {
+		options.push({ cwd: value.cwd, label: projectLabel(value.cwd), taskCount: 0 });
+	}
+	if (value.kind === "unassigned" && !options.some((p) => p.cwd === null)) {
+		options.push({ cwd: null, label: "Unassigned", taskCount: 0 });
+	}
+	const total = projects.reduce((n, p) => n + p.taskCount, 0);
+	return (
+		<select
+			value={filterKey(value)}
+			onChange={(e) => onChange(filterFromKey(e.target.value))}
+			className="field h-7 max-w-[16rem] px-2 font-mono text-2xs"
+			title={value.kind === "cwd" ? value.cwd : undefined}
+			aria-label="Project"
+		>
+			<option value={filterKey(ALL_PROJECTS)}>All projects · {total}</option>
+			{options.map((p) => {
+				const key = filterKey(p.cwd === null ? { kind: "unassigned" } : { kind: "cwd", cwd: p.cwd });
+				return (
+					<option key={key} value={key} title={p.cwd ?? undefined}>
+						{p.label} · {p.taskCount}
+					</option>
+				);
+			})}
+		</select>
 	);
 }
 

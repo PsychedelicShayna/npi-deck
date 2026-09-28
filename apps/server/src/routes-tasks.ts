@@ -13,12 +13,14 @@ import type {
 	CreateTaskStateRequest,
 	ListTasksResponse,
 	MoveTaskRequest,
+	TaskProject,
 	UpdateTaskRequest,
 	UpdateTaskStateRequest,
 } from "@omp-deck/protocol";
 
 import { logger } from "./log.ts";
 import { broadcastBus } from "./broadcast-bus.ts";
+import { deriveLabel } from "./workspace-label.ts";
 import {
 	createState,
 	createTask,
@@ -27,6 +29,7 @@ import {
 	getState,
 	getTask,
 	listStates,
+	listTaskProjects,
 	listTasks,
 	moveTask,
 	reorderStates,
@@ -47,9 +50,21 @@ export function buildTasksRouter(): Hono {
 
 	app.get("/tasks", (c) => {
 		const includeArchived = c.req.query("includeArchived") === "1";
-		const tasks = listTasks({ includeArchived });
+		// `?cwd=<path>` scopes to one project and `?cwd=` (present, empty) to
+		// tasks with no cwd; without the param the board holds every project.
+		const cwdParam = c.req.query("cwd");
+		const tasks = listTasks({ includeArchived, cwd: cwdParam === undefined ? undefined : cwdParam || null });
 		const states = listStates();
-		const body: ListTasksResponse = { tasks, states };
+		const projects: TaskProject[] = listTaskProjects({ includeArchived })
+			.map((p) => ({ ...p, label: p.cwd === null ? "Unassigned" : deriveLabel(p.cwd) }))
+			// Named projects by label (full path breaks ties between checkouts of
+			// the same repo), then the unassigned bucket last.
+			.sort((a, b) => {
+				if (a.cwd === null) return b.cwd === null ? 0 : 1;
+				if (b.cwd === null) return -1;
+				return a.label.localeCompare(b.label) || a.cwd.localeCompare(b.cwd);
+			});
+		const body: ListTasksResponse = { tasks, states, projects };
 		return c.json(body);
 	});
 

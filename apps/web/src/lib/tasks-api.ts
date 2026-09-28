@@ -24,9 +24,13 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const tasksApi = {
-	list(includeArchived = false): Promise<ListTasksResponse> {
-		const q = includeArchived ? "?includeArchived=1" : "";
-		return req<ListTasksResponse>(`/tasks${q}`);
+	/** `cwd`: omit for every project, `null` for unassigned tasks, or a working directory. */
+	list(opts: { includeArchived?: boolean; cwd?: string | null } = {}): Promise<ListTasksResponse> {
+		const q = new URLSearchParams();
+		if (opts.includeArchived) q.set("includeArchived", "1");
+		if (opts.cwd !== undefined) q.set("cwd", opts.cwd ?? "");
+		const qs = q.toString();
+		return req<ListTasksResponse>(`/tasks${qs ? `?${qs}` : ""}`);
 	},
 	create(body: CreateTaskRequest): Promise<Task> {
 		return req<Task>(`/tasks`, { method: "POST", body: JSON.stringify(body) });
