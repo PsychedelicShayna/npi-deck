@@ -149,7 +149,7 @@ export function OAuthFlowModal({ open, provider, providerName, onClose, onComple
 			await authApi.submitManualCode(flowId, manualCode.trim());
 			setManualCode("");
 			setProgress("Exchanging authorization code…");
-			setPhase("progress");
+			setPhase((current) => (current === "complete" || current === "error" ? current : "progress"));
 		} catch (err) {
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			setPhase("error");
@@ -164,7 +164,7 @@ export function OAuthFlowModal({ open, provider, providerName, onClose, onComple
 			await authApi.replyPrompt(flowId, prompt.promptId, promptAnswer);
 			setPrompt(null);
 			setPromptAnswer("");
-			setPhase("progress");
+			setPhase((current) => (current === "complete" || current === "error" ? current : "progress"));
 		} catch (err) {
 			setErrorMessage(err instanceof Error ? err.message : String(err));
 			setPhase("error");
@@ -177,7 +177,7 @@ export function OAuthFlowModal({ open, provider, providerName, onClose, onComple
 				<div>
 					<h2 className="text-lg font-semibold text-ink">{title}</h2>
 					<p className="mt-1 text-xs text-ink-3">
-						The deck talks to the omp SDK; the SDK opens a local callback listener and the
+						The deck talks to the NeoPi SDK; the SDK opens a local callback listener and the
 						provider's consent flow redirects to it. Credentials never leave this machine.
 					</p>
 				</div>
