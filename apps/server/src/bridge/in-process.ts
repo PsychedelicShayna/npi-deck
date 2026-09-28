@@ -49,7 +49,12 @@ interface Active {
 	unsubscribe: () => void;
 	/** Wall-clock ms of the last user-visible activity on this session. */
 	lastActivityAt: number;
-	/** True between turn_start and turn_end — never reap mid-turn. */
+	/**
+	 * True from `agent_start`/`turn_start` until a terminal `agent_end`. NeoPi
+	 * emits `agent_end` with `isTerminal: false` when queued input or an async
+	 * delivery will resume the run, so neither that nor `turn_end` means idle.
+	 * The reaper never disposes a session while this is set.
+	 */
 	turnInFlight: boolean;
 	/** Set of WS connection ids currently subscribed. Reaping requires zero subscribers. */
 	subscribers: Set<string>;
@@ -379,20 +384,24 @@ export class InProcessAgentBridge implements AgentBridge {
 		// Bridge SDK events to handle's listeners, AND to bridge-internal activity
 		// tracking so the reaper sees real agent work and won't kill an in-flight turn.
 		const unsubscribe = session.subscribe((event) => {
+			const type = (event as { type?: string })?.type;
 			const entry = this.active.get(sessionId);
 			if (entry) {
 				entry.lastActivityAt = Date.now();
-				const type = (event as { type?: string })?.type;
-				if (type === "turn_start") entry.turnInFlight = true;
-				else if (type === "turn_end" || type === "agent_end") entry.turnInFlight = false;
+				entry.turnInFlight = nextTurnInFlight(entry.turnInFlight, event as { type?: string; isTerminal?: boolean });
+			}
+			// NeoPi's model_changed carries no payload; re-send the header fields
+			// so the UI follows model switches made by the agent or a slash command.
+			if (type === "model_changed") {
+				handle.emit({ type: "session_updated", snapshot: handle.snapshot() } as unknown as AgentSessionEventJson);
+				return;
 			}
 			handle.emit(event as unknown as AgentSessionEventJson);
 			// After the SDK's own event reaches subscribers, fire a synthetic
 			// `context_usage` event on the moments where the underlying number
 			// changes: a turn finishing (fresh assistant usage now available)
 			// or a compaction completing (post-compaction context shrunk).
-			const type = (event as { type?: string })?.type;
-			if (type === "turn_end" || type === "agent_end" || type === "compaction_complete") {
+			if (type === "turn_end" || type === "agent_end" || type === "auto_compaction_end") {
 				const usage = handle.getContextUsage();
 				if (usage) {
 					handle.emit({ type: "context_usage", contextUsage: usage } as unknown as AgentSessionEventJson);
@@ -400,17 +409,14 @@ export class InProcessAgentBridge implements AgentBridge {
 			}
 			// Same pattern for todos: the SDK only fires `todo_reminder` on
 			// reminder ticks (typically at turn boundaries), so the deck UI
-			// shows stale todos between an agent's `todo_write` call and the
-			// next reminder cycle. Synthesize `todo_phases_set` after each
-			// todo_write tool result so the Inspector TodoPanel reflects the
-			// current phase tree within the same tick (T-106).
-			if (type === "tool_execution_end") {
-				const toolName = (event as { toolName?: string }).toolName;
-				if (toolName === "todo_write") {
-					const phases = (session as unknown as { getTodoPhases?: () => unknown[] }).getTodoPhases?.();
-					if (Array.isArray(phases)) {
-						handle.emit({ type: "todo_phases_set", todoPhases: phases } as unknown as AgentSessionEventJson);
-					}
+			// shows stale todos between an agent's `todo` call and the next
+			// reminder cycle. Synthesize `todo_phases_set` after each `todo`
+			// tool result so the Inspector TodoPanel reflects the current
+			// phase tree within the same tick (T-106).
+			if (type === "tool_execution_end" && (event as { toolName?: string }).toolName === "todo") {
+				const phases = (session as unknown as { getTodoPhases?: () => unknown[] }).getTodoPhases?.();
+				if (Array.isArray(phases)) {
+					handle.emit({ type: "todo_phases_set", todoPhases: phases } as unknown as AgentSessionEventJson);
 				}
 			}
 			// Issue #4 recovery hint: when the SDK surfaces an auth-shaped error
@@ -1102,31 +1108,43 @@ export class InProcessSessionHandle implements SessionHandle {
 	}
 }
 
-/** Normalize a SessionManager.list / listAll record into our SessionSummary. */
-function summarize(raw: any): SessionSummary {
-	// omp's list returns objects like:
-	//   { id, path, cwd, title?, timestamp, messageCount?, modifiedAt? }
-	const id = String(raw.id ?? raw.sessionId ?? raw.header?.id ?? "");
-	const filePath = String(raw.path ?? raw.file ?? raw.sessionFile ?? "");
-	const cwd = String(raw.cwd ?? raw.header?.cwd ?? "");
-	const title =
-		typeof raw.title === "string"
-			? raw.title
-			: typeof raw.header?.title === "string"
-				? raw.header.title
-				: undefined;
-	const createdAt = String(raw.timestamp ?? raw.createdAt ?? raw.header?.timestamp ?? "");
-	const updatedAt = String(raw.modifiedAt ?? raw.updatedAt ?? createdAt);
-	const messageCount = Number(raw.messageCount ?? raw.count ?? 0);
+/** Normalize a NeoPi `SessionInfo` (SessionManager.list / listAll) into our SessionSummary. */
+function summarize(raw: {
+	id: string;
+	path: string;
+	cwd: string;
+	title?: string;
+	created: Date;
+	modified: Date;
+	messageCount: number;
+}): SessionSummary {
 	return {
-		id,
-		path: filePath,
-		cwd,
-		title,
-		createdAt,
-		updatedAt,
-		messageCount,
+		id: raw.id,
+		path: raw.path,
+		cwd: raw.cwd,
+		title: raw.title,
+		createdAt: raw.created.toISOString(),
+		updatedAt: raw.modified.toISOString(),
+		messageCount: raw.messageCount,
 	};
+}
+
+/**
+ * Whether a session is mid-run after `event`. A run starts at `agent_start`
+ * (or `turn_start`) and ends only at a terminal `agent_end`: NeoPi emits
+ * `agent_end` with `isTerminal: false` when queued input or an async delivery
+ * resumes the session, and `turn_end` fires between the turns of one run.
+ */
+export function nextTurnInFlight(prev: boolean, event: { type?: string; isTerminal?: boolean }): boolean {
+	switch (event.type) {
+		case "agent_start":
+		case "turn_start":
+			return true;
+		case "agent_end":
+			return event.isTerminal === false;
+		default:
+			return prev;
+	}
 }
 
 /**
