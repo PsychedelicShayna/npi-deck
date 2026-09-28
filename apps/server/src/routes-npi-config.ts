@@ -57,21 +57,11 @@ function envLock(setting: AnySetting): string | undefined {
 	return `$${setting.envName} overrides this setting while it is set. Remove it from the deck's Env settings or the launching environment to edit it here.`;
 }
 
-/**
- * The global file NeoPi reads: the first existing of its main config names.
- * NeoPi always saves to the first name, so when only a later one exists a save
- * would create a new file that shadows it; `readOnlyReason` explains that.
- */
-function globalConfigFile(): { path: string; readOnlyReason?: string } {
+/** The global file NeoPi reads and saves: the first existing of its main config names (config.yml, then config.yaml). */
+function globalConfigFile(): string {
 	const agentDir = sdk().getAgentDir();
-	const [primary, ...others] = feature("npi-config").MAIN_CONFIG_FILENAMES.map(name => path.join(agentDir, name));
-	if (existsSync(primary!)) return { path: primary! };
-	const fallback = others.find(file => existsSync(file));
-	if (!fallback) return { path: primary! };
-	return {
-		path: fallback,
-		readOnlyReason: `NeoPi reads ${fallback} but saves to ${primary}, which would then shadow it. Rename ${path.basename(fallback)} to ${path.basename(primary!)} to edit settings here.`,
-	};
+	const files = feature("npi-config").MAIN_CONFIG_FILENAMES.map(name => path.join(agentDir, name));
+	return files.find(file => existsSync(file)) ?? files[0]!;
 }
 
 function describe(setting: AnySetting, settings: Settings, globalLayer: RawLayer): NpiConfigSetting {
@@ -112,8 +102,9 @@ function describe(setting: AnySetting, settings: Settings, globalLayer: RawLayer
 	if (ui?.ordered) result.ordered = true;
 	if (definition.pathScoped) result.pathScoped = true;
 	if (setting.envName) result.env = { name: setting.envName, fallback: setting.envFallback !== false, active: setting.envValue() !== undefined };
-	// Entry names only, so write-only credential records can be edited per entry.
-	if (secret && definition.type === "record" && isRecord(raw)) result.secretEntryKeys = Object.keys(raw);
+	// Entry and field names only, so write-only credential records can be edited per field.
+	if (secret && definition.type === "record" && isRecord(raw))
+		result.secretEntries = Object.entries(raw).map(([key, entry]) => ({ key, fields: isRecord(entry) ? Object.keys(entry) : [] }));
 	if (lockedReason) result.lockedReason = lockedReason;
 	return result;
 }
@@ -150,8 +141,10 @@ function tabsFor(settings: readonly NpiConfigSetting[]): NpiConfigTab[] {
  * enums check membership); string settings are JSON-quoted first so the exact
  * text survives the parser's trim. Typed JSON values reach `set`, which
  * normalizes them and runs the setting's validate and type checks. `entries`
- * sets (or with null deletes) single keys of the record in config.yml, so a
- * write-only credential record is edited without resending the others.
+ * edits single keys of the record in config.yml, so a write-only credential
+ * record is edited without resending what the browser never sees: null deletes
+ * an entry, an object merges its fields into the existing entry (a null field
+ * deletes that field), and any other value replaces the entry.
  */
 function requestValue(setting: AnySetting, body: NpiConfigPatchRequest, globalLayer: RawLayer): unknown {
 	if (body.entries !== undefined) {
@@ -159,7 +152,15 @@ function requestValue(setting: AnySetting, body: NpiConfigPatchRequest, globalLa
 		const next: Record<string, unknown> = isRecord(current) ? { ...current } : {};
 		for (const [key, value] of Object.entries(body.entries)) {
 			if (value === null) delete next[key];
-			else next[key] = value;
+			else if (isRecord(value)) {
+				const existing = next[key];
+				const fields: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
+				for (const [field, fieldValue] of Object.entries(value)) {
+					if (fieldValue === null) delete fields[field];
+					else fields[field] = fieldValue;
+				}
+				next[key] = fields;
+			} else next[key] = value;
 		}
 		return next;
 	}
@@ -200,11 +201,9 @@ export function buildNpiConfigRouter(bridge: AgentBridge, config: Config): Hono 
 			const settings = await load();
 			const globalLayer = settings.getGlobalSettings();
 			const described = registeredSettings().map(setting => describe(setting, settings, globalLayer));
-			const file = globalConfigFile();
 			const body: NpiConfigResponse = {
 				cwd: config.defaultCwd,
-				configPath: file.path,
-				...(file.readOnlyReason ? { readOnlyReason: file.readOnlyReason } : {}),
+				configPath: globalConfigFile(),
 				tabs: tabsFor(described),
 				settings: described,
 			};
@@ -227,8 +226,6 @@ export function buildNpiConfigRouter(bridge: AgentBridge, config: Config): Hono 
 				if (!setting) throw new RequestError(`Unknown setting: ${body.id}`, 404);
 				const locked = envLock(setting);
 				if (locked) throw new RequestError(locked, 409);
-				const readOnly = globalConfigFile().readOnlyReason;
-				if (readOnly) throw new RequestError(readOnly, 409);
 				if (body.entries !== undefined && setting.type !== "record") throw new RequestError(`${setting.id} is not a record; send value instead of entries`, 400);
 				// A writable load moves a malformed config.yml aside; a read-only load
 				// fails first instead, leaving the user's file where it is.

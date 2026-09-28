@@ -178,7 +178,7 @@ await check("npi-config: registry handles enumerate, parse, persist and report p
 	assert(handle.get(read) === 0.9 && handle.provenance(read) === "global", `persisted ${String(handle.get(read))} via ${handle.provenance(read)}`);
 	handle.unset(writable);
 	await writable.flush();
-	// The deck reports the first existing name and refuses saves when only a later one exists.
+	// The deck reports the first existing of these names as the file NeoPi reads and saves.
 	const [primary] = npiConfig.MAIN_CONFIG_FILENAMES;
 	assert(primary === "config.yml" && await Bun.file(path.join(agentDir, primary)).exists(), `NeoPi saved to a file other than ${primary}`);
 	const cleared = await core.Settings.loadReadOnly({ cwd: agentDir, agentDir });

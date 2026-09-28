@@ -84,9 +84,6 @@ export function NpiConfigSection() {
 						<div>workspace: {data.cwd}</div>
 						<div>{data.settings.length} settings</div>
 					</div>
-					{data.readOnlyReason ? (
-						<div role="alert" className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">{data.readOnlyReason}</div>
-					) : null}
 					<label className="flex items-center gap-2 rounded-md border border-line bg-paper px-2">
 						<Search className="h-3.5 w-3.5 text-ink-4" />
 						<input
@@ -128,7 +125,7 @@ export function NpiConfigSection() {
 							</div>
 							<div className="divide-y divide-line">
 								{section.settings.map(setting => (
-									<SettingRow key={setting.id} setting={setting} cwd={data.cwd} readOnly={data.readOnlyReason !== undefined} onSaved={replace} />
+									<SettingRow key={setting.id} setting={setting} cwd={data.cwd} onSaved={replace} />
 								))}
 							</div>
 						</div>
@@ -139,13 +136,13 @@ export function NpiConfigSection() {
 	);
 }
 
-function SettingRow({ setting, cwd, readOnly, onSaved }: { setting: NpiConfigSetting; cwd: string; readOnly: boolean; onSaved: (setting: NpiConfigSetting) => void }) {
+function SettingRow({ setting, cwd, onSaved }: { setting: NpiConfigSetting; cwd: string; onSaved: (setting: NpiConfigSetting) => void }) {
 	const [draft, setDraft] = useState<Draft>(CLEAN);
 	const [generation, setGeneration] = useState(0);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 	const [status, setStatus] = useState<{ text: string; complete: boolean } | undefined>();
-	const locked = setting.lockedReason !== undefined || readOnly;
+	const locked = setting.lockedReason !== undefined;
 
 	const discard = () => { setDraft(CLEAN); setGeneration(g => g + 1); };
 	// A saved or reloaded setting remounts its editor from the new value.
@@ -230,7 +227,7 @@ function notes(setting: NpiConfigSetting, cwd: string): string[] {
 		out.push(`A ${setting.provenance} layer overrides the global value in ${cwd}.`);
 	if (setting.env?.active && setting.env.fallback)
 		out.push(setting.provenance === "env" ? `Using $${setting.env.name} until a config value is saved.` : `Config overrides $${setting.env.name}.`);
-	if (setting.secret && setting.type === "record") out.push("Entry values are never shown. Saving changes only the entries you add, replace or remove.");
+	if (setting.secret && setting.type === "record") out.push("Values are never shown. Saving merges the fields you send into that entry; other entries and fields are kept.");
 	else if (setting.secret) out.push(setting.configured ? "A value is configured; it is never shown. Saving replaces it." : "No value is configured.");
 	else if (setting.provenance !== "global" && setting.provenance !== "default") out.push(`Effective: ${preview(setting.effectiveValue)}`);
 	return out;
@@ -517,11 +514,12 @@ function parseJsonShape(text: string, shape: "array" | "object"): { value: unkno
 
 /**
  * Write-only credential record, edited per entry: remove configured entries by
- * name, or add/replace one entry with a JSON value. Other entries are kept by
- * the server's merge, since their values are never sent to the browser.
+ * name, or send fields for one entry as JSON. The server merges those fields
+ * into the entry (a null field deletes it) and keeps every other entry and
+ * field, since their values are never sent to the browser.
  */
 function SecretRecordEditor({ setting, disabled, onChange }: EditorProps) {
-	const configured = setting.secretEntryKeys ?? [];
+	const configured = setting.secretEntries ?? [];
 	const [removed, setRemoved] = useState<string[]>([]);
 	const [key, setKey] = useState("");
 	const [text, setText] = useState("");
@@ -529,7 +527,7 @@ function SecretRecordEditor({ setting, disabled, onChange }: EditorProps) {
 		const entries: Record<string, unknown> = Object.fromEntries(nextRemoved.map(k => [k, null]));
 		const name = nextKey.trim();
 		if (name || nextText.trim()) {
-			if (!name) return onChange({ dirty: true, error: "Name the entry to add or replace." });
+			if (!name) return onChange({ dirty: true, error: "Name the entry to update." });
 			let value: unknown;
 			try { value = JSON.parse(nextText); } catch { return onChange({ dirty: true, error: `Invalid JSON for ${name}.` }); }
 			entries[name] = value;
@@ -539,12 +537,12 @@ function SecretRecordEditor({ setting, disabled, onChange }: EditorProps) {
 	return (
 		<div className="space-y-1.5">
 			{configured.length === 0 ? <div className="font-mono text-2xs text-ink-4">no entries configured</div> : null}
-			{configured.map(name => {
+			{configured.map(({ key: name, fields }) => {
 				const gone = removed.includes(name);
 				return (
 					<div key={name} className="flex items-center gap-2 rounded bg-paper-2 px-1.5 py-0.5 text-2xs">
 						<span className={cn("flex-1 truncate font-mono", gone && "text-ink-4 line-through")}>{name}</span>
-						<span className="text-ink-4">value hidden</span>
+						<span className="truncate text-ink-4">{fields.length ? `${fields.join(", ")} (values hidden)` : "value hidden"}</span>
 						<button
 							type="button"
 							disabled={disabled}
@@ -564,7 +562,7 @@ function SecretRecordEditor({ setting, disabled, onChange }: EditorProps) {
 				<input
 					value={key}
 					disabled={disabled}
-					placeholder="entry to add or replace"
+					placeholder="entry to add or update"
 					onChange={e => { setKey(e.target.value); report(removed, e.target.value, text); }}
 					className="field h-7 w-full px-1.5 font-mono text-2xs"
 				/>
@@ -572,7 +570,7 @@ function SecretRecordEditor({ setting, disabled, onChange }: EditorProps) {
 					value={text}
 					disabled={disabled}
 					rows={2}
-					placeholder='JSON value, e.g. {"token": "…"}'
+					placeholder='JSON fields to set, e.g. {"token": "…"}; null removes a field'
 					onChange={e => { setText(e.target.value); report(removed, key, e.target.value); }}
 					className="field w-full resize-y px-1.5 py-1 font-mono text-2xs"
 				/>

@@ -173,8 +173,8 @@ export interface NpiConfigSetting {
 	/** Entries may be path-scoped objects (`{ path(s), values }`) rather than plain strings. */
 	pathScoped?: boolean;
 	env?: { name: string; fallback: boolean; active: boolean };
-	/** Credential records: names of the entries config.yml holds (never their values). Edit them with `entries`. */
-	secretEntryKeys?: string[];
+	/** Credential records: entry and field names config.yml holds (never their values). Edit them with `entries`. */
+	secretEntries?: Array<{ key: string; fields: string[] }>;
 	/** Why this setting cannot be edited here; absent when editable. */
 	lockedReason?: string;
 }
@@ -189,18 +189,18 @@ export interface NpiConfigTab {
 export interface NpiConfigResponse {
 	/** Workspace whose project layer the provenance reflects. */
 	cwd: string;
-	/** Global config file NeoPi reads (the first existing of config.yml, config.yaml). */
+	/** Global config file NeoPi reads and saves: the first existing of config.yml, config.yaml. */
 	configPath: string;
-	/** Why saving is refused: NeoPi saves to config.yml, which would shadow a config.yaml it reads. */
-	readOnlyReason?: string;
 	tabs: NpiConfigTab[];
 	settings: NpiConfigSetting[];
 }
 
 /**
  * Exactly one of: `value` to set (strings go through the setting's own text parser),
- * `unset: true` to remove the key from config.yml, or `entries` to set single keys of
- * a record (null deletes one) while keeping the others.
+ * `unset: true` to remove the key from the config file, or `entries` to edit single
+ * keys of a record while keeping the others: null deletes an entry, an object merges
+ * its fields into the existing entry (a null field deletes that field), and any other
+ * value replaces the entry.
  */
 export interface NpiConfigPatchRequest {
 	id: string;

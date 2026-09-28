@@ -138,32 +138,50 @@ test("rejected credential values are not echoed back", async () => {
 	}
 });
 
-test("credential record entries change one at a time and keep the hidden others", async () => {
-	await writeFile(configFile, "images:\n  urls:\n    credentials:\n      alpha:\n        token: s3cret-alpha\n      beta:\n        token: s3cret-beta\n");
+test("credential record entries merge field-wise and keep the hidden others", async () => {
+	await writeFile(configFile, [
+		"images:", "  urls:", "    credentials:",
+		"      alpha:", "        clientId: s3cret-alpha-id", "        accessToken: s3cret-alpha-old", "        refreshToken: s3cret-alpha-refresh",
+		"      beta:", "        token: s3cret-beta", "",
+	].join("\n"));
 	const listed = (await list()).settings.find(s => s.id === "images.urls.credentials");
-	expect(listed).toMatchObject({ secret: true, value: null, secretEntryKeys: ["alpha", "beta"] });
-	const response = await patch({ id: "images.urls.credentials", entries: { beta: null, gamma: { token: "s3cret-gamma" } } });
+	expect(listed).toMatchObject({
+		secret: true,
+		value: null,
+		secretEntries: [{ key: "alpha", fields: ["clientId", "accessToken", "refreshToken"] }, { key: "beta", fields: ["token"] }],
+	});
+	const response = await patch({
+		id: "images.urls.credentials",
+		entries: { alpha: { accessToken: "s3cret-alpha-new", refreshToken: null }, beta: null, gamma: { token: "s3cret-gamma" } },
+	});
 	expect(response.status).toBe(200);
 	const text = await response.text();
 	expect(text).not.toContain("s3cret");
-	expect((JSON.parse(text) as NpiConfigPatchResponse).setting.secretEntryKeys).toEqual(["alpha", "gamma"]);
-	const file = await readFile(configFile, "utf8");
-	expect(file).toContain("s3cret-alpha");
-	expect(file).toContain("s3cret-gamma");
-	expect(file).not.toContain("s3cret-beta");
+	expect((JSON.parse(text) as NpiConfigPatchResponse).setting.secretEntries).toEqual([
+		{ key: "alpha", fields: ["clientId", "accessToken"] },
+		{ key: "gamma", fields: ["token"] },
+	]);
+	const saved = Bun.YAML.parse(await readFile(configFile, "utf8")) as { images: { urls: { credentials: unknown } } };
+	expect(saved.images.urls.credentials).toEqual({
+		alpha: { clientId: "s3cret-alpha-id", accessToken: "s3cret-alpha-new" },
+		gamma: { token: "s3cret-gamma" },
+	});
 });
 
-test("a config.yaml NeoPi reads is reported and never shadowed by a new config.yml", async () => {
+test("with only config.yaml, NeoPi's file is reported and saves update it in place", async () => {
 	const yamlFile = path.join(agentDir, "config.yaml");
 	await rm(configFile);
-	await writeFile(yamlFile, "edit:\n  mode: patch\n");
+	await writeFile(yamlFile, "theme:\n  dark: titanium\nedit:\n  mode: patch\n");
 	try {
 		const body = await list();
 		expect(body.configPath).toBe(yamlFile);
-		expect(body.readOnlyReason).toContain("config.yaml");
 		expect(body.settings.find(s => s.id === "edit.mode")).toMatchObject({ provenance: "global", value: "patch" });
 		const response = await patch({ id: "edit.mode", value: "replace" });
-		expect(response.status).toBe(409);
+		expect(response.status).toBe(200);
+		expect(((await response.json()) as NpiConfigPatchResponse).setting).toMatchObject({ provenance: "global", value: "replace" });
+		const text = await readFile(yamlFile, "utf8");
+		expect(text).toContain("mode: replace");
+		expect(text).toContain("dark: titanium");
 		expect(await Bun.file(configFile).exists()).toBe(false);
 	} finally {
 		await rm(yamlFile, { force: true });
