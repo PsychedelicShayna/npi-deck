@@ -101,6 +101,27 @@ test("disabled webhook does not execute, successful webhook persists payload", a
 	expect(JSON.parse(listRuns(enabled.id)[0]!.triggerPayload!)).toEqual({ key: "accepted" });
 });
 
+test("abort and continue run only once despite a retained retry block", async () => {
+	setup();
+	for (const mode of ["abort", "continue"] as const) {
+		const attemptsFile = path.join(home, `attempts-${mode}`);
+		const nextFile = path.join(home, `next-${mode}`);
+		const r = routine(spec([
+			{ id: "fail", type: "run", command: `echo attempted >> '${attemptsFile}'; exit 7`,
+				on_failure: mode, retry: { times: 3, backoff: "linear", max_delay_secs: 0 } },
+			{ id: "next", type: "run", command: `echo reached > '${nextFile}'` },
+		]));
+		await runner!.fire(r.id);
+		expect(fs.readFileSync(attemptsFile, "utf8").trim().split("\n")).toEqual(["attempted"]);
+		expect(fs.existsSync(nextFile)).toBe(mode === "continue");
+		const run = listRuns(r.id)[0]!;
+		expect(listStepRuns(run.id).map(attempt => [attempt.stepId, attempt.attempt, attempt.status])).toEqual(
+			mode === "continue" ? [["fail", 1, "failed"], ["next", 1, "success"]] : [["fail", 1, "failed"]],
+		);
+		expect(run.abortReason).toBe(mode === "abort" ? "failure" : undefined);
+	}
+});
+
 test("continue ignores retry policy and cancellation during retry backoff prevents next attempt", async () => {
 	setup();
 	const marker = path.join(home, "attempts");
@@ -194,11 +215,13 @@ test("cancel-previous kills the running child before the replacement finishes", 
 	expect(runner!.busy).toBe(false);
 });
 
-test("agent retry charges failed and successful attempts before enforcing the cost cap", async () => {
+test("agent retry charges failed and successful attempts, and stops before the next attempt on budget excess", async () => {
 	setup(() => [process.execPath, path.join(home, "backend/packages/coding-agent/src/cli.ts")]);
 	const backend = path.join(home, "backend");
 	const cli = path.join(backend, "packages/coding-agent/src/cli.ts");
 	const counter = path.join(home, "attempts");
+	const failUntil = path.join(home, "fail-until");
+	fs.writeFileSync(failUntil, "1");
 	fs.mkdirSync(path.dirname(cli), { recursive: true });
 	fs.writeFileSync(cli, `
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -209,7 +232,7 @@ const message = { role: "assistant", timestamp: attempt, model: "test", content:
   usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: {total: 0.001} } };
 process.stdout.write(JSON.stringify({type:"message_end", message}) + "\\n" +
   JSON.stringify({type:"agent_end", messages:[message]}) + "\\n");
-if (attempt === 1) process.exitCode = 1;
+if (attempt <= Number(readFileSync(${JSON.stringify(failUntil)}, "utf8"))) process.exitCode = 1;
 `);
 	const s = spec([{ id: "agent", type: "agent", prompt: "answer", on_failure: "retry",
 		retry: { times: 2, backoff: "linear", max_delay_secs: 0 } }]);
@@ -222,4 +245,17 @@ if (attempt === 1) process.exitCode = 1;
 	expect(run.abortReason).toBe("budget");
 	expect(run.totalLlmCostMicros).toBe(2000);
 	expect(run.totalLlmTokens).toBe(30);
+	fs.writeFileSync(counter, "0");
+	fs.writeFileSync(failUntil, "2");
+	const tokenSpec = spec([{ id: "agent", type: "agent", prompt: "answer", on_failure: "retry",
+		retry: { times: 3, backoff: "linear", max_delay_secs: 0 } }]);
+	tokenSpec.budget = { max_llm_tokens_input: 15 };
+	const tokenRun = routine(tokenSpec);
+	await runner!.fire(tokenRun.id);
+	const stopped = listRuns(tokenRun.id)[0]!;
+	expect(listStepRuns(stopped.id).map(attempt => attempt.status)).toEqual(["failed", "failed"]);
+	expect(fs.readFileSync(counter, "utf8")).toBe("2");
+	expect(stopped.abortReason).toBe("budget");
+	expect(stopped.totalLlmCostMicros).toBe(2000);
+	expect(stopped.totalLlmTokens).toBe(30);
 }, 20_000);
