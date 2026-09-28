@@ -34,7 +34,12 @@ export class PlanModeBridge {
 	private enabled = false;
 	private disposed = false;
 	private sequence = 0;
+	private preparing = false;
 	private planFilePath = DEFAULT_PLAN;
+	private readonly reconnectGraceMs: number;
+	private readonly approvalTimeoutMs: number;
+	private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+	private approvalTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(
 		private readonly sessionId: string,
@@ -45,7 +50,11 @@ export class PlanModeBridge {
 			buildSessionContext(): { mode?: string; modeData?: Record<string, unknown> };
 			appendModeChange(mode: string, data?: Record<string, unknown>): string;
 		},
-	) {}
+		timeouts: { reconnectGraceMs?: number; approvalTimeoutMs?: number } = {},
+	) {
+		this.reconnectGraceMs = timeouts.reconnectGraceMs ?? 30_000;
+		this.approvalTimeoutMs = timeouts.approvalTimeoutMs ?? 10 * 60_000;
+	}
 
 	isEnabled(): boolean { return this.enabled; }
 	hasPendingApproval(): boolean { return this.pending !== undefined; }
@@ -66,7 +75,17 @@ export class PlanModeBridge {
 	}
 	subscribeFrames(listener: FrameListener): () => void {
 		this.listeners.add(listener);
-		return () => this.listeners.delete(listener);
+		if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+		this.reconnectTimer = undefined;
+		return () => {
+			if (!this.listeners.delete(listener)) return;
+			if (this.listeners.size === 0 && this.pending) this.scheduleReconnectExpiry();
+		};
+	}
+	private scheduleReconnectExpiry(): void {
+		this.reconnectTimer = setTimeout(() => {
+			this.settlePending({ approved: false, feedback: "Plan review expired: no reviewer reconnected." }, "expired");
+		}, this.reconnectGraceMs);
 	}
 	private emit(frame: PlanModeFrame): void {
 		for (const listener of this.listeners) {
@@ -123,6 +142,10 @@ export class PlanModeBridge {
 		return "settled";
 	}
 	private settlePending(response: PlanApprovalResponse, outcome: "approved" | "rejected" | "expired"): void {
+		if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+		if (this.approvalTimer) clearTimeout(this.approvalTimer);
+		this.reconnectTimer = undefined;
+		this.approvalTimer = undefined;
 		const p = this.pending;
 		if (!p) return;
 		this.pending = undefined;
@@ -149,16 +172,23 @@ export class PlanModeBridge {
 	}
 	private async propose(title: string): Promise<{ content: Array<{ type: "text"; text: string }>; details: { planFilePath: string; title: string; planExists: boolean } }> {
 		const { resolveApprovedPlan } = feature("plan-mode");
-		if (!this.enabled || this.pending) throw new Error("Plan mode is not ready for another proposal.");
-		const plan = await resolveApprovedPlan({
-			suppliedTitle: title,
-			statePlanFilePath: this.planFilePath,
-			readPlan: async url => {
-				try { return await readFile(this.localPath(url), "utf8"); }
-				catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
-			},
-			listPlanFiles: () => this.listPlans(),
-		});
+		if (this.disposed || !this.enabled || this.pending || this.preparing) throw new Error("Plan mode is not ready for another proposal.");
+		this.preparing = true;
+		let plan: Awaited<ReturnType<typeof resolveApprovedPlan>>;
+		try {
+			plan = await resolveApprovedPlan({
+				suppliedTitle: title,
+				statePlanFilePath: this.planFilePath,
+				readPlan: async url => {
+					try { return await readFile(this.localPath(url), "utf8"); }
+					catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+				},
+				listPlanFiles: () => this.listPlans(),
+			});
+		} finally {
+			this.preparing = false;
+		}
+		if (this.disposed || !this.enabled || this.pending) throw new Error("Plan mode is no longer ready for this proposal.");
 		this.planFilePath = plan.planFilePath;
 		const state = this.session.getPlanModeState();
 		if (state) this.session.setPlanModeState({ ...state, planFilePath: plan.planFilePath });
@@ -168,6 +198,12 @@ export class PlanModeBridge {
 			this.pending = { proposalId, planFilePath: plan.planFilePath, planContent: plan.planContent,
 				suggestedTitle: plan.title, resolve };
 		});
+		// An active reviewer may leave a tab open indefinitely; an absent one
+		// gets a short reconnect window. Neither timeout approves the plan.
+		this.approvalTimer = setTimeout(() => {
+			this.settlePending({ approved: false, feedback: "Plan review expired: approval timed out." }, "expired");
+		}, this.approvalTimeoutMs);
+		if (this.listeners.size === 0) this.scheduleReconnectExpiry();
 		this.emit({ type: "plan_proposed", sessionId: this.sessionId, ...this.getPendingPlanApproval()! });
 		const response = await decision;
 		const details = { planFilePath: plan.planFilePath, title: plan.title, planExists: true };
