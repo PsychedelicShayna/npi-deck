@@ -13,7 +13,7 @@
  */
 
 // Re-export the V1 routine spec validator. JSON Schemas live in src/schemas/.
-export { validateRoutineSpec } from "./validate";
+export { validateRoutineSpec, validateStructuredOutput } from "./validate";
 export type { ValidationError, ValidationResult } from "./validate";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,6 +117,16 @@ export interface RestartServerResponse {
 	pid?: number;
 	message: string;
 }
+
+export interface BackendStatusResponse {
+	workerGeneration: string;
+	running: { id: string | null; path: string; source: "env" | "config"; version: string | null; commit: string | null } | null;
+	desired: string | null;
+	pinned: boolean;
+	reason?: string;
+	backends: Array<{ id: string; kind: "source" | "gateway"; path: string }>;
+}
+export interface BackendSwitchResponse { ok: boolean; message: string; busy?: Array<{ kind: string; id: string }> }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Starters (opt-in extensions: the maintenance gate)
@@ -645,7 +655,7 @@ export interface ContextUsage {
  */
 export interface PlanModeContextWire {
 	enabled: boolean;
-	/** Always `local://PLAN.md` for the deck MVP — surfaced so future per-session overrides land here. */
+	/** Current plan artifact; after proposal this is the agent's `local://<slug>-plan.md`. */
 	planFilePath: string;
 }
 
@@ -657,14 +667,12 @@ export interface PlanModeContextWire {
 export interface PendingPlanApprovalWire {
 	/** Stable id used to disambiguate concurrent approval responses (two tabs). */
 	proposalId: string;
-	/** Original `local://` path the agent wrote the plan to (always `local://PLAN.md` for MVP). */
+	/** Agent-authored `local://<slug>-plan.md` URL, preserved after approval. */
 	planFilePath: string;
 	/** Verbatim contents of `planFilePath` as the agent submitted it. */
 	planContent: string;
-	/** Title derived via SDK `resolvePlanTitle` — pre-fills the title input. */
+	/** Normalized title derived by NeoPi from the submitted plan. */
 	suggestedTitle: string;
-	/** Final `local://` path the plan will move to on approve (title-stem.md). */
-	suggestedFinalPath: string;
 }
 
 /** Snapshot delivered when a client subscribes to an existing session. */
@@ -803,31 +811,27 @@ export type ClientFrame =
 			dialogId: string;
 	  } & ExtUiDialogResponse)
 	/**
-	 * Enter or exit plan mode for `sessionId`. Idempotent: re-sending the
-	 * same `enabled` value is a no-op. Server snapshots active tools on
-	 * enter and restores them on exit, registers/clears the standing
-	 * resolve handler, and broadcasts a `plan_mode_changed` frame.
+	 * Enter or exit NeoPi plan mode. The server restores the previous tools on
+	 * exit and broadcasts `plan_mode_changed`.
 	 */
 	| { type: "set_plan_mode"; sessionId: string; enabled: boolean }
 	/**
-	 * Reply to a `plan_proposed` frame. `approved=true` triggers rename +
-	 * synthetic `planModeApprovedPrompt` injection; `approved=false`
-	 * silently exits plan mode. `editedContent` overwrites `local://PLAN.md`
-	 * before the rename; `finalPath` overrides the title-derived destination
-	 * (must be `local://*.md`).
+	 * Reply to a plan proposal. Approval exits plan mode and returns control to
+	 * the agent; rejection keeps planning active and returns feedback to the
+	 * agent. Edited content replaces the proposed artifact in place.
 	 */
 	| {
 			type: "plan_response";
 			sessionId: string;
 			proposalId: string;
 			approved: boolean;
-			finalPath?: string;
+			feedback?: string;
 			editedContent?: string;
 	  };
 
 /** Server → Client. */
 export type ServerFrame =
-	| { type: "hello"; connectionId: string }
+	| { type: "hello"; connectionId: string; workerGeneration: string; backend: BackendStatusResponse["running"]; capabilities: string[] }
 	| { type: "pong" }
 	| { type: "subscribed"; sessionId: string; snapshot: SessionSnapshot }
 	| { type: "unsubscribed"; sessionId: string }
@@ -836,6 +840,7 @@ export type ServerFrame =
 	| { type: "prompt_consumed"; sessionId: string; output: string }
 	| { type: "session_event"; sessionId: string; event: AgentSessionEventJson }
 	| { type: "session_disposed"; sessionId: string }
+	| { type: "subagents_snapshot"; sessionId: string; nodes: SubagentNode[] }
 	/** Broadcast frame: any kanban-task mutation occurred. Clients refetch. */
 	| { type: "tasks_changed" }
 	/** Broadcast frame: skill catalog or enabled-state changed. Clients refetch. */
@@ -965,10 +970,9 @@ export type ServerFrame =
 			planFilePath?: string;
 	  }
 	/**
-	 * Agent has finalized a plan and called `resolve apply`. The web client
-	 * renders an inline `PlanApproval` card with Approve / Reject / Edit &
-	 * approve buttons and replies with `plan_response`. Replayed verbatim
-	 * on `subscribed` via `pendingPlanApproval` so a late tab sees the card.
+	 * Agent submitted a plan by writing its slug to `xd://propose`. The web
+	 * client renders the artifact and returns approval, edits or rejection
+	 * feedback via `plan_response`; late subscribers see the pending card.
 	 */
 	| {
 			type: "plan_proposed";
@@ -977,13 +981,10 @@ export type ServerFrame =
 			planFilePath: string;
 			planContent: string;
 			suggestedTitle: string;
-			suggestedFinalPath: string;
 	  }
 	/**
-	 * A previously-broadcast `plan_proposed` has been resolved. Second-tab
-	 * Approve clicks observe `outcome="resolved_elsewhere"` on the same id
-	 * and can roll back their optimistic UI. `expired` is reserved for a
-	 * future server-side timeout; v1 emits only `approved`/`rejected`.
+	 * A proposal was settled (or expired when its session was disposed).
+	 * Second-tab responses to the same id are rejected as stale.
 	 */
 	| {
 			type: "plan_proposal_resolved";
@@ -1059,6 +1060,25 @@ export interface SessionTranscriptResponse {
 	cwd: string;
 	title?: string;
 	messages: AgentMessageJson[];
+}
+
+/** A child of a live deck session. parentId is another node or the root agent id. */
+export interface SubagentNode {
+	id: string;
+	parentId: string;
+	name: string;
+	status: string;
+	description?: string;
+	activity?: string;
+	sessionFile?: string;
+	createdAt: number;
+}
+
+export interface SubagentTranscriptResponse {
+	id: string;
+	messages: AgentMessageJson[];
+	nextByte: number;
+	reset: boolean;
 }
 
 

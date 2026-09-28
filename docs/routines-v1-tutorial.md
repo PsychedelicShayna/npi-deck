@@ -135,12 +135,13 @@ What happens when a trigger fires while a previous run is in flight:
 ## Budget
 
 `max_duration_secs`, `max_llm_cost_usd`, `max_llm_tokens_input`,
-`max_llm_tokens_output`, `max_steps_executed`. Checked between steps. On
-excess the runner hard-aborts with `abort_reason: 'budget'` and persists
-partial results.
+`max_llm_tokens_output`, `max_steps_executed`. Checked after each attempt,
+including failed retries. On excess the runner stops with
+`abort_reason: 'budget'` and persists the usage and partial results.
 
-Cost estimation comes from a static price table — treat it as an estimate,
-not an invoice. Your LLM vendor's bill is authoritative.
+Agent-step token totals include cached and orchestration tokens when reported;
+USD cost comes from NeoPi's provider-reported usage, not a static model-price
+estimate. Your LLM vendor's bill remains authoritative.
 
 ## Cross-run state
 
@@ -206,10 +207,13 @@ errors if anything is off.
 
 ## Limitations in V1
 
-- The `mcp` step type is **stubbed**. It validates at the schema level but
-  fails at runtime with a clear V1.5 pointer. Use an `agent` step with
-  `mcp_servers_allowed: [server-name]` instead — the SDK's MCP client tracks
-  state via `~/.omp/agent/mcp.json` and the agent has access to those tools.
+- The `mcp` step type is **stubbed**. For `agent` steps, omitting
+  `mcp_servers_allowed` inherits the backend's configured MCP servers and `[]`
+  disables them. A nonempty allowlist requires NeoPi's `mcp.includeServers`
+  and `--mcp` capability (neopi#120); older backends reject it before spawning.
+  Literal allowlisted names must be present in the configured MCP servers.
+- `skills_allowed: [name]` restricts skills with NeoPi's `--skills` flag;
+  `skills_allowed: []` disables skills.
 - DnD step reordering lands in V1.5. Up/down arrows work today.
 - No "test this step in isolation" runner yet — full re-run is the only
   way to debug. Coming in V2.

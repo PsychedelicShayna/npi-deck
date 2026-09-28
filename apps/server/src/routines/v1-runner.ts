@@ -36,6 +36,7 @@ import { notificationService } from "../notifications/index.ts";
 import { finalizeRun, finishStepRun, insertSkippedStepRun, startStepRun } from "../db/routine-step-runs.ts";
 import { logger } from "../log.ts";
 import { workRegistry } from "../work-registry.ts";
+import { routineAgentCommand } from "./agent-command.ts";
 import { accumulate, checkBudget, newBudgetState } from "./budget.ts";
 import { evaluate } from "./sandbox.ts";
 import { executeAgentStep } from "./steps/agent.ts";
@@ -80,13 +81,7 @@ export async function runV1Pipeline(input: {
 	triggerPayload: Record<string, unknown>;
 	abortSignal: AbortSignal;
 	defaultCwd: string;
-	/**
-	 * Per-run sandbox root for `agent` steps. The runner creates
-	 * `<agentSandboxRoot>/<runId>/` lazily on the first `agent` step and uses
-	 * it as the cwd for that step's `omp -p` child process. Keeps agent steps
-	 * away from the user's home (where unrelated files may be inferred by
-	 * the coding agent as 'briefing material').
-	 */
+	/** Per-run sandbox root for headless NeoPi agent steps. */
 	agentSandboxRoot: string;
 }): Promise<{ status: "success" | "failed" | "aborted"; abortReason?: AbortReason }> {
 	const { routine, spec, runId, triggerKind, triggerPayload, abortSignal, defaultCwd, agentSandboxRoot } = input;
@@ -127,6 +122,8 @@ export async function runV1Pipeline(input: {
 	let aggregateStdout = "";
 
 	const stepCwd = (routine.actionCwd && routine.actionCwd.trim()) || defaultCwd;
+	let pinnedAgentCommand: string[] | undefined;
+	const agentCommandForRun = (): string[] => pinnedAgentCommand ??= routineAgentCommand([]);
 
 	// Lazy mkdir for the per-run agent sandbox. Created the first time an
 	// `agent` step runs; left in place after the run finishes so the user can
@@ -223,7 +220,7 @@ export async function runV1Pipeline(input: {
 				const releaseStep = workRegistry.admit("routine-step", `${runId}:${step.id}:${attempt}`);
 				const timer = setTimeout(() => { timedOut = true; stepAbort.abort(); }, remainingMs);
 				try {
-					result = await dispatchStep(step, context, stepAbort.signal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox);
+					result = await dispatchStep(step, context, stepAbort.signal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox, agentCommandForRun);
 				} finally {
 					clearTimeout(timer);
 					abortSignal.removeEventListener("abort", onAbort);
@@ -265,6 +262,17 @@ export async function runV1Pipeline(input: {
 						: undefined,
 			});
 
+			// Failed attempts and aborts can still incur real provider charges.
+			accumulate(budget, result);
+			// A deadline or cancellation already terminated the attempt; retain
+			// that cause even when elapsed time now exceeds the duration cap.
+			if (timedOut || abortSignal.aborted || result.status === "aborted") break;
+			const exceededAttempt = checkBudget(budget, spec.budget, () => Date.now());
+			if (exceededAttempt) {
+				log.info(`run ${runId} hit budget limit ${exceededAttempt.limit} (${exceededAttempt.value} > ${exceededAttempt.cap})`);
+				abortReason = "budget";
+				break;
+			}
 			if (result.status === "success" || result.status === "aborted" || abortSignal.aborted) break;
 			if (attempt < attemptCap) {
 				const delaySecs = Math.min(
@@ -299,9 +307,10 @@ export async function runV1Pipeline(input: {
 		context.steps[step.id] = ctxEntry;
 
 		stepCountTotal += 1;
-		accumulate(budget, finalResult);
+		// Usage was accumulated per attempt, including failed attempts.
 		aggregateStdout = appendClipped(aggregateStdout, finalResult.stdoutExcerpt);
 
+		if (abortReason === "budget") break;
 		if (finalResult.status === "failed" || finalResult.status === "aborted" || abortSignal.aborted) {
 			stepCountFailed += 1;
 			const onFailure = step.on_failure ?? "abort";
@@ -390,17 +399,17 @@ async function dispatchStep(
 	runId: string,
 	routineId: string,
 	ensureAgentSandbox: () => Promise<string>,
+	agentCommandForRun: () => string[],
 ): Promise<StepResult> {
 	switch (step.type) {
 		case "run":
 			return executeRunStep(step, context, signal, routineCwd);
 		case "agent": {
-			// Agent steps shell out to `omp -p`, which is a full coding agent
-			// with read / bash / search / etc. Run it in a deck-owned per-run
-			// scratch dir so it can't latch onto unrelated files in the user's
-			// home and use them as 'input data' (daily-briefing drift case).
+			// Run in a deck-owned per-run scratch directory rather than the
+			// user's home, and pin the backend command across retries.
+			const command = agentCommandForRun();
 			const sandbox = await ensureAgentSandbox();
-			return executeAgentStep(step, context, signal, sandbox);
+			return executeAgentStep(step, context, signal, sandbox, command);
 		}
 		case "write":
 			return executeWriteStep(step, context, signal, routineCwd);

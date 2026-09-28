@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { RoutineSpec } from "@npi-deck/protocol";
 import { openDb, closeDb, getDb } from "../db/index.ts";
+import { listStepRuns } from "../db/routine-step-runs.ts";
 import { createRoutine, createV1Routine, getRoutine, listRuns } from "../db/routines.ts";
 import { RoutinesRunner } from "../routines-runner.ts";
 import { initializeOwnedGeneration, stopOwnedProcesses } from "../owned-process.ts";
@@ -191,4 +192,41 @@ test("cancel-previous kills the running child before the replacement finishes", 
 	expect(lines.filter((line) => line === "start")).toHaveLength(2);
 	expect(listRuns(r.id).some((run) => run.abortReason === "cancelled")).toBe(true);
 	expect(runner!.busy).toBe(false);
+});
+
+test("agent retry charges failed and successful attempts before enforcing the cost cap", async () => {
+	setup();
+	const backend = path.join(home, "backend");
+	const cli = path.join(backend, "packages/coding-agent/src/cli.ts");
+	const counter = path.join(home, "attempts");
+	fs.mkdirSync(path.dirname(cli), { recursive: true });
+	fs.writeFileSync(cli, `
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+const file = ${JSON.stringify(counter)};
+const attempt = existsSync(file) ? Number(readFileSync(file, "utf8")) + 1 : 1;
+writeFileSync(file, String(attempt));
+const message = { role: "assistant", timestamp: attempt, model: "test", content: [{type:"text",text:"answer"}],
+  usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cost: {total: 0.001} } };
+process.stdout.write(JSON.stringify({type:"message_end", message}) + "\\n" +
+  JSON.stringify({type:"agent_end", messages:[message]}) + "\\n");
+if (attempt === 1) process.exitCode = 1;
+`);
+	const previous = process.env.NPI_DECK_BACKEND;
+	process.env.NPI_DECK_BACKEND = backend;
+	try {
+		const s = spec([{ id: "agent", type: "agent", prompt: "answer", on_failure: "retry",
+			retry: { times: 2, backoff: "linear", max_delay_secs: 0 } }]);
+		s.budget = { max_llm_cost_usd: 0.0015 };
+		const r = routine(s);
+		await runner!.fire(r.id);
+		const run = listRuns(r.id)[0]!;
+		const attempts = listStepRuns(run.id);
+		expect(attempts.map(attempt => attempt.status)).toEqual(["failed", "success"]);
+		expect(run.abortReason).toBe("budget");
+		expect(run.totalLlmCostMicros).toBe(2000);
+		expect(run.totalLlmTokens).toBe(30);
+	} finally {
+		if (previous === undefined) delete process.env.NPI_DECK_BACKEND;
+		else process.env.NPI_DECK_BACKEND = previous;
+	}
 });

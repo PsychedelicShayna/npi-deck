@@ -125,6 +125,14 @@ export function validateRoutineSpec(spec: unknown): ValidationResult {
 	return { valid: true };
 }
 
+/** Validate a headless agent's answer against its declared output schema. */
+export function validateStructuredOutput(schema: unknown, output: unknown): ValidationResult {
+	const ajv = new Ajv2020({ allErrors: true, strict: false });
+	addFormats(ajv);
+	const validate = ajv.compile(schema as object);
+	return validate(output) ? { valid: true } : { valid: false, errors: normalizeErrors(validate.errors) };
+}
+
 /**
  * Cross-reference pass for `layout`. JSON Schema can't express "this string
  * must match a sibling array's element ids", so we do it after structural

@@ -1,13 +1,6 @@
 /**
- * Per-run budget enforcer. Tracks LLM tokens, estimated cost, wall-clock,
- * and step count against the spec's `budget` block. The runner calls
- * `tryConsume()` after every step; if any cap is hit the runner aborts the
- * run with `abort_reason='budget'`.
- *
- * Cost estimation is approximate — model price table at module bottom; not a
- * substitute for vendor-side billing. For BYOK customers the displayed cost
- * is "we think you spent about this" and the real bill is what their vendor
- * says. Documented per the V1 plan §10.4.
+ * Per-run budget enforcer. Agent steps supply provider-reported token and USD
+ * usage; the runner accumulates every attempt before checking caps.
  */
 
 import type { RoutineBudget } from "@npi-deck/protocol";
@@ -28,17 +21,6 @@ export interface BudgetExceeded {
 	cap: number;
 }
 
-const PRICES_PER_MILLION: Record<string, { input: number; output: number }> = {
-	"claude-sonnet-4-6": { input: 3.0, output: 15.0 },
-	"claude-opus-4": { input: 15.0, output: 75.0 },
-	"claude-haiku-4-5": { input: 1.0, output: 5.0 },
-	"gpt-4o": { input: 5.0, output: 15.0 },
-	"gpt-4o-mini": { input: 0.15, output: 0.6 },
-	// Sensible default for unknown models — assume sonnet-tier pricing so the
-	// estimate errs on the side of triggering the budget alarm.
-	default: { input: 3.0, output: 15.0 },
-};
-
 export function newBudgetState(now: () => number): BudgetState {
 	return {
 		startedAtMs: now(),
@@ -47,18 +29,6 @@ export function newBudgetState(now: () => number): BudgetState {
 		totalCostMicros: 0,
 		stepsExecuted: 0,
 	};
-}
-
-/** Compute USD micro-cents (millionths of a dollar) for a single step's LLM usage. */
-export function costMicros(model: string | undefined, tokensIn: number, tokensOut: number): number {
-	const tier = (model && PRICES_PER_MILLION[model]) || PRICES_PER_MILLION.default!;
-	// price per million → cents per token → micros per token (×10000)
-	const inMicros = Math.round((tokensIn * tier.input * 10_000) / 1_000_000 * 1_000_000) / 1_000_000;
-	const outMicros = Math.round((tokensOut * tier.output * 10_000) / 1_000_000 * 1_000_000) / 1_000_000;
-	// Simpler: just multiply tokens by per-million price (USD) × 1_000_000 micros/$ / 1_000_000 tokens = identity scaler.
-	const inUsd = (tokensIn / 1_000_000) * tier.input;
-	const outUsd = (tokensOut / 1_000_000) * tier.output;
-	return Math.round((inUsd + outUsd) * 1_000_000);
 }
 
 /** Accumulate a step's resource usage. */
