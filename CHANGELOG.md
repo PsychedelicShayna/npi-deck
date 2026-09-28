@@ -5,6 +5,16 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+### Changed
+
+- **The server loads NeoPi at runtime.** `apps/server/src/backend/manifest.ts` lists every SDK export the deck uses (module, export, tier). At boot the server imports them by absolute path from the tree named by `NPI_DECK_BACKEND` or `activeBackend` in `~/.npi-deck/config.yml`, and exits with a diagnostic naming each missing module/export when a required one is absent. `@oh-my-pi` is never in the deck's `node_modules`; `scripts/check-sdk-imports.ts` fails on value imports from it outside `apps/server/src/backend/`.
+- **Server typecheck uses the tree's `tsgo`.** `bun run --filter '@omp-deck/server' typecheck` runs the import check, then the pinned tree's `tsgo` (`scripts/tsgo.ts`).
+- **Plan mode is unavailable** until it is ported to NeoPi's `xd://propose` flow (#45). Toggling it reports that instead of half-entering.
+
+### Fixed
+
+- **OAuth prompt lost before the flow id arrived** (R08, #8). The sign-in modal subscribes before starting the flow and replays the flow's early frames, so a provider that asks a question right away (Ollama) shows it. Closing the modal before the flow id arrives now cancels the flow.
+
 ### Removed
 
 - **npm distribution.** `bin/omp-deck.mjs`, the `prepack` / `postpack` scripts, and the `bin` / `files` / `bundledDependencies` fields are gone; the root package is `private`. npi-deck runs from a checkout (`bun scripts/neopi-setup.ts`, then `bun run dev`); an `npi-deck` launcher is planned.

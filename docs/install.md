@@ -63,6 +63,14 @@ The script:
    `tsconfig.neopi.json`. `apps/server` extends it, so typechecking the server
    needs this step first.
 
+The server imports NeoPi from the selected tree at startup; `NPI_DECK_BACKEND`
+(a backend id from `config.yml`, or an absolute tree path) overrides
+`activeBackend`. To check a tree against everything the deck uses:
+
+```bash
+bun apps/server/src/backend/contract.ts   # isolated; no provider requests
+```
+
 `NPI_DECK_HOME` overrides `~/.npi-deck`. Re-running the script is safe.
 
 ---
