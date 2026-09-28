@@ -23,8 +23,11 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-ai": typeof import("@oh-my-pi/pi-ai");
 	"@oh-my-pi/pi-coding-agent": typeof import("@oh-my-pi/pi-coding-agent");
 	"@oh-my-pi/pi-coding-agent/advisor/config": typeof import("@oh-my-pi/pi-coding-agent/advisor/config");
+	"@oh-my-pi/pi-coding-agent/advisor/settings": typeof import("@oh-my-pi/pi-coding-agent/advisor/settings");
+	"@oh-my-pi/pi-coding-agent/advisor/watchdog": typeof import("@oh-my-pi/pi-coding-agent/advisor/watchdog");
 	"@oh-my-pi/pi-coding-agent/capability": typeof import("@oh-my-pi/pi-coding-agent/capability");
 	"@oh-my-pi/pi-coding-agent/capability/skill": typeof import("@oh-my-pi/pi-coding-agent/capability/skill");
+	"@oh-my-pi/pi-coding-agent/config/model-settings": typeof import("@oh-my-pi/pi-coding-agent/config/model-settings");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace": typeof import("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace");
@@ -155,6 +158,13 @@ export const MANIFEST = {
 			resolveAdvisorConfigEditPath: op("@oh-my-pi/pi-coding-agent/advisor/config", "resolveAdvisorConfigEditPath"),
 			loadWatchdogConfigFile: op("@oh-my-pi/pi-coding-agent/advisor/config", "loadWatchdogConfigFile"),
 			saveWatchdogConfigFile: op("@oh-my-pi/pi-coding-agent/advisor/config", "saveWatchdogConfigFile"),
+			slugifyAdvisorName: op("@oh-my-pi/pi-coding-agent/advisor/config", "slugifyAdvisorName"),
+			collectConfigCandidates: op("@oh-my-pi/pi-coding-agent/advisor/watchdog", "collectConfigCandidates"),
+			cfgAdvisorEnabled: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorEnabled"),
+			cfgAdvisorSyncBacklog: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorSyncBacklog"),
+			cfgAdvisorMaxNotesPerUpdate: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorMaxNotesPerUpdate"),
+			cfgAdvisorEvictStaleResults: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorEvictStaleResults"),
+			cfgModelRoles: op("@oh-my-pi/pi-coding-agent/config/model-settings", "cfgModelRoles"),
 		},
 	},
 	/** W3: mixture-of-agents models (`mixture/<name>`) listed in the model picker without a live session. */

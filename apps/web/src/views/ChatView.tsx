@@ -5,8 +5,11 @@ import { Composer } from "@/components/Composer";
 import { Inspector } from "@/components/Inspector";
 import { StatusBar } from "@/components/chrome/StatusBar";
 import { ExtUiDialog } from "@/components/chat/ExtUiDialog";
+import { AdvisorPanel } from "@/components/chat/AdvisorPanel";
+import { selectActiveSession, useStore } from "@/lib/store";
 
 export function ChatView() {
+	const session = useStore(selectActiveSession);
 	return (
 		<>
 			<Layout
@@ -14,6 +17,7 @@ export function ChatView() {
 				main={
 					<div className="flex h-full min-h-0 flex-col">
 						<Chat />
+						{session && !session.readOnly && <AdvisorPanel sessionId={session.sessionId} />}
 						<Composer />
 					</div>
 				}

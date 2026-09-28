@@ -11,6 +11,7 @@ import { SkillsView } from "./views/SkillsView";
 import { SettingsView } from "./views/SettingsView";
 import { IntegrationsView } from "./views/IntegrationsView";
 import { OnboardingView } from "./views/OnboardingView";
+import { AdvisorsView } from "./views/AdvisorsView";
 import { onboardingApi } from "./lib/onboarding-api";
 
 /**
@@ -54,6 +55,7 @@ const router = createBrowserRouter([
 			{ path: "/skills", element: <SkillsView /> },
 			{ path: "/kb", element: <KbView /> },
 			{ path: "/integrations", element: <IntegrationsView /> },
+			{ path: "/advisors", element: <AdvisorsView /> },
 			{ path: "/settings", element: <SettingsView /> },
 			{ path: "/onboarding", element: <OnboardingView /> },
 		],

@@ -23,6 +23,8 @@ import type {
 	SessionSnapshot,
 	SessionSummary,
 	SessionTranscriptResponse,
+	SubagentNode,
+	SubagentTranscriptResponse,
 } from "@npi-deck/protocol";
 
 import * as path from "node:path";
@@ -34,6 +36,7 @@ import { notificationService } from "../notifications/index.ts";
 import { workRegistry } from "../work-registry.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
+import { SubagentTree } from "./subagent-tree.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
@@ -69,6 +72,9 @@ interface Active {
 	uiBridge: ExtensionUIBridge;
 	/** Per-session bridge for the SDK plan-mode lifecycle. */
 	planBridge: PlanModeBridge;
+	subagents?: SubagentTree;
+	advisorNotes: Array<{ advisor: string; severity: "nit" | "concern" | "blocker"; note: string; timestamp: number }>;
+	advisorEvents: Array<{ type: "advisor_cost_changed" | "advisor_yielded"; timestamp: number }>;
 }
 
 export class InProcessAgentBridge implements AgentBridge {
@@ -159,12 +165,39 @@ export class InProcessAgentBridge implements AgentBridge {
 			log.info(`extension paths: ${ext.extensions.map(e => (e as { path?: string }).path ?? "<unknown>").join(" | ")}`);
 		}
 		await this.wireExtensionRunner(session);
-		return this.attach(session, cwd, sessionManager, result.setToolUIContext);
+		const handle = this.attach(session, cwd, sessionManager, result.setToolUIContext, hasFeature("subagent-tree") ? result.subagentEventBus : undefined);
+		await handle.restorePlanMode();
+		return handle;
 	}
 
 
 	getSession(sessionId: string): SessionHandle | undefined {
 		return this.active.get(sessionId)?.handle;
+	}
+
+	advisorSession(id: string) {
+		const entry = this.active.get(id);
+		if (!entry) return undefined;
+		return {
+			cwd: entry.handle.cwd,
+			advisorStatus: () => ({
+				overview: entry.session.getAdvisorStatusOverview(),
+				stats: entry.session.getAdvisorStats(),
+				notes: entry.advisorNotes,
+				events: entry.advisorEvents,
+			}),
+			setAdvisorEnabled: (enabled: boolean) => entry.session.setAdvisorEnabled(enabled),
+			applyAdvisorConfigs: (config: Awaited<ReturnType<ReturnType<typeof feature<"advisors">>["discoverAdvisorConfigs"]>>) =>
+				entry.session.applyAdvisorConfigs(config.advisors, config.sharedInstructions, config.sharedMaxNotesPerUpdate),
+			reloadAdvisorSettings: () => entry.session.settings.reloadFromDisk(),
+		};
+	}
+
+	liveAdvisorSessions() {
+		return [...this.active.keys()].flatMap(id => {
+			const session = this.advisorSession(id);
+			return session ? [session] : [];
+		});
 	}
 
 	async listSessions(opts: { cwd?: string }): Promise<SessionSummary[]> {
@@ -192,6 +225,26 @@ export class InProcessAgentBridge implements AgentBridge {
 			...(known.title ? { title: known.title } : {}),
 			messages: manager.buildSessionContext({ transcript: true }).messages as unknown as AgentMessageJson[],
 		};
+	}
+
+	subagentSnapshot(sessionId: string): SubagentNode[] {
+		return this.active.get(sessionId)?.subagents?.snapshot() ?? [];
+	}
+
+	subscribeSubagents(sessionId: string, listener: (nodes: SubagentNode[]) => void): () => void {
+		return this.active.get(sessionId)?.subagents?.subscribe(listener) ?? (() => {});
+	}
+
+	async readSubagentTranscript(sessionId: string, id: string, fromByte?: number): Promise<SubagentTranscriptResponse> {
+		const tree = this.active.get(sessionId)?.subagents;
+		if (!tree) throw new Error("Forbidden subagent");
+		return tree.transcript(id, fromByte);
+	}
+
+	async abortSubagent(sessionId: string, id: string): Promise<void> {
+		const tree = this.active.get(sessionId)?.subagents;
+		if (!tree) throw new Error("Forbidden subagent");
+		await tree.abort(id);
 	}
 
 	private ensureModelRegistry(): Promise<ModelRegistry> {
@@ -415,6 +468,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		cwd: string,
 		sessionManager: SessionManager,
 		setToolUIContext: CreateAgentSessionResult["setToolUIContext"],
+		subagentEventBus?: CreateAgentSessionResult["subagentEventBus"],
 	): InProcessSessionHandle {
 		const sessionId = (session as any).sessionId as string;
 		const uiBridge = new ExtensionUIBridge(sessionId);
@@ -423,7 +477,8 @@ export class InProcessAgentBridge implements AgentBridge {
 		// the deck UI via WebSocket frames.
 		setToolUIContext(uiBridge, true);
 
-		const planBridge = new PlanModeBridge();
+		const subagents = subagentEventBus ? new SubagentTree((session as { getAgentId?: () => string }).getAgentId?.() ?? "", subagentEventBus) : undefined;
+		const planBridge = new PlanModeBridge(sessionId, session, sessionManager);
 
 		const handle = new InProcessSessionHandle({
 			session,
@@ -436,6 +491,7 @@ export class InProcessAgentBridge implements AgentBridge {
 				uiBridge.dispose();
 				planBridge.dispose();
 				const entry = this.active.get(sessionId);
+				subagents?.dispose();
 				entry?.releaseWork?.();
 				this.active.delete(sessionId);
 			},
@@ -456,6 +512,20 @@ export class InProcessAgentBridge implements AgentBridge {
 				if (!wasBusy && isBusy) entry.releaseWork = workRegistry.admit("session", sessionId);
 				else if (wasBusy && !isBusy) { entry.releaseWork?.(); entry.releaseWork = undefined; }
 				entry.turnInFlight = next;
+			}
+			if (type === "message_end") {
+				const message = (event as { message?: { role?: string; customType?: string; details?: { notes?: Array<{ advisor?: string; severity?: string; note?: string }> }; timestamp?: number } }).message;
+				if (message?.role === "custom" && message.customType === "advisor") {
+					for (const note of message.details?.notes ?? []) {
+						if (typeof note.note !== "string" || !["nit", "concern", "blocker"].includes(note.severity ?? "")) continue;
+						entry?.advisorNotes.push({ advisor: note.advisor ?? "Advisor", severity: note.severity as "nit" | "concern" | "blocker", note: note.note, timestamp: message.timestamp ?? Date.now() });
+					}
+					if (entry && entry.advisorNotes.length > 100) entry.advisorNotes.splice(0, entry.advisorNotes.length - 100);
+				}
+			}
+			if (entry && (type === "advisor_cost_changed" || type === "advisor_yielded")) {
+				entry.advisorEvents.push({ type, timestamp: Date.now() });
+				if (entry.advisorEvents.length > 100) entry.advisorEvents.shift();
 			}
 			// NeoPi's model_changed carries no payload; re-send the header fields
 			// so the UI follows model switches made by the agent or a slash command.
@@ -513,6 +583,9 @@ export class InProcessAgentBridge implements AgentBridge {
 			subscribers: new Set(),
 			uiBridge,
 			planBridge,
+			subagents,
+			advisorNotes: [],
+			advisorEvents: [],
 		});
 		return handle;
 	}
@@ -1136,6 +1209,10 @@ export class InProcessSessionHandle implements SessionHandle {
 		if (accepted === false) {
 			throw new Error(`session rejected name (empty after sanitization?): ${JSON.stringify(name)}`);
 		}
+	}
+
+	async restorePlanMode(): Promise<void> {
+		await this.planBridge.restore();
 	}
 
 	// ─── Plan-mode bridge surface ────────────────────────────────────────
