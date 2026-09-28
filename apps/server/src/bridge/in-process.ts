@@ -426,7 +426,7 @@ export class InProcessAgentBridge implements AgentBridge {
 	async listModels(opts: { sessionId?: string } = {}): Promise<ModelInfo[]> {
 		const registry = await this.ensureModelRegistry();
 		const handle = opts.sessionId ? this.active.get(opts.sessionId)?.handle : undefined;
-		const lease = await this.leaseMixtures(registry, handle?.cwd ?? process.cwd());
+		const lease = await this.leaseMixtures(registry, handle?.mixtureCwd() ?? process.cwd());
 		try {
 			const current = handle?.snapshot().model;
 			// The shared registry lists the union of every held workspace's mixtures;
@@ -661,7 +661,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			cwd,
 			sessionId,
 			getModelRegistry: () => this.ensureModelRegistry(),
-			leaseMixtures: (registry) => this.leaseMixtures(registry, cwd),
+			leaseMixtures: (registry, workspace) => this.leaseMixtures(registry, workspace),
 			planBridge,
 			onDispose: () => {
 				uiBridge.dispose();
@@ -879,7 +879,7 @@ export class InProcessSessionHandle implements SessionHandle {
 	private session: AgentSession;
 	private readonly sessionManager: SessionManager;
 	private readonly modelRegistryRef: () => Promise<ModelRegistry>;
-	private readonly mixtureLease: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
+	private readonly mixtureLease: (registry: ModelRegistry, cwd: string) => Promise<MixtureRoster | undefined>;
 	private readonly planBridge: PlanModeBridge;
 	private listeners = new Set<EventListener>();
 	private onDisposeCallback: () => void;
@@ -906,7 +906,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		sessionId: string;
 		getModelRegistry: () => Promise<ModelRegistry>;
 		/** Request-scoped lease on this session's workspace mixtures; absent in tests that never select one. */
-		leaseMixtures?: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
+		leaseMixtures?: (registry: ModelRegistry, cwd: string) => Promise<MixtureRoster | undefined>;
 		planBridge: PlanModeBridge;
 		onDispose: () => void;
 	}) {
@@ -918,6 +918,16 @@ export class InProcessSessionHandle implements SessionHandle {
 		this.mixtureLease = args.leaseMixtures ?? (async () => undefined);
 		this.planBridge = args.planBridge;
 		this.onDisposeCallback = args.onDispose;
+	}
+
+	/**
+	 * The workspace NeoPi currently runs mixtures for. `/move` and `/wt`
+	 * relocate a session and rebind its mixture scope, so read the session
+	 * manager's live cwd instead of the cwd the chat was opened with.
+	 */
+	mixtureCwd(): string {
+		const live = (this.sessionManager as { getCwd?: () => string | undefined }).getCwd?.();
+		return path.resolve(live ?? this.cwd);
 	}
 
 	get sessionFile(): string | undefined {
@@ -1051,7 +1061,7 @@ export class InProcessSessionHandle implements SessionHandle {
 
 	async setModel(ref: ModelRef): Promise<void> {
 		const registry = await this.modelRegistryRef();
-		const lease = ref.provider === "mixture" ? await this.mixtureLease(registry) : undefined;
+		const lease = ref.provider === "mixture" ? await this.mixtureLease(registry, this.mixtureCwd()) : undefined;
 		try {
 			if (ref.provider === "mixture" && !lease?.find(ref.id)) {
 				throw new Error(`mixture/${ref.id} is not defined in ${this.cwd}`);
