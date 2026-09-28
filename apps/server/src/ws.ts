@@ -267,27 +267,30 @@ export class WsHub {
 			sendError(err);
 			return;
 		}
+		const consumed = (output: string): void => {
+			send(ws, { type: "prompt_consumed", sessionId: frame.sessionId, output });
+		};
+		const forward = async (text: string): Promise<void> => {
+			if (!(await handle.prompt(text, opts))) consumed("Done.");
+		};
 		if (frame.text.startsWith("/")) {
-			const consumed = (output: string): void => {
-				send(ws, { type: "prompt_consumed", sessionId: frame.sessionId, output });
-			};
 			handle
 				.dispatchDeckSlashCommand(frame.text)
 				.then((deck) => {
 					if (deck.kind === "consumed") return consumed(deck.output);
-					if (deck.kind === "rewritten") return handle.prompt(deck.prompt, opts);
+					if (deck.kind === "rewritten") return forward(deck.prompt);
 					return handle
 						.dispatchSlashCommand(frame.text)
 						.then((sdk) => {
 							if (sdk.kind === "consumed") return consumed(sdk.output);
-							if (sdk.kind === "rewritten") return handle.prompt(sdk.prompt, opts);
-							return handle.prompt(frame.text, opts);
+							if (sdk.kind === "rewritten") return forward(sdk.prompt);
+							return forward(frame.text);
 						});
 				})
 				.catch(sendError).finally(release);
 			return;
 		}
-		handle.prompt(frame.text, opts).catch(sendError).finally(release);
+		forward(frame.text).catch(sendError).finally(release);
 	}
 
 	private async handleAbort(ws: ServerWebSocket<ConnectionData>, sessionId: string): Promise<void> {

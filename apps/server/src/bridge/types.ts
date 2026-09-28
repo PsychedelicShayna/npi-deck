@@ -119,10 +119,11 @@ export interface SessionHandle {
 
 	subscribe(listener: EventListener): () => void;
 	snapshot(): SessionSnapshot;
+	/** False when NeoPi handles the prompt locally; no agent_end follows. */
 	prompt(
 		text: string,
 		opts?: { streamingBehavior?: "steer" | "followUp"; images?: ImageAttachment[] },
-	): Promise<void>;
+	): Promise<boolean>;
 	/** True iff a turn is currently in-flight. Used by the WS layer to decide
 	 *  whether a freshly-arrived prompt is being queued vs. running immediately. */
 	isStreamingNow(): boolean;

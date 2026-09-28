@@ -25,6 +25,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 
 ### Fixed
 
+- NeoPi extension commands that finish locally now acknowledge the sending WebSocket client instead of leaving Telegram waiting for an `agent_end` that never arrives (#37). Agent-forwarded prompts still wait for the terminal event.
 - Launcher-loss shutdown is now capped at five seconds before the worker exits and systemd reaps its entire cgroup (#74); ordinary SIGTERM still uses graceful teardown. Disposing a session settles an outstanding plan decision before awaiting NeoPi's turn drain.
 - An unanswered plan proposal expires 30 seconds after its last reviewer disconnects, allowing a quick reconnect to replay the card; even a connected review expires after ten minutes (#75). Expiration rejects approval without deleting the plan artifact. Concurrent proposal preparation can no longer overwrite a pending decision.
 - The first WebSocket hello now refetches session and workspace lists if bootstrap started REST reads before the worker generation was known; the sidebar no longer stays empty until manually refreshed.

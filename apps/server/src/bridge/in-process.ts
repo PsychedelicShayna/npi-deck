@@ -989,7 +989,7 @@ export class InProcessSessionHandle implements SessionHandle {
 	async prompt(
 		text: string,
 		opts?: { streamingBehavior?: "steer" | "followUp"; images?: import("@npi-deck/protocol").ImageAttachment[] },
-	): Promise<void> {
+	): Promise<boolean> {
 		// Snapshot the streaming flag BEFORE calling the SDK so we can tell
 		// whether the SDK queued this prompt (was streaming) or ran it immediately.
 		// The deck UI uses this to surface a "queued" bubble — without it, prompts
@@ -1029,6 +1029,7 @@ export class InProcessSessionHandle implements SessionHandle {
 			} as unknown as AgentSessionEventJson);
 			this.emitQueueState();
 		}
+		return dispatched;
 	}
 
 	isStreamingNow(): boolean {

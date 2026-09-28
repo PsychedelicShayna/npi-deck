@@ -23,6 +23,7 @@ function setup(handle: Record<string, unknown>) {
 		getSession: () => ({
 			prompt: async (text: string) => {
 				prompted.push(text);
+				return true;
 			},
 			...handle,
 		}),
@@ -70,5 +71,20 @@ describe("WsHub prompt", () => {
 		await settle();
 		expect(sent).toEqual([]);
 		expect(prompted).toEqual(["/skill:foo"]);
+	});
+
+	test("an extension command consumed by NeoPi completes without agent_end", async () => {
+		const { sent, prompted, promptFrame } = setup({
+			dispatchDeckSlashCommand: async () => ({ kind: "fallthrough" }),
+			dispatchSlashCommand: async () => ({ kind: "fallthrough" }),
+			prompt: async (text: string) => {
+				prompted.push(text);
+				return false;
+			},
+		});
+		await promptFrame("/extension-command");
+		await settle();
+		expect(prompted).toEqual(["/extension-command"]);
+		expect(sent).toEqual([{ type: "prompt_consumed", sessionId: "s", output: "Done." }]);
 	});
 });
