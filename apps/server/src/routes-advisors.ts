@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { feature, sdk } from "./backend/runtime.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 import { logger } from "./log.ts";
+import { spawnOwnedSync } from "./owned-process.ts";
 
 const log = logger("routes:advisors");
 type AdvisorSdk = ReturnType<typeof feature<"advisors">>;
@@ -28,7 +29,7 @@ async function fileSnapshot(file: string): Promise<{ hash: string; text: string 
 // NeoPi's TUI edits the VCS root, falling back to cwd. Avoid accepting arbitrary
 // file paths from the browser: the scope and cwd select a discovered destination.
 function projectRoot(cwd: string): string {
-	const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], { cwd, stdout: "pipe", stderr: "ignore" });
+	const result = spawnOwnedSync(["git", "rev-parse", "--show-toplevel"], { cwd, stdout: "pipe", stderr: "ignore" });
 	return result.exitCode === 0 ? result.stdout.toString().trim() || cwd : cwd;
 }
 function directories(cwd: string): { projectDir: string; agentDir: string } {

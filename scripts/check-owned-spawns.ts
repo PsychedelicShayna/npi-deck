@@ -15,9 +15,10 @@ function scan(dir: string): void {
 			const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
 			function visit(node: ts.Node): void {
 				if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-					&& node.expression.expression.getText(source) === "Bun" && node.expression.name.text === "spawn") {
+					&& node.expression.expression.getText(source) === "Bun"
+					&& (node.expression.name.text === "spawn" || node.expression.name.text === "spawnSync")) {
 					const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-					violations.push(`${path.relative(root, file)}:${line}: direct spawn outside spawnOwned`);
+					violations.push(`${path.relative(root, file)}:${line}: direct ${node.expression.name.text} outside owned-process`);
 				}
 				if (ts.isImportDeclaration(node) && /^(node:)?child_process$/.test((node.moduleSpecifier as ts.StringLiteral).text)) violations.push(`${path.relative(root, file)}: child_process import`);
 				ts.forEachChild(node, visit);
@@ -28,4 +29,4 @@ function scan(dir: string): void {
 }
 scan(root);
 if (violations.length) { console.error(violations.join("\n")); process.exit(1); }
-console.log("server process spawns use spawnOwned");
+console.log("server process creation uses owned-process wrappers");

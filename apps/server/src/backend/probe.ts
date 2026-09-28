@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { spawnOwned, terminateOwned } from "../owned-process.ts";
+import { spawnOwned, spawnOwnedSync, terminateOwned } from "../owned-process.ts";
 import { MANIFEST } from "./manifest.ts";
 import { resolveManifest, formatDiagnostic, type BackendIdentity, type FeatureStatus } from "./runtime.ts";
 import type { FeatureName } from "./manifest.ts";
@@ -36,7 +36,7 @@ async function inspect(tree: string): Promise<ProbeResult> {
 	const candidate = loader.initLoaderContext().candidates.find(existsSync);
 	if (!candidate) throw new Error(`tree not prepared: native addon missing (need ${sentinel})`);
 	if (!sentinelPresent(candidate, sentinel)) throw new Error(`native addon ${candidate} lacks ${sentinel}`);
-	const git = Bun.spawnSync(["git", "-C", tree, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
+	const git = spawnOwnedSync(["git", "-C", tree, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
 	if (git.exitCode !== 0) throw new Error(`cannot identify backend git HEAD: ${git.stderr.toString().trim()}`);
 	const commit = git.stdout.toString().trim();
 	const { features, values } = await resolveManifest(tree, MANIFEST);

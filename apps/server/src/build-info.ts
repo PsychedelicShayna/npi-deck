@@ -17,6 +17,7 @@
 import * as fs from "node:fs";
 
 import { buildInfoFile, DECK_ROOT } from "./assets.ts";
+import { spawnOwnedSync } from "./owned-process.ts";
 
 import packageJson from "../package.json" with { type: "json" };
 
@@ -49,13 +50,10 @@ function resolveBuildSha(): string | null {
 		// fall through — .buildinfo unreadable, try git
 	}
 
-	// Git fallback (synchronous, runs once at boot). Bun.spawnSync keeps us off
-	// node:child_process and avoids the Windows quoting traps that plague
-	// `cmd /c git ...`.
+	// Git fallback (synchronous, runs once at boot).
 	try {
 		const repoRoot = DECK_ROOT;
-		const proc = Bun.spawnSync({
-			cmd: ["git", "rev-parse", "HEAD"],
+		const proc = spawnOwnedSync(["git", "rev-parse", "HEAD"], {
 			cwd: repoRoot,
 			stdout: "pipe",
 			stderr: "pipe",

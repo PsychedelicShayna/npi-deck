@@ -22,6 +22,7 @@ import * as path from "node:path";
 import { parse as parseYaml, parseDocument } from "yaml";
 
 import { getDataDir } from "../env-store.ts";
+import { spawnOwnedSync } from "../owned-process.ts";
 
 import {
 	MANIFEST,
@@ -165,7 +166,7 @@ function errorMessage(err: unknown): string {
 }
 
 function readIdentity(tree: string, version: unknown): BackendIdentity {
-	const git = Bun.spawnSync(["git", "-C", tree, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "ignore" });
+	const git = spawnOwnedSync(["git", "-C", tree, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "ignore" });
 	return {
 		path: tree,
 		version: typeof version === "string" ? version : null,

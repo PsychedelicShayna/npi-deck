@@ -26,6 +26,7 @@ import * as path from "node:path";
 import type { AgentSession, CreateAgentSessionOptions } from "@oh-my-pi/pi-coding-agent";
 
 import { MANIFEST, manifestRows, type FeatureSpec, type ModuleSpecifier } from "./manifest.ts";
+import { spawnOwnedSync } from "../owned-process.ts";
 import { feature, formatDiagnostic, loadBackend, resolveBackendSelection, resolveManifest, sdk } from "./runtime.ts";
 
 // HOME and friends must be set before the process starts: NeoPi (and
@@ -53,11 +54,11 @@ if (!process.env.NPI_DECK_CONTRACT_ROOT) {
 	});
 	mkdirSync(home, { recursive: true });
 	mkdirSync(env.PI_CODING_AGENT_DIR!, { recursive: true });
-	const child = Bun.spawnSync([process.execPath, import.meta.path, ...process.argv.slice(2)], {
+	const child = spawnOwnedSync([process.execPath, import.meta.path, ...process.argv.slice(2)], {
 		cwd: root,
 		env,
 		stdio: ["ignore", "inherit", "inherit"],
-	});
+	}, { replaceEnv: true });
 	rmSync(root, { recursive: true, force: true });
 	process.exit(child.exitCode ?? 1);
 }

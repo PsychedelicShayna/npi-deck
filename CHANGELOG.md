@@ -25,6 +25,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 
 ### Fixed
 
+- Owned process-group signals now verify the recorded leader or a descendant carrying that spawn's unique marker before signaling the group, including exit callbacks and SIGKILL escalation (#72). Short-lived leaders with surviving children can be journaled through a marked descendant. Synchronous server probes also use a parent-death-protected wrapper; the spawn gate covers both Bun spawn APIs.
 - NeoPi extension commands that finish locally now acknowledge the sending WebSocket client instead of leaving Telegram waiting for an `agent_end` that never arrives (#37). Agent-forwarded prompts still wait for the terminal event.
 - OAuth prompt and manual-code replies no longer replace an already-rendered signed-in or error state with "Working…" when the provider completes before the HTTP reply settles (#38).
 - Routine agent NDJSON parsing now treats non-terminal `agent_end` as an advisor pause, retaining incurred usage without accepting a provisional answer. Distinct assistant messages starting in the same millisecond no longer lose usage when their provider omits a response id. Each run persists the NeoPi backend tree it pinned on its first agent step (#48).

@@ -226,6 +226,12 @@ every process that still carries its generation marker (`NPI_DECK_GEN`).
 Descendants of a server whose launcher was also killed are cleaned up at the
 next start.
 
+Server child processes carry a per-spawn group marker. Group cleanup checks
+the original leader or a marked descendant before signaling its process group,
+so a recycled group ID cannot target an unrelated process. Blocking git and
+preflight probes use the same parent-death protection. The generation sweep
+remains the fallback for descendants that leave their original group.
+
 Status and logs: `systemctl --user status npi-deck`,
 `journalctl --user -u npi-deck`, `systemd-cgls --user-unit npi-deck.service`.
 
