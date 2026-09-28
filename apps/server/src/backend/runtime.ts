@@ -24,11 +24,9 @@ import { parse as parseYaml } from "yaml";
 
 import {
 	MANIFEST,
-	manifestRows,
 	type FeatureExports,
 	type FeatureName,
 	type FeatureSpec,
-	type ModuleSpecifier,
 	type OptionalFeatureName,
 	type Tier,
 } from "./manifest.ts";
@@ -140,7 +138,7 @@ export function resolveBackendSelection(env: NodeJS.ProcessEnv = process.env): B
 
 type ModuleLoad = { ok: true; file: string; ns: Record<string, unknown> } | { ok: false; file: string | null; reason: string };
 
-async function importModule(tree: string, specifier: ModuleSpecifier): Promise<ModuleLoad> {
+async function importModule(tree: string, specifier: string): Promise<ModuleLoad> {
 	let file: string;
 	try {
 		file = Bun.resolveSync(specifier, tree);
@@ -167,34 +165,23 @@ function readIdentity(tree: string, version: unknown): BackendIdentity {
 	};
 }
 
-let active: { backend: LoadedBackend; values: Map<FeatureName, Record<string, unknown>> } | undefined;
-
 /**
- * Import the manifest from `selection` and make it the process's backend.
- * Throws BackendLoadError (every required diagnostic) without activating
- * anything when a required export is missing. Idempotent for the same tree;
- * a second, different tree is refused because module effects can't be undone.
+ * Import every module a manifest names from `tree` and check each export and
+ * file. Pure with respect to the active backend; loadBackend() activates the
+ * result, and the contract fixture feeds it deliberately broken manifests.
  */
-export async function loadBackend(selection: BackendSelection = resolveBackendSelection()): Promise<LoadedBackend> {
-	const tree = path.resolve(selection.path);
-	if (active) {
-		if (active.backend.identity.path === tree) return active.backend;
-		throw new BackendLoadError(
-			`backend already loaded from ${active.backend.identity.path}; switching to ${tree} needs a restart`,
-			[],
-		);
-	}
-	if (!existsSync(path.join(tree, "packages/coding-agent/package.json"))) {
-		throw new BackendConfigError(`${tree} is not a NeoPi source tree (packages/coding-agent/package.json missing)`);
-	}
-
-	const specifiers = new Set<ModuleSpecifier>(manifestRows().map((r) => r.module));
-	const loads = new Map<ModuleSpecifier, ModuleLoad>();
+export async function resolveManifest(
+	tree: string,
+	manifest: Readonly<Record<string, FeatureSpec>> = MANIFEST,
+): Promise<{ features: Record<FeatureName, FeatureStatus>; values: Map<FeatureName, Record<string, unknown>> }> {
+	const specs = Object.entries(manifest) as [FeatureName, FeatureSpec][];
+	const specifiers = new Set(specs.flatMap(([, spec]) => Object.values(spec.exports).map((ref) => ref.module)));
+	const loads = new Map<string, ModuleLoad>();
 	await Promise.all([...specifiers].map(async (s) => loads.set(s, await importModule(tree, s))));
 
 	const features = {} as Record<FeatureName, FeatureStatus>;
 	const values = new Map<FeatureName, Record<string, unknown>>();
-	for (const [name, spec] of Object.entries(MANIFEST) as [FeatureName, FeatureSpec][]) {
+	for (const [name, spec] of specs) {
 		const diagnostics: ManifestDiagnostic[] = [];
 		const featureValues: Record<string, unknown> = {};
 		for (const [key, ref] of Object.entries(spec.exports)) {
@@ -217,6 +204,31 @@ export async function loadBackend(selection: BackendSelection = resolveBackendSe
 		features[name] = { tier: spec.tier, available: diagnostics.length === 0, diagnostics };
 		values.set(name, featureValues);
 	}
+	return { features, values };
+}
+
+let active: { backend: LoadedBackend; values: Map<FeatureName, Record<string, unknown>> } | undefined;
+
+/**
+ * Import the manifest from `selection` and make it the process's backend.
+ * Throws BackendLoadError (every required diagnostic) without activating
+ * anything when a required export is missing. Idempotent for the same tree;
+ * a second, different tree is refused because module effects can't be undone.
+ */
+export async function loadBackend(selection: BackendSelection = resolveBackendSelection()): Promise<LoadedBackend> {
+	const tree = path.resolve(selection.path);
+	if (active) {
+		if (active.backend.identity.path === tree) return active.backend;
+		throw new BackendLoadError(
+			`backend already loaded from ${active.backend.identity.path}; switching to ${tree} needs a restart`,
+			[],
+		);
+	}
+	if (!existsSync(path.join(tree, "packages/coding-agent/package.json"))) {
+		throw new BackendConfigError(`${tree} is not a NeoPi source tree (packages/coding-agent/package.json missing)`);
+	}
+
+	const { features, values } = await resolveManifest(tree);
 
 	const requiredFailures = Object.values(features).flatMap((f) => (f.tier === "required" ? f.diagnostics : []));
 	if (requiredFailures.length > 0) {

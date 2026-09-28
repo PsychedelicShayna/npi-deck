@@ -35,6 +35,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/registry/agent-registry": typeof import("@oh-my-pi/pi-coding-agent/registry/agent-registry");
 	"@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins": typeof import("@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins");
 	"@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry": typeof import("@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry");
+	"@oh-my-pi/pi-coding-agent/tools/resolve": typeof import("@oh-my-pi/pi-coding-agent/tools/resolve");
 	"@oh-my-pi/pi-tui/theme/theme": typeof import("@oh-my-pi/pi-tui/theme/theme");
 	"@oh-my-pi/pi-tui/tools/tool-errors": typeof import("@oh-my-pi/pi-tui/tools/tool-errors");
 };
@@ -127,6 +128,7 @@ export const MANIFEST = {
 		tier: "optional-feature",
 		consumers: ["W4 bridge/plan-mode-bridge.ts"],
 		exports: {
+			dispatchResolutionDevice: op("@oh-my-pi/pi-coding-agent/tools/resolve", "dispatchResolutionDevice"),
 			resolveApprovedPlan: op("@oh-my-pi/pi-coding-agent/plan-mode/approved-plan", "resolveApprovedPlan"),
 			planFileUrlForSlug: op("@oh-my-pi/pi-coding-agent/plan-mode/approved-plan", "planFileUrlForSlug"),
 			resolveLocalUrlToPath: op("@oh-my-pi/pi-coding-agent/internal-urls", "resolveLocalUrlToPath"),
