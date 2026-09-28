@@ -40,8 +40,8 @@ import type { RestartServerResponse } from "@npi-deck/protocol";
 import type { BackendStatusResponse, BackendSwitchResponse } from "@npi-deck/protocol";
 
 const log = logger("server");
-/** Launcher loss must not leave a worker (or its cgroup) waiting on SDK teardown. */
-const LAUNCHER_SHUTDOWN_DEADLINE_MS = 5_000;
+/** Leave room for the 1s launcher poll and cgroup teardown within W9's 5s limit. */
+const SHUTDOWN_DEADLINE_MS = 3_000;
 
 /** An unready switched worker must hand control back to the launcher. */
 export function rollbackFailedBoot(): boolean {
@@ -280,7 +280,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 				validated = previousValidated;
 				throw err;
 			}
-			setTimeout(() => { void stop("backend switch").then(() => process.exit(RESTART_EXIT_CODE)); }, 50);
+			setTimeout(() => exitAfterShutdown(stop, "backend switch", RESTART_EXIT_CODE), 50);
 			return { code: 202, body: { ok: true, message: `switching to ${id}${force ? "; aborting active work" : ""}` } };
 		} finally { if (!committed) switching = false; }
 	}
@@ -407,24 +407,28 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 		}
 	}
 
-	// A lost launcher cannot stop a hung worker's systemd unit. Keep graceful
-	// teardown for the common case, but force an exit so the cgroup is reaped.
+	// A lost launcher cannot stop a hung worker's systemd unit.
 	const launcher = launcherFromEnv();
 	if (launcher) {
 		watchLauncher(launcher, () => {
 			log.warn(`launcher pid ${launcher.pid} is gone; shutting down`);
-			const deadline = setTimeout(() => {
-				log.error(`launcher-loss shutdown exceeded ${LAUNCHER_SHUTDOWN_DEADLINE_MS}ms; forcing worker exit`);
-				process.exit(1);
-			}, LAUNCHER_SHUTDOWN_DEADLINE_MS);
-			void stop("launcher gone").then(
-				() => { clearTimeout(deadline); process.exit(0); },
-				(error) => { clearTimeout(deadline); log.error("launcher-loss shutdown failed", error); process.exit(1); },
-			);
+			exitAfterShutdown(stop, "launcher gone", 0, 1);
 		});
 	}
 
 	return { url: `http://${server.hostname}:${server.port}`, stop };
+}
+
+/** A blocked SDK/routine teardown must never strand the current worker generation. */
+function exitAfterShutdown(stop: (reason: string) => Promise<void>, reason: string, exitCode: number, forcedExitCode = exitCode): void {
+	const deadline = setTimeout(() => {
+		log.error(`${reason} shutdown exceeded ${SHUTDOWN_DEADLINE_MS}ms; forcing worker exit`);
+		process.exit(forcedExitCode);
+	}, SHUTDOWN_DEADLINE_MS);
+	void stop(reason).then(
+		() => { clearTimeout(deadline); process.exit(exitCode); },
+		(error) => { clearTimeout(deadline); log.error(`${reason} shutdown failed`, error); process.exit(1); },
+	);
 }
 
 /**
@@ -438,7 +442,7 @@ function scheduleRestart(stop: (reason: string) => Promise<void>): RestartServer
 	}
 	setTimeout(() => {
 		log.info(`restart requested; exiting with ${RESTART_EXIT_CODE}`);
-		void stop("restart").then(() => process.exit(RESTART_EXIT_CODE));
+		exitAfterShutdown(stop, "restart", RESTART_EXIT_CODE);
 	}, 100);
 	return { ok: true, message: "Restart scheduled" };
 }

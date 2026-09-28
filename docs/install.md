@@ -216,12 +216,16 @@ What it does:
   foreground.
 - Ctrl-C (or SIGTERM/SIGHUP) on the launcher stops the unit. If the launcher
   itself is killed, the server notices within a second (it watches
-  `NPI_DECK_LAUNCHER_PID`) and shuts down, which empties the cgroup.
+  `NPI_DECK_LAUNCHER_PID`) and shuts down. A hung shutdown is forced after
+  three seconds so systemd can empty the unit's cgroup within five seconds.
 - Settings → Restart makes the server exit with the reserved status 75;
   systemd restarts it on exactly that status (`RestartForceExitStatus`) and
-  clears the cgroup between generations. It gives up after 5 starts in 60 s.
-  A server started with `bun run dev` or `bun run start` has no supervisor,
-  so its restart button reports that instead.
+  clears the cgroup between generations. Force-switching a backend uses the
+  same restart status. Both restarts force worker exit after three seconds if
+  active work blocks teardown; systemd then kills remaining processes in the
+  old cgroup. It gives up after 5 starts in 60 s. A server started with
+  `bun run dev` or `bun run start` has no supervisor, so its restart button
+  reports that instead.
 
 Without a systemd user manager the launcher refuses to start unless given
 `--no-systemd`. Then the server is a direct child, run under
