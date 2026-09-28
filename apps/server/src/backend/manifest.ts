@@ -37,6 +37,15 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace": typeof import("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace");
 	"@oh-my-pi/pi-coding-agent/internal-urls": typeof import("@oh-my-pi/pi-coding-agent/internal-urls");
 	"@oh-my-pi/pi-coding-agent/mcp/config": typeof import("@oh-my-pi/pi-coding-agent/mcp/config");
+	// #90 reads and writes MCP server definitions; grouped here so the sorted
+	// list above keeps one insertion point per workstream.
+	"@oh-my-pi/pi-coding-agent/mcp/config-writer": typeof import("@oh-my-pi/pi-coding-agent/mcp/config-writer");
+	"@oh-my-pi/pi-coding-agent/mcp/settings": typeof import("@oh-my-pi/pi-coding-agent/mcp/settings");
+	"@oh-my-pi/pi-coding-agent/capability/mcp": typeof import("@oh-my-pi/pi-coding-agent/capability/mcp");
+	"@oh-my-pi/pi-coding-agent/capability/fs": typeof import("@oh-my-pi/pi-coding-agent/capability/fs");
+	"@oh-my-pi/pi-coding-agent/discovery": typeof import("@oh-my-pi/pi-coding-agent/discovery");
+	"@oh-my-pi/pi-coding-agent/extensibility/settings": typeof import("@oh-my-pi/pi-coding-agent/extensibility/settings");
+	"@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime": typeof import("@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime");
 	"@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents": typeof import("@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents");
 	"@oh-my-pi/pi-coding-agent/moa/registration": typeof import("@oh-my-pi/pi-coding-agent/moa/registration");
 	"@oh-my-pi/pi-coding-agent/plan-mode/approved-plan": typeof import("@oh-my-pi/pi-coding-agent/plan-mode/approved-plan");
@@ -195,6 +204,34 @@ export const MANIFEST = {
 			TAB_METADATA: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_METADATA"),
 			TAB_GROUPS: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_GROUPS"),
 			MAIN_CONFIG_FILENAMES: op("@oh-my-pi/pi-utils", "MAIN_CONFIG_FILENAMES"),
+		},
+	},
+	/** #90: list, edit and toggle MCP server definitions in the user and project mcp.json files. */
+	"mcp-servers": {
+		tier: "optional-feature",
+		consumers: ["routes-mcp-servers.ts", "bridge/in-process.ts"],
+		exports: {
+			getMCPConfigPath: op("@oh-my-pi/pi-utils", "getMCPConfigPath"),
+			mcpCapability: op("@oh-my-pi/pi-coding-agent/capability/mcp", "mcpCapability"),
+			clearFsCache: op("@oh-my-pi/pi-coding-agent/capability/fs", "clearCache"),
+			isProviderEnabled: op("@oh-my-pi/pi-coding-agent/discovery", "isProviderEnabled"),
+			isUserSourceEnabled: op("@oh-my-pi/pi-coding-agent/discovery", "isUserSourceEnabled"),
+			cfgDisabledExtensions: op("@oh-my-pi/pi-coding-agent/extensibility/settings", "cfgDisabledExtensions"),
+			cfgMcpEnableProjectConfig: op("@oh-my-pi/pi-coding-agent/mcp/settings", "cfgMcpEnableProjectConfig"),
+			readMCPConfigFile: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "readMCPConfigFile"),
+			getMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "getMCPServer"),
+			addMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "addMCPServer"),
+			updateMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "updateMCPServer"),
+			removeMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "removeMCPServer"),
+			setMcpServerEnabled: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "setMcpServerEnabled"),
+			readDisabledServers: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "readDisabledServers"),
+			readEnabledServers: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "readEnabledServers"),
+			validateServerName: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "validateServerName"),
+			validateServerConfig: op("@oh-my-pi/pi-coding-agent/mcp/config", "validateServerConfig"),
+			applyMcpToggleRuntime: op(
+				"@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime",
+				"applyMcpToggleRuntime",
+			),
 		},
 	},
 	/** neopi#122: runtime-snapshotted source identity; git remains the fallback for older trees. */

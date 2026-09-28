@@ -37,6 +37,7 @@ import { buildOnboardingRouter } from "./routes-onboarding.ts";
 import { buildSubagentsRouter } from "./routes-subagents.ts";
 import { buildAdvisorsRouter } from "./routes-advisors.ts";
 import { buildNpiConfigRouter } from "./routes-npi-config.ts";
+import { buildMcpServersRouter } from "./routes-mcp-servers.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
@@ -279,6 +280,7 @@ export function buildRouter(
 	app.route("/subagents", buildSubagentsRouter(bridge));
 	app.route("/", buildAdvisorsRouter(bridge, config));
 	app.route("/", buildNpiConfigRouter(bridge, config));
+	app.route("/", buildMcpServersRouter(bridge, config));
 
 	return app;
 }

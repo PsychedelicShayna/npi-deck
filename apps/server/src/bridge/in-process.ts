@@ -1,4 +1,4 @@
-import type { AgentSession, CreateAgentSessionResult, ModelRegistry, SessionManager } from "@oh-my-pi/pi-coding-agent";
+import type { AgentSession, CreateAgentSessionResult, MCPManager, ModelRegistry, SessionManager } from "@oh-my-pi/pi-coding-agent";
 import { feature, hasFeature, sdk } from "../backend/runtime.ts";
 // `Model` is owned by `@oh-my-pi/pi-ai`, a transitive dep we don't bring in
 // directly. Treat it as opaque at the bridge boundary — we only ever pass it
@@ -45,6 +45,7 @@ import type {
 	AgentBridge,
 	CreateSessionOpts,
 	EventListener,
+	LiveMcpSession,
 	LiveSettingsReload,
 	PlanApprovalResponse,
 	ResumeSessionOpts,
@@ -97,6 +98,8 @@ interface Active {
 	/** Per-session bridge for the SDK plan-mode lifecycle. */
 	planBridge: PlanModeBridge;
 	subagents?: SubagentTree;
+	/** NeoPi's MCP runtime for this chat; absent when the chat opened with MCP off. */
+	mcpManager?: MCPManager;
 	advisorNotes: Array<{ advisor: string; severity: "nit" | "concern" | "blocker"; note: string; timestamp: number }>;
 	advisorEvents: Array<{ type: "advisor_cost_changed" | "advisor_yielded"; timestamp: number }>;
 	/**
@@ -273,7 +276,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			log.info(`extension paths: ${ext.extensions.map(e => (e as { path?: string }).path ?? "<unknown>").join(" | ")}`);
 		}
 		await this.wireExtensionRunner(session);
-		const handle = this.attach(session, cwd, sessionManager, result.setToolUIContext, hasFeature("subagent-tree") ? result.subagentEventBus : undefined);
+		const handle = this.attach(session, cwd, sessionManager, result.setToolUIContext, hasFeature("subagent-tree") ? result.subagentEventBus : undefined, result.mcpManager);
 		// A new or resumed chat starts with an empty selection: nothing may run.
 		const entry = this.active.get(sessionId);
 		if (entry) this.enforceAdvisorSelection(entry);
@@ -361,6 +364,37 @@ export class InProcessAgentBridge implements AgentBridge {
 				// selection decides whether advisors run.
 				this.enforceAdvisorSelection(entry);
 			}
+		}));
+	}
+
+	liveMcpSessions(): LiveMcpSession[] {
+		const mcp = feature("mcp-servers");
+		return [...this.active].map(([sessionId, entry]): LiveMcpSession => ({
+			sessionId,
+			cwd: entry.handle.cwd,
+			status: name => entry.mcpManager?.getConnectionStatus(name),
+			apply: async (name, enabled) => {
+				if (!entry.mcpManager) return "no-mcp-runtime";
+				// Same filters the chat started with, so a reconnect cannot admit a
+				// server its own startup discovery excluded.
+				await mcp.applyMcpToggleRuntime({
+					name,
+					enabled,
+					cwd: entry.handle.cwd,
+					manager: entry.mcpManager,
+					session: { refreshMCPTools: tools => entry.session.refreshMCPTools(tools) },
+					discovery: {
+						enableProjectConfig: mcp.cfgMcpEnableProjectConfig.get(entry.session.settings),
+						filterExa: true,
+						filterBrowser: entry.session.getEvalPreludes().some(prelude => prelude.name === "browser"),
+						extensionRoots: entry.session.effectiveExtensionRoots,
+						...(hasFeature("mcp-allowlist")
+							? { includeServers: feature("mcp-allowlist").cfgMcpIncludeServers.get(entry.session.settings) }
+							: {}),
+					},
+				});
+				return "applied";
+			},
 		}));
 	}
 
@@ -644,6 +678,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		sessionManager: SessionManager,
 		setToolUIContext: CreateAgentSessionResult["setToolUIContext"],
 		subagentEventBus?: CreateAgentSessionResult["subagentEventBus"],
+		mcpManager?: MCPManager,
 	): InProcessSessionHandle {
 		const sessionId = (session as any).sessionId as string;
 		const uiBridge = new ExtensionUIBridge(sessionId);
@@ -759,6 +794,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			uiBridge,
 			planBridge,
 			subagents,
+			mcpManager,
 			advisorNotes: [],
 			advisorEvents: [],
 			advisorSelection: [],

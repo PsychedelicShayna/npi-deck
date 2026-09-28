@@ -51,6 +51,12 @@ export interface AgentBridge {
 	 * a config.yml write, so the change applies without a restart.
 	 */
 	reloadLiveSettings(): Promise<LiveSettingsReload[]>;
+	/**
+	 * Live chats' MCP runtimes, so an `mcp.json` write can reach them without a
+	 * restart. Chats opened with MCP switched off report no runtime rather than
+	 * pretending the change applied.
+	 */
+	liveMcpSessions(): LiveMcpSession[];
 	/** Catalog of models the SDK knows about, plus a marker on the current one when sessionId is given. */
 	listModels(opts?: { sessionId?: string }): Promise<ModelInfo[]>;
 	/**
@@ -106,6 +112,21 @@ export interface LiveSettingsReload {
 	settings: Settings;
 	/** The reload failed and was logged (its message can quote config.yml); the session keeps its previous layers. */
 	failed?: true;
+}
+
+/** One live chat's MCP runtime, for reconciling a written `mcp.json` change. */
+export interface LiveMcpSession {
+	sessionId: string;
+	cwd: string;
+	/**
+	 * Reconnect (`enabled`) or drop (`!enabled`) one server from the config on
+	 * disk and rebind the chat's MCP tools, exactly as NeoPi's own
+	 * `/mcp enable` / `/mcp disable` do. Resolves `"no-mcp-runtime"` when the
+	 * chat runs without an MCP manager; rejects when NeoPi's reconcile throws.
+	 */
+	apply(name: string, enabled: boolean): Promise<"applied" | "no-mcp-runtime">;
+	/** NeoPi's connection state for `name`, or undefined without an MCP runtime. */
+	status(name: string): "connected" | "connecting" | "disconnected" | undefined;
 }
 
 /** Invalid per-session MCP selection; callers can return a client error. */

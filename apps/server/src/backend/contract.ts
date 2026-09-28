@@ -350,6 +350,99 @@ await check("MCP: per-session override rejects unknown and shadowed names", [
 	return "allowed fixture spawned; excluded never spawned; config unchanged; unknown and shadowed IDs rejected before startup";
 });
 
+await check("MCP servers: list every source, write one scope, toggle, apply live", [
+	"getMCPConfigPath", "mcpCapability", "isProviderEnabled", "isUserSourceEnabled", "cfgDisabledExtensions",
+	"cfgMcpEnableProjectConfig", "readMCPConfigFile", "getMCPServer", "addMCPServer", "updateMCPServer",
+	"removeMCPServer", "setMcpServerEnabled", "readDisabledServers", "readEnabledServers", "validateServerName",
+	"validateServerConfig", "applyMcpToggleRuntime", "clearFsCache",
+], async () => {
+	const servers = feature("mcp-servers");
+	const cwd = mkdir("root-mcp-edit");
+	const userPath = servers.getMCPConfigPath("user", cwd);
+	const projectPath = servers.getMCPConfigPath("project", cwd);
+	assert(userPath === path.join(agentDir, "mcp.json"), `user MCP config resolved to ${userPath}`);
+	assert(projectPath.startsWith(cwd) && projectPath.endsWith("mcp.json"), `project MCP config resolved to ${projectPath}`);
+	assert(servers.validateServerName("bad name!") !== undefined, "an invalid server name was accepted");
+	assert(servers.validateServerName("contract-live") === undefined, "a valid server name was rejected");
+	assert(
+		servers.validateServerConfig("contract-live", { type: "stdio" } as never).length === 1,
+		"a stdio entry without a command passed validation",
+	);
+
+	// A live chat that starts before the server exists: its manager is the one
+	// the deck reconciles against after the write.
+	const live = await newSession(cwd, { agentId: "Contract-mcp-live" });
+	const manager = live.mcpManager;
+	assert(manager, "session exposes no MCP manager");
+	try {
+		const fixture = path.join(backendPath, "packages/coding-agent/test/fixtures/mcp-marker-server.ts");
+		const marker = path.join(cwd, "ran-contract-live");
+		await servers.addMCPServer(projectPath, "contract-live", {
+			type: "stdio", command: process.execPath, args: [fixture, "contract-live", marker],
+		});
+		const duplicate = await servers.addMCPServer(projectPath, "contract-live", { type: "stdio", command: "true" })
+			.then(() => undefined, (error: unknown) => error);
+		assert(duplicate instanceof Error, "a duplicate server name was accepted");
+		await servers.updateMCPServer(projectPath, "contract-live", {
+			type: "stdio", command: process.execPath, args: [fixture, "contract-live", marker], timeout: 20_000,
+		});
+		const stored = await servers.getMCPServer(projectPath, "contract-live");
+		assert(stored?.type === "stdio" && stored.timeout === 20_000, `update did not land: ${JSON.stringify(stored?.type)}`);
+		const file = await servers.readMCPConfigFile(projectPath);
+		assert(Object.keys(file.mcpServers ?? {}).join(",") === "contract-live", "project config holds the wrong servers");
+
+		const settings = await core.Settings.loadReadOnly({ cwd, agentDir });
+		assert(typeof servers.cfgMcpEnableProjectConfig.get(settings) === "boolean", "project-config setting unavailable");
+		const discovered = await core.loadCapability<{ name: string; _source: { path: string; level: string; provider: string } }>(
+			servers.mcpCapability.id,
+			{ cwd, includeDisabled: true, disabledExtensions: [...servers.cfgDisabledExtensions.get(settings)] },
+		);
+		const row = discovered.all.find(item => item.name === "contract-live");
+		assert(row?._source.path === projectPath && row._source.level === "project" && row._source.provider === "native",
+			`discovery reported ${JSON.stringify(row?._source)}`);
+		assert(servers.isProviderEnabled("native"), "the native provider is switched off");
+		assert(servers.isUserSourceEnabled("native"), "the native user source is opt-in");
+
+		// Live apply: connect the new server into the running chat, then drop it.
+		const apply = (enabled: boolean) => servers.applyMcpToggleRuntime({
+			name: "contract-live", enabled, cwd, manager, session: live.session,
+			discovery: { enableProjectConfig: true, filterExa: true, filterBrowser: false },
+		});
+		await apply(true);
+		assert(await Bun.file(marker).exists(), "live apply did not spawn the server");
+		assert(manager.getConnectionStatus("contract-live") === "connected", `live apply left it ${manager.getConnectionStatus("contract-live")}`);
+		const bound = manager.getTools().filter(tool => tool.mcpServerName === "contract-live");
+		assert(bound.length > 0, "the manager exposes no tools for the connected server");
+		assert(bound.every(tool => live.session.getAllToolNames().includes(tool.name)), "session tools missed the connected server");
+		await apply(false);
+		assert(manager.getConnectionStatus("contract-live") === "disconnected", "live disable left the server connected");
+		assert(!live.session.getAllToolNames().some(name => bound.some(tool => tool.name === name)), "live disable left the server's tools bound");
+
+		// Writable source carries the flag; a server NeoPi cannot rewrite uses the user lists.
+		await servers.setMcpServerEnabled({ userPath, projectPath, sourcePath: projectPath, name: "contract-live", enabled: false });
+		assert((await servers.getMCPServer(projectPath, "contract-live"))?.enabled === false, "disable did not reach the project entry");
+		assert(!(await servers.readDisabledServers(userPath)).includes("contract-live"), "a writable server was denylisted anyway");
+		await servers.setMcpServerEnabled({ userPath, projectPath, name: "contract-foreign", enabled: false });
+		assert((await servers.readDisabledServers(userPath)).includes("contract-foreign"), "foreign disable did not reach the denylist");
+		await servers.setMcpServerEnabled({ userPath, projectPath, name: "contract-foreign", enabled: true });
+		assert(!(await servers.readDisabledServers(userPath)).includes("contract-foreign"), "re-enable left the denylist entry");
+		assert((await servers.readEnabledServers(userPath)).includes("contract-foreign"), "foreign enable did not reach the allowlist");
+
+		await servers.removeMCPServer(projectPath, "contract-live");
+		assert(await servers.getMCPServer(projectPath, "contract-live") === undefined, "remove left the entry behind");
+
+		// An edit made outside NeoPi's writer (a terminal, another tool) is only
+		// visible once the capability file cache is dropped.
+		await Bun.write(projectPath, JSON.stringify({ mcpServers: { "contract-external": { type: "stdio", command: "true" } } }));
+		servers.clearFsCache();
+		const external = await core.loadCapability<{ name: string }>(servers.mcpCapability.id, { cwd, includeDisabled: true });
+		assert(external.all.some(item => item.name === "contract-external"), "an external mcp.json edit stayed invisible after clearing the cache");
+		return `wrote, discovered and removed ${path.relative(tmp, projectPath)}; live connect/disconnect through applyMcpToggleRuntime; external edit seen after cache clear`;
+	} finally {
+		await live.session.dispose();
+	}
+});
+
 await check("commands: builtin registry, ACP dispatch, session commands", [
 	"BUILTIN_SLASH_COMMAND_DEFS",
 	"ACP_BUILTIN_SLASH_COMMANDS",

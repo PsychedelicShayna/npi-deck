@@ -1811,3 +1811,140 @@ export interface OAuthPromptReplyRequest {
 	promptId: string;
 	answer: string;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP servers (`~/.omp/agent/mcp.json`, `<project>/.omp/mcp.json`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A scope the deck can write: NeoPi's user and project `mcp.json`. */
+export type McpServerScope = "user" | "project";
+export type McpTransport = "stdio" | "http" | "sse";
+
+/** One env variable or HTTP header. Secret-looking values never leave the server: `value` is null and `masked` is true. */
+export interface McpKeyValue {
+	key: string;
+	value: string | null;
+	masked: boolean;
+}
+
+/** An env/header pair a write submits; `value: null` keeps whatever the config file already holds for that key. */
+export interface McpKeyValueInput {
+	key: string;
+	value: string | null;
+}
+
+/** Why a discovered server does not run. */
+export type McpDisabledReason =
+	/** In the user `mcp.json` `disabledServers` denylist. */
+	| "denylisted"
+	/** Its own config entry sets `enabled: false`. */
+	| "config-flag"
+	/** Legacy `mcp:<name>` entry in NeoPi's `disabledExtensions` setting. */
+	| "extension-disabled"
+	/** Its discovery provider is switched off. */
+	| "provider-disabled"
+	/** A foreign tool's `~/` config that NeoPi loads only when opted in. */
+	| "user-opt-in"
+	/** A higher-priority source defines the same server name. */
+	| "shadowed";
+
+/** One discovered MCP server, from any source NeoPi reads. */
+export interface McpServerRow {
+	name: string;
+	transport: McpTransport;
+	command?: string;
+	args?: string[];
+	/** Working directory for a stdio server. */
+	cwd?: string;
+	url?: string;
+	env: McpKeyValue[];
+	headers: McpKeyValue[];
+	timeout?: number;
+	/** Absolute path of the file that defines this server. */
+	sourcePath: string;
+	/** Source scope as NeoPi reports it; `native` is a built-in definition with no user file. */
+	level: "user" | "project" | "native";
+	/** Discovery provider id (`native`, `mcp-json`, `claude`, `codex`, …) and its display name. */
+	provider: string;
+	providerName: string;
+	/** The deck may rewrite this entry: it lives in a file NeoPi's own writer owns. */
+	editable: boolean;
+	/** Scope the editor writes for an editable row. */
+	scope?: McpServerScope;
+	state: "enabled" | "disabled" | "shadowed";
+	disabledReason?: McpDisabledReason;
+	/** Named in the user `enabledServers` allowlist, which overrides a non-writable source's `enabled: false`. */
+	forceEnabled: boolean;
+}
+
+export interface McpServersResponse {
+	/** Workspace whose project scope is listed. */
+	cwd: string;
+	userConfigPath: string;
+	projectConfigPath: string;
+	/** NeoPi's `mcp.enableProjectConfig`; false means new chats ignore the project file. */
+	projectConfigEnabled: boolean;
+	servers: McpServerRow[];
+	/** Discovery warnings (unreadable or malformed sources), without file contents. */
+	warnings: string[];
+}
+
+/**
+ * The config file a mutation targets. `scope` picks NeoPi's user or project
+ * `mcp.json`; `sourcePath` (a row's own `sourcePath`) keeps an edit in the file
+ * that already defines the server, and is ignored unless NeoPi's writer owns it.
+ */
+export interface McpServerTargetRequest {
+	scope: McpServerScope;
+	sourcePath?: string;
+}
+
+/**
+ * Server definition to write. Enabled state is not part of it: that runs
+ * through the enable endpoint, which also clears NeoPi's deny/allow lists.
+ */
+export interface McpServerWriteRequest extends McpServerTargetRequest {
+	transport: McpTransport;
+	/** stdio only. */
+	command?: string;
+	args?: string[];
+	cwd?: string;
+	/** http and sse only. */
+	url?: string;
+	env?: McpKeyValueInput[];
+	headers?: McpKeyValueInput[];
+	/** Connection timeout in ms; null removes it. */
+	timeout?: number | null;
+}
+
+export interface McpServerCreateRequest extends McpServerWriteRequest {
+	name: string;
+}
+
+export interface McpServerEnabledRequest extends McpServerTargetRequest {
+	enabled: boolean;
+}
+
+/** What one live chat's MCP runtime did with the change. */
+export interface McpLiveApply {
+	sessionId: string;
+	cwd: string;
+	/**
+	 * `applied`: the chat's MCP runtime reconnected or dropped the server and its tools were rebound.
+	 * `no-mcp-runtime`: the chat runs without MCP (per-chat server selection excluded everything).
+	 * `failed`: the reconcile threw; the deck server log has the details.
+	 */
+	outcome: "applied" | "no-mcp-runtime" | "failed";
+	/** Connection state after the apply, when the chat has an MCP runtime. */
+	status?: "connected" | "connecting" | "disconnected";
+}
+
+export interface McpServerMutationResponse {
+	/** File the write landed in. */
+	path: string;
+	/** The server after the write; null when it was removed. */
+	server: McpServerRow | null;
+	/** Truthful statement of how far this change reached, live chats included. */
+	applyNote: string;
+	live: McpLiveApply[];
+}
