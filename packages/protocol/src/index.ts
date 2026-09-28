@@ -943,8 +943,8 @@ export type ServerFrame =
 			kind: "select" | "editor" | "confirm" | "input";
 			/** Title / prompt line shown above the controls. */
 			prompt: string;
-			/** select: option labels in display order. */
-			options?: string[];
+			/** select: options in display order; the response `value` is the chosen `label`. */
+			options?: SelectOptionWire[];
 			/** select: hint that the dialog allows multiple selections. */
 			multi?: boolean;
 			/** select: index of the option pre-focused on open. */
@@ -1067,30 +1067,25 @@ export interface NotificationPayload {
 	actionUrl?: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tool-call rendering hints (used by the web app to pick a renderer)
-// ─────────────────────────────────────────────────────────────────────────────
+/** One option of an `ext_ui_dialog_open` select, as NeoPi's `ExtensionUISelectItem` carries it. */
+export interface SelectOptionWire {
+	label: string;
+	description?: string;
+}
 
-export const KNOWN_TOOLS = [
-	"read",
-	"write",
-	"edit",
-	"bash",
-	"search",
-	"find",
-	"lsp",
-	"task",
-	"web_search",
-	"eval",
-	"generate_image",
-	"todo_write",
-	"browser",
-	"ast_edit",
-	"ast_grep",
-	"ask",
-] as const;
+/**
+ * `GET /api/sessions/transcript?path=…`: a persisted session read straight
+ * from its file. No SDK session is created and nothing is spawned; the
+ * sidebar renders it read-only until the user resumes or sends.
+ */
+export interface SessionTranscriptResponse {
+	sessionId: string;
+	path: string;
+	cwd: string;
+	title?: string;
+	messages: AgentMessageJson[];
+}
 
-export type KnownTool = (typeof KNOWN_TOOLS)[number];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tasks (kanban)

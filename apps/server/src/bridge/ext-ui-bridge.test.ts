@@ -31,10 +31,28 @@ describe("ExtensionUIBridge", () => {
 		expect(frame.sessionId).toBe("s_test");
 		expect(frame.kind).toBe("select");
 		expect(frame.prompt).toBe("Pick one");
-		expect(frame.options).toEqual(["a", "b", "c"]);
+		expect(frame.options).toEqual([{ label: "a" }, { label: "b" }, { label: "c" }]);
 
 		bridge.handleResponse(frame.dialogId, { value: "b" });
 		expect(await promise).toBe("b");
+	});
+
+	it("carries option descriptions and resolves with the chosen label", async () => {
+		const bridge = new ExtensionUIBridge("s_test");
+		const { frames } = collect(bridge);
+
+		const promise = bridge.select("Pick one", [
+			{ label: "fast", description: "cheap, lower quality" },
+			"plain",
+		]);
+		const frame = frames[0] as OpenFrame;
+		expect(frame.options).toEqual([
+			{ label: "fast", description: "cheap, lower quality" },
+			{ label: "plain" },
+		]);
+
+		bridge.handleResponse(frame.dialogId, { value: "fast" });
+		expect(await promise).toBe("fast");
 	});
 
 	it("returns undefined when the client cancels", async () => {

@@ -30,7 +30,7 @@ import type {
 	ExtensionWidgetOptions,
 	TerminalInputHandler,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import type { ExtUiDialogResponse, ServerFrame } from "@npi-deck/protocol";
+import type { ExtUiDialogResponse, SelectOptionWire, ServerFrame } from "@npi-deck/protocol";
 
 import { logger } from "../log.ts";
 
@@ -120,9 +120,15 @@ export class ExtensionUIBridge implements ExtensionUIContext {
 		dialogOptions?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
 		// NeoPi passes `{label, description}` objects when an option has a
-		// description; the caller expects the chosen label back. The wire
-		// carries labels only until W3 adds descriptions to the protocol.
-		const options = items.map((item) => (typeof item === "string" ? item : item.label));
+		// description and plain strings otherwise; the caller expects the
+		// chosen label back, which is what the web client answers with.
+		const options = items.map((item): SelectOptionWire =>
+			typeof item === "string"
+				? { label: item }
+				: item.description
+					? { label: item.label, description: item.description }
+					: { label: item.label },
+		);
 		const fields: Pick<DialogOpenFrame, "options"> = { options };
 		return this.openDialog<string | undefined>(
 			{ kind: "select", prompt, ...fields },
