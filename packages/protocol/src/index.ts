@@ -858,6 +858,9 @@ export type ServerFrame =
 	| { type: "pong" }
 	| { type: "subscribed"; sessionId: string; snapshot: SessionSnapshot }
 	| { type: "unsubscribed"; sessionId: string }
+	/** Sent only to the socket that sent a `prompt` whose slash command the
+	 *  deck or SDK handled itself. No agent run follows, so no `agent_end`. */
+	| { type: "prompt_consumed"; sessionId: string; output: string }
 	| { type: "session_event"; sessionId: string; event: AgentSessionEventJson }
 	| { type: "session_disposed"; sessionId: string }
 	/** Broadcast frame: any kanban-task mutation occurred. Clients refetch. */

@@ -6,10 +6,15 @@ export class SessionNotActiveError extends Error {
 	}
 }
 
+/** How long a prompt may go without any frame for its session before the
+ *  bridge gives up on it, so one lost completion cannot wedge a chat queue. */
+export const DEFAULT_PROMPT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+
 export class DeckClient {
 	constructor(
 		private readonly apiBase: string,
 		private readonly wsUrl: string,
+		private readonly promptIdleTimeoutMs: number = DEFAULT_PROMPT_IDLE_TIMEOUT_MS,
 	) {}
 
 	async createSession(opts: { cwd: string; resumeFromPath?: string }): Promise<CreateSessionResponse> {
@@ -42,18 +47,29 @@ export class DeckClient {
 			let settled = false;
 			let latestText = "";
 			let sawAssistant = false;
+			let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
-			const finish = (err?: Error) => {
+			const finish = (err?: Error, output?: string) => {
 				if (settled) return;
 				settled = true;
+				if (idleTimer) clearTimeout(idleTimer);
 				try {
 					ws.close();
 				} catch {
 					// already closed
 				}
 				if (err) reject(err);
+				else if (output !== undefined) resolve(output.trim() || "Done.");
 				else resolve(latestText.trim() || (sawAssistant ? "" : "Turn complete."));
 			};
+			const armIdleTimer = () => {
+				if (idleTimer) clearTimeout(idleTimer);
+				idleTimer = setTimeout(
+					() => finish(new Error(`deck sent nothing for ${Math.round(this.promptIdleTimeoutMs / 1000)}s; giving up on this prompt`)),
+					this.promptIdleTimeoutMs,
+				);
+			};
+			armIdleTimer();
 
 			ws.onopen = () => {
 				ws.send(JSON.stringify({ type: "subscribe", sessionId: args.sessionId }));
@@ -82,12 +98,18 @@ export class DeckClient {
 					);
 					return;
 				}
+				if (frame.type === "prompt_consumed" && frame.sessionId === args.sessionId) {
+					// A slash command the deck handled itself: no agent run follows.
+					finish(undefined, frame.output);
+					return;
+				}
 				if (frame.type === "error" && (!frame.sessionId || frame.sessionId === args.sessionId)) {
 					const message = frame.error.toLowerCase();
 					finish(message.includes("session not active") ? new SessionNotActiveError(args.sessionId) : new Error(frame.error));
 					return;
 				}
 				if (frame.type !== "session_event" || frame.sessionId !== args.sessionId) return;
+				armIdleTimer();
 				const event = frame.event as Record<string, unknown>;
 				if (event.type === "message_update" || event.type === "message_end" || event.type === "message_start") {
 					const msg = event.message as Record<string, unknown> | undefined;

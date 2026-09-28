@@ -18,7 +18,7 @@ afterEach(() => {
 	server = null;
 });
 
-function fakeDeck(script: Script): DeckClient {
+function fakeDeck(script: Script, idleTimeoutMs?: number): DeckClient {
 	server = Bun.serve({
 		port: 0,
 		fetch(req, srv) {
@@ -39,7 +39,7 @@ function fakeDeck(script: Script): DeckClient {
 		},
 	});
 	const base = `http://127.0.0.1:${server.port}`;
-	return new DeckClient(base, `ws://127.0.0.1:${server.port}/ws`);
+	return new DeckClient(base, `ws://127.0.0.1:${server.port}/ws`, idleTimeoutMs);
 }
 
 function event(e: Record<string, unknown>): ServerFrame {
@@ -65,5 +65,25 @@ describe("DeckClient.promptSession", () => {
 		const final = await deck.promptSession({ sessionId: SESSION, text: "how long is it?", onText: (t) => seen.push(t) });
 		expect(final).toBe("The file has 42 lines.");
 		expect(seen).toEqual(["Let me check the file.", "The file has 42 lines."]);
+	});
+
+	test("a consumed slash command settles, and the next prompt still completes", async () => {
+		const deck = fakeDeck((text) =>
+			text.startsWith("/")
+				? [
+						event({ type: "message_start", message: { role: "user", content: text, synthetic: true } }),
+						{ type: "prompt_consumed", sessionId: SESSION, output: "No tasks." },
+					]
+				: [assistant("hello"), event({ type: "agent_end" })],
+		);
+		expect(await deck.promptSession({ sessionId: SESSION, text: "/task list", onText: () => {} })).toBe("No tasks.");
+		expect(await deck.promptSession({ sessionId: SESSION, text: "hi", onText: () => {} })).toBe("hello");
+	});
+
+	test("a prompt that never completes fails after the idle timeout", async () => {
+		const deck = fakeDeck(() => [assistant("working…")], 50);
+		await expect(deck.promptSession({ sessionId: SESSION, text: "stall", onText: () => {} })).rejects.toThrow(
+			/giving up on this prompt/,
+		);
 	});
 });

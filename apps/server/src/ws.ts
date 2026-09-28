@@ -248,15 +248,18 @@ export class WsHub {
 			});
 		};
 		if (frame.text.startsWith("/")) {
+			const consumed = (output: string): void => {
+				send(ws, { type: "prompt_consumed", sessionId: frame.sessionId, output });
+			};
 			handle
 				.dispatchDeckSlashCommand(frame.text)
 				.then((deck) => {
-					if (deck.kind === "consumed") return undefined;
+					if (deck.kind === "consumed") return consumed(deck.output);
 					if (deck.kind === "rewritten") return handle.prompt(deck.prompt, opts);
 					return handle
 						.dispatchSlashCommand(frame.text)
 						.then((sdk) => {
-							if (sdk.kind === "consumed") return undefined;
+							if (sdk.kind === "consumed") return consumed(sdk.output);
 							if (sdk.kind === "rewritten") return handle.prompt(sdk.prompt, opts);
 							return handle.prompt(frame.text, opts);
 						});
