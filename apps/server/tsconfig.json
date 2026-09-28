@@ -1,7 +1,6 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../../tsconfig.neopi.json",
   "compilerOptions": {
-    "types": ["bun"],
     "verbatimModuleSyntax": false,
     "allowImportingTsExtensions": true,
     "noEmit": true
