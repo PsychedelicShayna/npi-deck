@@ -13,8 +13,8 @@ export class SubagentTree {
 	private readonly listeners = new Set<(nodes: SubagentNode[]) => void>();
 	private readonly unsubscribers: Array<() => void>;
 
-	constructor(readonly rootId: string, bus: Bus) {
-		this.registry = feature("subagent-tree").AgentRegistry.global();
+	constructor(readonly rootId: string, bus: Bus, private readonly api = feature("subagent-tree")) {
+		this.registry = api.AgentRegistry.global();
 		this.unsubscribers = [
 			bus.on("task:subagent:lifecycle", (data) => this.lifecycle(data)),
 			bus.on("task:subagent:progress", (data) => this.progress(data)),
@@ -124,7 +124,7 @@ export class SubagentTree {
 		if (!file) return { id, messages: [], nextByte: 0, reset: false };
 		// An existing ref must still identify the same transcript as the bus record.
 		if (ref && node.sessionFile && file !== node.sessionFile) throw new Error("Forbidden subagent");
-		const result = await feature("subagent-tree").readRpcSubagentTranscript(file, fromByte);
+		const result = await this.api.readRpcSubagentTranscript(file, fromByte);
 		return { id, messages: result.messages as unknown as SubagentTranscriptResponse["messages"], nextByte: result.nextByte, reset: result.reset };
 	}
 
@@ -140,7 +140,7 @@ export class SubagentTree {
 		} catch (error) {
 			abortError = error;
 		}
-		const released = await feature("subagent-tree").AgentLifecycleManager.global().release(id, ref, { tombstone: true });
+		const released = await this.api.AgentLifecycleManager.global().release(id, ref, { tombstone: true });
 		if (!released) throw new Error("Subagent no longer active");
 		this.release(id);
 		this.nodes.set(id, { ...node, status: "aborted", activity: undefined });

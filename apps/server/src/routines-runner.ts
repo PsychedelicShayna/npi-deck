@@ -46,6 +46,7 @@ export class RoutinesRunner {
 	private closing = false;
 	private readonly runs = new Map<string, { abort: AbortController; finished: Promise<void> }>();
 	readonly concurrency = new ConcurrencyController();
+	constructor(private readonly agentCommand: () => string[] = () => routineAgentCommand([])) {}
 	get busy(): boolean { return this.runs.size > 0; }
 	get workSnapshot(): Array<{ runId: string; routineId: string }> {
 		return [...this.runs.keys()].map((key) => ({ routineId: key.split(":")[0]!, runId: key.split(":")[1]! }));
@@ -240,6 +241,7 @@ export class RoutinesRunner {
 					routine, spec, runId: run.id, triggerKind: trigger, triggerPayload: payload,
 					abortSignal: decision.abort.signal, defaultCwd: config.defaultCwd,
 					agentSandboxRoot: path.join(path.dirname(config.dbPath), "routine-runs"),
+					agentCommand: this.agentCommand,
 				});
 			} catch (err) {
 				log.error(`V1 pipeline threw for ${routine.id}`, err);

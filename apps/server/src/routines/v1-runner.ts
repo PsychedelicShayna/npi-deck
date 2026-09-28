@@ -83,6 +83,7 @@ export async function runV1Pipeline(input: {
 	defaultCwd: string;
 	/** Per-run sandbox root for headless NeoPi agent steps. */
 	agentSandboxRoot: string;
+	agentCommand?: () => string[];
 }): Promise<{ status: "success" | "failed" | "aborted"; abortReason?: AbortReason }> {
 	const { routine, spec, runId, triggerKind, triggerPayload, abortSignal, defaultCwd, agentSandboxRoot } = input;
 	const startedAt = new Date();
@@ -123,7 +124,7 @@ export async function runV1Pipeline(input: {
 
 	const stepCwd = (routine.actionCwd && routine.actionCwd.trim()) || defaultCwd;
 	let pinnedAgentCommand: string[] | undefined;
-	const agentCommandForRun = (): string[] => pinnedAgentCommand ??= routineAgentCommand([]);
+	const agentCommandForRun = (): string[] => pinnedAgentCommand ??= input.agentCommand?.() ?? routineAgentCommand([]);
 
 	// Lazy mkdir for the per-run agent sandbox. Created the first time an
 	// `agent` step runs; left in place after the run finishes so the user can

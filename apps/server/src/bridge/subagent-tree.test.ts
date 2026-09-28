@@ -1,4 +1,5 @@
-import { expect, mock, test } from "bun:test";
+import { expect, test } from "bun:test";
+import { SubagentTree } from "./subagent-tree.ts";
 
 const refs = new Map<string, any>();
 const listeners = new Set<(change: any) => void>();
@@ -7,7 +8,7 @@ const registry = {
 	onChange: (listener: (change: any) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
 };
 const released: Array<{ id: string; ref: unknown; tombstone: boolean }> = [];
-mock.module("../backend/runtime.ts", () => ({ feature: () => ({
+const api = {
 	AgentRegistry: { global: () => registry },
 	AgentLifecycleManager: { global: () => ({ release: async (id: string, ref: unknown, opts: { tombstone: boolean }) => {
 		if (refs.get(id) !== ref) return false;
@@ -17,9 +18,7 @@ mock.module("../backend/runtime.ts", () => ({ feature: () => ({
 		return true;
 	} }) },
 	readRpcSubagentTranscript: async (file: string, fromByte: number) => ({ messages: [{ role: "assistant", content: file }], nextByte: fromByte + 1, reset: false }),
-}) }));
-
-const { SubagentTree } = await import("./subagent-tree.ts");
+} as unknown as NonNullable<ConstructorParameters<typeof SubagentTree>[2]>;
 function bus() {
 	const handlers = new Map<string, (data: any) => void>();
 	return { on(channel: string, cb: (data: any) => void) { handlers.set(channel, cb); return () => { handlers.delete(channel); }; },
@@ -35,7 +34,7 @@ test("root ownership gates nested transcripts and abort, and tombstones the exac
 	const child = { id: "child", parentId: "parent", kind: "sub", status: "running", createdAt: 2, displayName: "child", sessionFile: "/tmp/child.jsonl", session: { abort: async () => aborted.push("child") } };
 	refs.set("child", child);
 	const aBus = bus(), bBus = bus();
-	const a = new SubagentTree("rootA", aBus), b = new SubagentTree("rootB", bBus);
+	const a = new SubagentTree("rootA", aBus, api), b = new SubagentTree("rootB", bBus, api);
 	aBus.emit("task:subagent:lifecycle", { id: "parent", status: "started" });
 	aBus.emit("task:subagent:lifecycle", { id: "child", status: "started" });
 	bBus.emit("task:subagent:lifecycle", { id: "child", status: "started" });
@@ -74,7 +73,7 @@ test("replaced generation is forbidden and disappearing child cannot be marked a
 	const original = { id: "race", parentId: "rootA", kind: "sub", status: "running", createdAt: 1, displayName: "race", sessionFile: "/tmp/race.jsonl",
 		session: { abort: async () => { refs.delete("race"); } } };
 	refs.set("race", original);
-	const events = bus(), tree = new SubagentTree("rootA", events);
+	const events = bus(), tree = new SubagentTree("rootA", events, api);
 	events.emit("task:subagent:lifecycle", { id: "race", status: "started" });
 	await expect(tree.abort("race")).rejects.toThrow("Subagent no longer active");
 	expect(tree.snapshot()[0]?.status).toBe("running");

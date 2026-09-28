@@ -402,6 +402,13 @@ await check("advisors: save WATCHDOG.yml, rediscover, apply live", [
 	"loadWatchdogConfigFile",
 	"saveWatchdogConfigFile",
 	"discoverAdvisorConfigs",
+	"slugifyAdvisorName",
+	"collectConfigCandidates",
+	"cfgAdvisorEnabled",
+	"cfgAdvisorSyncBacklog",
+	"cfgAdvisorMaxNotesPerUpdate",
+	"cfgAdvisorEvictStaleResults",
+	"cfgModelRoles",
 ], async () => {
 	assert(sessionB, "no session");
 	const file = await advisors.resolveAdvisorConfigEditPath("user", { projectDir: rootB, agentDir });
@@ -414,6 +421,15 @@ await check("advisors: save WATCHDOG.yml, rediscover, apply live", [
 	assert(reloaded.advisors[0]?.name === "Contract", "saved doc did not round-trip");
 	const discovered = await advisors.discoverAdvisorConfigs(rootB, agentDir);
 	assert(discovered.advisors.some((a) => a.name === "Contract"), "discovery missed the saved advisor");
+	assert(advisors.slugifyAdvisorName("Contract") === "contract", "advisor name normalization changed");
+	const candidates = await advisors.collectConfigCandidates(rootB, agentDir, ["WATCHDOG.yml", "WATCHDOG.yaml"]);
+	assert(candidates.some((candidate) => candidate.path === file), "candidate walk missed user WATCHDOG");
+	const settings = await core.Settings.loadIsolated({ cwd: rootB, agentDir });
+	assert(typeof advisors.cfgAdvisorEnabled.get(settings) === "boolean", "advisor enabled setting unavailable");
+	assert(advisors.cfgAdvisorSyncBacklog.get(settings) !== undefined, "advisor backlog setting unavailable");
+	assert(typeof advisors.cfgAdvisorMaxNotesPerUpdate.get(settings) === "number", "advisor notes limit unavailable");
+	assert(typeof advisors.cfgAdvisorEvictStaleResults.get(settings) === "boolean", "advisor eviction setting unavailable");
+	assert(typeof advisors.cfgModelRoles.get(settings) === "object", "model role setting unavailable");
 	sessionB.setAdvisorEnabled(true);
 	const count = sessionB.applyAdvisorConfigs(discovered.advisors, discovered.sharedInstructions, discovered.sharedMaxNotesPerUpdate);
 	const status = await advisorStatus(sessionB);

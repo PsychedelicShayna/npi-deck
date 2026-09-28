@@ -11,14 +11,14 @@ import { initializeOwnedGeneration, stopOwnedProcesses } from "../owned-process.
 const root = "/home/shayna/tmp";
 let home = "";
 let runner: RoutinesRunner | undefined;
-function setup(): void {
+function setup(agentCommand?: () => string[]): void {
 	fs.mkdirSync(root, { recursive: true });
 	home = fs.mkdtempSync(path.join(root, "npi-routine-test-"));
 	process.env.NPI_DECK_HOME = home;
 	process.env.NPI_DECK_DB_PATH = path.join(home, "deck.db");
 	openDb({ path: process.env.NPI_DECK_DB_PATH });
 	initializeOwnedGeneration();
-	runner = new RoutinesRunner();
+	runner = agentCommand ? new RoutinesRunner(agentCommand) : new RoutinesRunner();
 }
 function routine(spec: RoutineSpec, enabled = true) {
 	return createV1Routine({ name: `test-${crypto.randomUUID()}`, spec, specYaml: JSON.stringify(spec), enabled });
@@ -195,7 +195,7 @@ test("cancel-previous kills the running child before the replacement finishes", 
 });
 
 test("agent retry charges failed and successful attempts before enforcing the cost cap", async () => {
-	setup();
+	setup(() => [process.execPath, path.join(home, "backend/packages/coding-agent/src/cli.ts")]);
 	const backend = path.join(home, "backend");
 	const cli = path.join(backend, "packages/coding-agent/src/cli.ts");
 	const counter = path.join(home, "attempts");
@@ -211,22 +211,15 @@ process.stdout.write(JSON.stringify({type:"message_end", message}) + "\\n" +
   JSON.stringify({type:"agent_end", messages:[message]}) + "\\n");
 if (attempt === 1) process.exitCode = 1;
 `);
-	const previous = process.env.NPI_DECK_BACKEND;
-	process.env.NPI_DECK_BACKEND = backend;
-	try {
-		const s = spec([{ id: "agent", type: "agent", prompt: "answer", on_failure: "retry",
-			retry: { times: 2, backoff: "linear", max_delay_secs: 0 } }]);
-		s.budget = { max_llm_cost_usd: 0.0015 };
-		const r = routine(s);
-		await runner!.fire(r.id);
-		const run = listRuns(r.id)[0]!;
-		const attempts = listStepRuns(run.id);
-		expect(attempts.map(attempt => attempt.status)).toEqual(["failed", "success"]);
-		expect(run.abortReason).toBe("budget");
-		expect(run.totalLlmCostMicros).toBe(2000);
-		expect(run.totalLlmTokens).toBe(30);
-	} finally {
-		if (previous === undefined) delete process.env.NPI_DECK_BACKEND;
-		else process.env.NPI_DECK_BACKEND = previous;
-	}
-});
+	const s = spec([{ id: "agent", type: "agent", prompt: "answer", on_failure: "retry",
+		retry: { times: 2, backoff: "linear", max_delay_secs: 0 } }]);
+	s.budget = { max_llm_cost_usd: 0.0015 };
+	const r = routine(s);
+	await runner!.fire(r.id);
+	const run = listRuns(r.id)[0]!;
+	const attempts = listStepRuns(run.id);
+	expect(attempts.map(attempt => attempt.status)).toEqual(["failed", "success"]);
+	expect(run.abortReason).toBe("budget");
+	expect(run.totalLlmCostMicros).toBe(2000);
+	expect(run.totalLlmTokens).toBe(30);
+}, 20_000);
