@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Convenience launcher for omp-deck on macOS / Linux. Sibling to
-# `Start-OMP-Deck.cmd` for Windows users — same shape: start the dev
-# server + Vite together in the background, write logs under `.logs/`,
-# open the deck in the default browser.
+# Convenience dev launcher for macOS / Linux: start the dev server + Vite
+# together in the background, write logs under `.logs/`, open the deck in
+# the default browser.
 #
 # Quitting: `bash Start-OMP-Deck.sh stop` (or Ctrl+C if started without
 # the `start` argument — see below).
