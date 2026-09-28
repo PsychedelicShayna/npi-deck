@@ -69,6 +69,23 @@ test("deadline kills shell grandchild and records timeout", async () => {
 	expect(listRuns(r.id)[0]?.abortReason).toBe("timeout");
 });
 
+test("run-duration budget preempts a longer step deadline and its child group", async () => {
+	setup();
+	const pidFile = path.join(home, "budget-grandchild.pid");
+	const s = spec([{ id: "slow", type: "run", timeout_secs: 20,
+		command: `sleep 30 & echo $! > '${pidFile}'; wait` }]);
+	s.budget = { max_duration_secs: 1 };
+	const r = routine(s);
+	const start = Date.now();
+	await runner!.fire(r.id);
+	expect(Date.now() - start).toBeLessThan(4000);
+	const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+	const ps = Bun.spawnSync(["ps", "-p", String(pid), "-o", "stat="], { stdout: "pipe", stderr: "ignore" });
+	const status = new TextDecoder().decode(ps.stdout).trim();
+	expect(status === "" || status.startsWith("Z")).toBe(true);
+	expect(listRuns(r.id)[0]?.abortReason).toBe("timeout");
+});
+
 test("disabled webhook does not execute, successful webhook persists payload", async () => {
 	setup();
 	const marker = path.join(home, "webhook");
