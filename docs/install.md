@@ -28,6 +28,37 @@ whether you already use omp on this machine:
 
 You do **not** need Node.js — Bun runs everything.
 
+## NeoPi backend tree
+
+The deck no longer installs `@oh-my-pi/*` from npm. It loads NeoPi from a
+source tree pinned in `neopi.pin`. Prepare that tree once per pin:
+
+```bash
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts            # the pinned commit
+bun scripts/neopi-setup.ts <sha>      # another commit
+bun scripts/neopi-setup.ts --path DIR # an existing NeoPi tree, prepared in place
+```
+
+The script:
+
+1. Adds a detached worktree at `~/.npi-deck/neopi/<sha>` from the NeoPi
+   checkout (`--source`, or `NPI_DECK_NEOPI_SOURCE`).
+2. Runs `bun install --frozen-lockfile --ignore-scripts` and `gen:tool-views`
+   inside it.
+3. Links in a prebuilt `pi_natives` addon whose version sentinel matches the
+   tree's `packages/natives` version. It searches `--native-dir` (repeatable)
+   or `NPI_DECK_NATIVE_DIRS` (`:`-separated). `--copy` copies the file
+   instead of symlinking it. If no addon matches, it prints the
+   `build:native` command and exits. `--build-native` runs that build.
+4. Registers the tree under `backends` in `~/.npi-deck/config.yml`, and sets
+   `activeBackend` if it isn't set yet.
+5. For the pinned commit (or with `--tsconfig`), writes the gitignored
+   `tsconfig.neopi.json`. `apps/server` extends it, so typechecking the server
+   needs this step first.
+
+`NPI_DECK_HOME` overrides `~/.npi-deck`. Re-running the script is safe.
+
 ---
 
 ## Path A — Existing omp user
