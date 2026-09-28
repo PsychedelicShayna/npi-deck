@@ -3,7 +3,11 @@ import { ArgRow, Pre, extractResultText } from "./shared";
 
 export function SearchTool({ args, stream }: ToolRendererProps) {
 	const pattern = (args.pattern as string | undefined) ?? "";
-	const paths = Array.isArray(args.paths) ? (args.paths as string[]) : [];
+	const paths = Array.isArray(args.paths)
+		? (args.paths as string[])
+		: typeof args.path === "string"
+			? [args.path]
+			: [];
 	const result = stream?.result ?? stream?.partialResult;
 	const text = result ? extractResultText(result) : "";
 

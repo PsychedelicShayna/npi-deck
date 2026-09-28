@@ -11,7 +11,7 @@ export function EditTool({ args, stream }: ToolRendererProps) {
 
 	return (
 		<div className="space-y-1.5">
-			<ArgRow k="path" v={<PathChip title={path}>{shortPath(path, 72)}</PathChip>} />
+			{path ? <ArgRow k="path" v={<PathChip title={path}>{shortPath(path, 72)}</PathChip>} /> : null}
 			{patch ? <HashlinePatch patch={patch} /> : null}
 			{text ? (
 				<details open>

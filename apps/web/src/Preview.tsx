@@ -107,7 +107,7 @@ const toolCalls: Record<string, ToolCallStream> = {
 	}),
 	"tc-search": tcStream({
 		id: "tc-search",
-		name: "search",
+		name: "grep",
 		args: { pattern: "ImageAttachment", paths: ["apps/web/src/**/*.tsx"] },
 		result: {
 			summary: { totalMatches: 4 },
@@ -163,13 +163,10 @@ const toolCalls: Record<string, ToolCallStream> = {
 	}),
 	"tc-todo": tcStream({
 		id: "tc-todo",
-		name: "todo_write",
+		name: "todo",
 		args: {
-			ops: [
-				{ op: "init", phase: "Phase 1", items: ["Map renderer surface", "Wire highlight.js"] },
-				{ op: "start", task: "Wire highlight.js" },
-				{ op: "done", task: "Map renderer surface" },
-			],
+			op: "init",
+			list: [{ phase: "Phase 1", items: ["Map renderer surface", "Wire highlight.js"] }],
 		},
 	}),
 	"tc-gen": tcStream({
@@ -186,7 +183,7 @@ const toolCalls: Record<string, ToolCallStream> = {
 	}),
 	"tc-running": tcStream({
 		id: "tc-running",
-		name: "search",
+		name: "grep",
 		args: { pattern: "still going" },
 		status: "running",
 		endedAt: undefined,
@@ -273,15 +270,15 @@ export function PreviewPage() {
 							["tc-write", "write"],
 							["tc-edit", "edit"],
 							["tc-bash", "bash"],
-							["tc-search", "search"],
+							["tc-search", "grep"],
 							["tc-lsp", "lsp"],
 							["tc-task", "task"],
 							["tc-web", "web_search"],
 							["tc-eval-js", "eval"],
-							["tc-todo", "todo_write"],
+							["tc-todo", "todo"],
 							["tc-gen", "generate_image"],
 							["tc-browser", "browser"],
-							["tc-running", "search"],
+							["tc-running", "grep"],
 							["tc-err", "bash"],
 						] as Array<[keyof typeof toolCalls, string]>
 					).map(([id, name]) => (
