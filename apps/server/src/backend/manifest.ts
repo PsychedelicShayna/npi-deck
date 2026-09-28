@@ -176,12 +176,12 @@ export const MANIFEST = {
 			cfgAdvisorEvictStaleResults: op("@oh-my-pi/pi-coding-agent/advisor/settings", "cfgAdvisorEvictStaleResults"),
 		},
 	},
-	/** W3: mixture-of-agents models (`mixture/<name>`) listed in the model picker without a live session. */
+	/** W3/#84: per-workspace mixture-of-agents models (`mixture/<name>`) listed in the model picker without a live session. */
 	mixtures: {
 		tier: "optional-feature",
 		consumers: ["bridge/in-process.ts"],
 		exports: {
-			retainMixtureCatalog: op("@oh-my-pi/pi-coding-agent/moa/registration", "retainMixtureCatalog"),
+			MixtureWorkspace: op("@oh-my-pi/pi-coding-agent/moa/registration", "MixtureWorkspace"),
 		},
 	},
 	/** #86: enumerate, validate and write every registered NeoPi setting from the Settings view. */

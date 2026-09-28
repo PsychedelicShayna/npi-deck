@@ -11,6 +11,8 @@ type SdkModel = {
 	input?: unknown[];
 	api?: string;
 };
+/** One workspace's registered mixtures, as the deck needs them. */
+type MixtureRoster = { find(name: string): unknown; release(): void };
 import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
@@ -117,8 +119,8 @@ export class InProcessAgentBridge implements AgentBridge {
 	/** Shared SDK model registry, lazily constructed on first session create. */
 	private modelRegistry: ModelRegistry | undefined;
 	private modelRegistryPromise: Promise<ModelRegistry> | undefined;
-	/** Set once the deck holds NeoPi's mixture catalog on the shared registry. */
-	private mixturesRetained: Promise<void> | undefined;
+	/** One picker lease per workspace (resolved cwd); released on dispose. */
+	private mixtureWorkspaces = new Map<string, Promise<MixtureRoster | undefined>>();
 	/** Bumped per SDK session this bridge creates; makes every live generation's agentId unique. */
 	private generation = 0;
 
@@ -163,13 +165,13 @@ export class InProcessAgentBridge implements AgentBridge {
 		// user's NeoPi config or change their CLI sessions.
 		const core = sdk();
 		const settings = await core.Settings.loadIsolated({ cwd, agentDir: core.getAgentDir() });
-		// createAgentSession resolves an explicit model before it retains the
-		// mixture catalog itself, so a mixture must already be registered here.
-		// Without this a new chat on `mixture/<name>` silently fell back to the default.
+		// createAgentSession resolves an explicit model before it retains its own
+		// mixture workspace, so this workspace's mixtures must already be registered.
+		// A mixture another workspace registered on the shared registry is refused.
 		if (model?.provider === "mixture") {
-			await this.ensureMixtures(modelRegistry);
-			if (!modelRegistry.find(model.provider, model.id)) {
-				throw new Error(`mixture/${model.id} is not a registered mixture`);
+			const roster = await this.ensureMixtures(modelRegistry, cwd);
+			if (!roster?.find(model.id)) {
+				throw new Error(`mixture/${model.id} is not defined in ${cwd}`);
 			}
 		}
 		let deckDefaultModel: ReturnType<ModelRegistry["find"]>;
@@ -414,34 +416,43 @@ export class InProcessAgentBridge implements AgentBridge {
 
 	async listModels(opts: { sessionId?: string } = {}): Promise<ModelInfo[]> {
 		const registry = await this.ensureModelRegistry();
-		await this.ensureMixtures(registry);
-		const current = opts.sessionId ? this.active.get(opts.sessionId)?.handle.snapshot().model : undefined;
-		return registry.getAll().map((model) => modelInfoFromSdk(model as unknown as SdkModel, registry, current));
+		const handle = opts.sessionId ? this.active.get(opts.sessionId)?.handle : undefined;
+		const roster = await this.ensureMixtures(registry, handle?.cwd ?? process.cwd());
+		const current = handle?.snapshot().model;
+		// The shared registry lists the union of every held workspace's mixtures;
+		// show only the ones this workspace defines (and can run).
+		return registry.getAll()
+			.filter((model) => model.api !== "mixture" || roster?.find(model.id) !== undefined)
+			.map((model) => modelInfoFromSdk(model as unknown as SdkModel, registry, current));
 	}
 
 	/**
-	 * NeoPi registers mixture-of-agents models (`mixture/<name>`, from
-	 * MIXTURES.toml) on the model registry only while some owner holds its
-	 * mixture catalog; sessions hold it for their lifetime. The deck holds it
-	 * too, so the picker lists mixtures before any chat is open. Discovery
-	 * reads config files only and spawns nothing. The global settings instance
-	 * is only initialized once a session exists; use the read-only loader here
-	 * so opening the picker cannot migrate or write the user's config.
-	 * The pinned NeoPi keeps one roster per registry (first holder discovers);
-	 * per-workspace rosters arrive with neopi#126.
+	 * NeoPi registers mixture-of-agents models (`mixture/<name>`, from the
+	 * MIXTURES.toml search path of a workspace) while some owner holds that
+	 * workspace's scope; sessions hold theirs for their lifetime. The deck holds
+	 * one per workspace too, so the picker lists mixtures before any chat is
+	 * open. Discovery reads config files only and spawns nothing; the read-only
+	 * settings loader keeps opening the picker from writing the user's config.
 	 */
-	private ensureMixtures(registry: ModelRegistry): Promise<void> {
-		if (!hasFeature("mixtures")) return Promise.resolve();
-		this.mixturesRetained ??= (async () => {
-			const cwd = process.cwd();
-			const agentDir = sdk().getAgentDir();
-			const settings = await sdk().Settings.loadReadOnly({ cwd, agentDir });
-			await feature("mixtures").retainMixtureCatalog("npi-deck:model-picker", { cwd, agentDir, registry, settings });
-		})().catch((err) => {
-			this.mixturesRetained = undefined;
-			log.warn("mixture discovery failed; picker lists no mixtures", err);
-		});
-		return this.mixturesRetained;
+	private ensureMixtures(registry: ModelRegistry, cwd: string): Promise<MixtureRoster | undefined> {
+		if (!hasFeature("mixtures")) return Promise.resolve(undefined);
+		const key = path.resolve(cwd);
+		let held = this.mixtureWorkspaces.get(key);
+		if (!held) {
+			held = (async () => {
+				const agentDir = sdk().getAgentDir();
+				const settings = await sdk().Settings.loadReadOnly({ cwd: key, agentDir });
+				const workspace = await feature("mixtures").MixtureWorkspace.retain(`npi-deck:model-picker:${key}`, { cwd: key, agentDir, registry, settings });
+				return { find: (name: string) => workspace.scope.find(name), release: () => workspace.release() };
+			})().catch((err) => {
+				// retain drops its own hold when discovery fails; retry on the next call.
+				this.mixtureWorkspaces.delete(key);
+				log.warn(`mixture discovery failed for ${key}; picker lists no mixtures there`, err);
+				return undefined;
+			});
+			this.mixtureWorkspaces.set(key, held);
+		}
+		return held;
 	}
 
 	async dispose(): Promise<void> {
@@ -457,6 +468,8 @@ export class InProcessAgentBridge implements AgentBridge {
 		);
 		await Promise.all(disposals);
 		this.active.clear();
+		for (const held of this.mixtureWorkspaces.values()) (await held)?.release();
+		this.mixtureWorkspaces.clear();
 	}
 
 	/** Called by the WS hub when a connection subscribes. Pin the session against the reaper. */
@@ -641,6 +654,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			cwd,
 			sessionId,
 			getModelRegistry: () => this.ensureModelRegistry(),
+			getMixtureRoster: (registry) => this.ensureMixtures(registry, cwd),
 			planBridge,
 			onDispose: () => {
 				uiBridge.dispose();
@@ -858,6 +872,7 @@ export class InProcessSessionHandle implements SessionHandle {
 	private session: AgentSession;
 	private readonly sessionManager: SessionManager;
 	private readonly modelRegistryRef: () => Promise<ModelRegistry>;
+	private readonly mixtureRoster: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
 	private readonly planBridge: PlanModeBridge;
 	private listeners = new Set<EventListener>();
 	private onDisposeCallback: () => void;
@@ -883,6 +898,8 @@ export class InProcessSessionHandle implements SessionHandle {
 		cwd: string;
 		sessionId: string;
 		getModelRegistry: () => Promise<ModelRegistry>;
+		/** This session's workspace mixtures; absent in tests that never select one. */
+		getMixtureRoster?: (registry: ModelRegistry) => Promise<MixtureRoster | undefined>;
 		planBridge: PlanModeBridge;
 		onDispose: () => void;
 	}) {
@@ -891,6 +908,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		this.cwd = args.cwd;
 		this.sessionId = args.sessionId;
 		this.modelRegistryRef = args.getModelRegistry;
+		this.mixtureRoster = args.getMixtureRoster ?? (async () => undefined);
 		this.planBridge = args.planBridge;
 		this.onDisposeCallback = args.onDispose;
 	}
@@ -1026,6 +1044,9 @@ export class InProcessSessionHandle implements SessionHandle {
 
 	async setModel(ref: ModelRef): Promise<void> {
 		const registry = await this.modelRegistryRef();
+		if (ref.provider === "mixture" && !(await this.mixtureRoster(registry))?.find(ref.id)) {
+			throw new Error(`mixture/${ref.id} is not defined in ${this.cwd}`);
+		}
 		const model = registry.find(ref.provider, ref.id);
 		if (!model) throw new Error(`unknown model: ${ref.provider}/${ref.id}`);
 		if (!registry.hasConfiguredAuth(model)) {

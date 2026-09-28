@@ -213,34 +213,36 @@ await check("auth: storage, registry, env key, oauth providers", ["discoverAuthS
 	return `${providers.length} OAuth providers; credentials.all() empty; model registry resolves ${cheapModel.provider}/${cheapModel.id}`;
 });
 
-await check("mixtures: catalog registers MIXTURES.toml models without a session", ["retainMixtureCatalog"], async () => {
-	const file = path.join(agentDir, "MIXTURES.toml");
-	await Bun.write(
-		file,
-		[
-			"[[mixtures]]",
-			'name = "deck-contract"',
-			'entry = "writer"',
-			"[[mixtures.members]]",
-			'id = "writer"',
-			'model = "openrouter/openai/gpt-4o-mini"',
-			'system_prompt = "Draft."',
-			"tools = false",
-			"",
-		].join("\n"),
-	);
+await check("mixtures: workspaces register only their own MIXTURES.toml models", ["MixtureWorkspace"], async () => {
+	const mixture = (name: string, prompt: string) => [
+		"[[mixtures]]",
+		`name = "${name}"`,
+		'entry = "writer"',
+		"[[mixtures.members]]",
+		'id = "writer"',
+		'model = "openrouter/openai/gpt-4o-mini"',
+		`system_prompt = "${prompt}"`,
+		"tools = false",
+		"",
+	].join("\n");
+	const a = mkdir("moa-a");
+	const b = mkdir("moa-b");
+	await Bun.write(path.join(a, "MIXTURES.toml"), mixture("deck-contract-a", "Draft A."));
+	await Bun.write(path.join(b, "MIXTURES.toml"), mixture("deck-contract-b", "Draft B."));
+	const hold = async (cwd: string) => mixtures.MixtureWorkspace.retain(`contract:${cwd}`, { cwd, agentDir, registry, settings: await core.Settings.loadIsolated({ cwd, agentDir }) });
+	const wa = await hold(a);
+	const wb = await hold(b);
 	try {
-		const settings = await core.Settings.loadIsolated({ cwd: agentDir, agentDir });
-		const catalog = await mixtures.retainMixtureCatalog("contract", { cwd: agentDir, agentDir, registry, settings });
-		const model = registry.find("mixture", "deck-contract");
-		assert(model, "mixture/deck-contract not registered");
-		assert(model.api === "mixture", `api = ${model.api}`);
-		catalog.release("contract");
-		assert(!registry.find("mixture", "deck-contract"), "mixture still registered after the last release");
-		return "mixture/deck-contract registered with api=mixture, unregistered on release";
+		assert(registry.find("mixture", "deck-contract-a")?.api === "mixture", "mixture/deck-contract-a not registered");
+		assert(registry.find("mixture", "deck-contract-b")?.api === "mixture", "mixture/deck-contract-b not registered");
+		assert(wa.scope.find("deck-contract-a") && !wa.scope.find("deck-contract-b"), "workspace A scope sees B's mixture");
+		assert(wb.scope.find("deck-contract-b") && !wb.scope.find("deck-contract-a"), "workspace B scope sees A's mixture");
 	} finally {
-		rmSync(file, { force: true });
+		wa.release();
+		wb.release();
 	}
+	assert(!registry.find("mixture", "deck-contract-a") && !registry.find("mixture", "deck-contract-b"), "mixtures still registered after the last release");
+	return "two workspaces register their own mixture, each scope finds only its own, both unregister on release";
 });
 
 async function newSession(cwd: string, extra: Partial<CreateAgentSessionOptions> = {}) {
