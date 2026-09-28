@@ -12,14 +12,13 @@
 import { Database } from "bun:sqlite";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 
+import { migrationsDir } from "../assets.ts";
 import { logger } from "../log.ts";
 
 const log = logger("db");
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = path.join(here, "migrations");
+const MIGRATIONS_DIR = migrationsDir();
 
 let instance: Database | null = null;
 
