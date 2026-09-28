@@ -18,7 +18,7 @@ import { useStore } from "@/lib/store";
 
 type OpenFrame = Extract<ServerFrame, { type: "ext_ui_dialog_open" }>;
 
-const OTHER_OPTION_SENTINEL = "__omp_deck_other__";
+const OTHER_OPTION_SENTINEL = "__npi_deck_other__";
 
 export function ExtUiDialog(): JSX.Element | null {
 	const activeId = useStore((s) => s.activeId);

@@ -1,10 +1,10 @@
 # Starter skills
 
-omp-native skills bundled with omp-deck. On server boot, `apps/server/src/starter-skills.ts` walks this directory and copies any subdir that isn't already present in `~/.omp/agent/skills/`. The installer is **never-overwrite**: once a target exists, the user owns it. Deleting the destination dir + restarting reinstalls.
+omp-native skills bundled with NPI deck. On server boot, `apps/server/src/starter-skills.ts` walks this directory and copies any subdir that isn't already present in `~/.omp/agent/skills/`. The installer is **never-overwrite**: once a target exists, the user owns it. Deleting the destination dir + restarting reinstalls.
 
 ## Bundled skills
 
-### omp-deck native
+### NPI deck native
 
 - **create-skill** — Author a new omp-native skill. The full author loop using only `omp`'s standard tools (`read`, `write`, `edit`, `bash`). Triggers when the user wants to capture a recurring workflow or formalize a procedure into a `SKILL.md`.
 
@@ -24,7 +24,7 @@ For full context see [ATTRIBUTION.md](./ATTRIBUTION.md) and the task that drove 
 
 - `caveman` — Overlaps the more-developed `caveman:*` skill family.
 - `write-a-skill` — Overlaps `create-skill` + `skill-creator:skill-creator`.
-- `to-prd`, `to-issues` — Target GitHub issues + a per-repo config we don't run. Adapting them to the omp-deck kanban is a follow-up.
+- `to-prd`, `to-issues` — Target GitHub issues + a per-repo config we don't run. Adapting them to the NPI deck kanban is a follow-up.
 - `edit-article`, `obsidian-vault`, `scaffold-exercises`, `migrate-to-shoehorn`, `setup-pre-commit`, `git-guardrails-claude-code`, `setup-matt-pocock-skills` — Personal-to-Matt or framework-coupled.
 - `improve-codebase-architecture`, `triage`, `grill-with-docs`, `tdd` — Depend on `docs/adr/` + `CONTEXT.md` conventions we don't have. Revisit if we adopt them.
 - `in-progress/*` — Upstream marks them unstable; wait for graduation.
@@ -38,5 +38,5 @@ For full context see [ATTRIBUTION.md](./ATTRIBUTION.md) and the task that drove 
 
 ## Disabling
 
-Set `OMP_DECK_INSTALL_STARTER_SKILLS=0` to skip the bootstrap entirely.
-Set `OMP_DECK_STARTER_SKILLS_DIR=<path>` to override the source directory.
+Set `NPI_DECK_INSTALL_STARTER_SKILLS=0` to skip the bootstrap entirely.
+Set `NPI_DECK_STARTER_SKILLS_DIR=<path>` to override the source directory.

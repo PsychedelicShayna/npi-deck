@@ -283,7 +283,7 @@ function WelcomeTaskTile() {
 			<div className="flex items-center gap-2">
 				<ClipboardList className="h-4 w-4 shrink-0 text-accent" />
 				<span>
-					<span className="font-medium">T-1 Welcome to omp·deck</span> is waiting in
+					<span className="font-medium">T-1 Welcome to NPI deck</span> is waiting in
 					your kanban
 				</span>
 			</div>

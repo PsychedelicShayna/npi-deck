@@ -11,7 +11,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 
 ### Changed
 
-- **Renamed to npi-deck** (#49). Packages are `@npi-deck/*`. Every `OMP_DECK_*` variable is now `NPI_DECK_*`, with no fallback to the old names. `OMP_BRIDGE_TELEGRAM_ENTRY` is now `NPI_DECK_TELEGRAM_BRIDGE_ENTRY`.
+- **Renamed to NPI deck** (#49), version **0.7.0-dev** (the fork's first line; 0.6.1 was the last upstream omp-deck release). The UI header, onboarding, welcome task, page title and Telegram replies say NPI deck. Packages are `@npi-deck/*`. Every `OMP_DECK_*` variable is now `NPI_DECK_*`, with no fallback to the old names. `OMP_BRIDGE_TELEGRAM_ENTRY` is now `NPI_DECK_TELEGRAM_BRIDGE_ENTRY`.
 - **One data dir, `~/.npi-deck`** (`NPI_DECK_HOME` overrides). The managed `.env`, `deck.db`, uploads, the Telegram bridge db, backend trees and run state all live there. `NPI_DECK_DATA_DIR`, the `NPI_DECK_DB` alias and the `~/.config/omp-deck`/`%LOCALAPPDATA%` and `<cwd>/data/deck.db` defaults are gone. Old `~/.omp-deck` data is not read; migrating it is separate work.
 - **Default port 1701.**
 - **Shipped files resolve through `apps/server/src/assets.ts`**, not the process cwd. The server is `startDeck()` in `apps/server/src/deck.ts`; `index.ts` is only the process entry.

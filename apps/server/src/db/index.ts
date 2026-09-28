@@ -108,7 +108,7 @@ function seedWelcomeTaskIfEmpty(db: Database): void {
 
 	const taskId = `t_${id().toLowerCase().slice(0, 18)}`;
 	const now = nowIso();
-	const title = "Welcome to npi-deck";
+	const title = "Welcome to NPI deck";
 	const body = WELCOME_BODY;
 
 	db.transaction(() => {
@@ -126,7 +126,7 @@ function seedWelcomeTaskIfEmpty(db: Database): void {
 	log.info(`seeded welcome task (T-1) on empty kanban`);
 }
 
-const WELCOME_BODY = `Welcome to npi-deck, a browser front end for the NeoPi agent. Mark this task done when you've had a look around.
+const WELCOME_BODY = `Welcome to NPI deck, a browser front end for the NeoPi agent. Mark this task done when you've had a look around.
 
 The nav rail on the left edge holds:
 - **Chat** — multi-session conversations with the agent. A new session starts as an empty thread.

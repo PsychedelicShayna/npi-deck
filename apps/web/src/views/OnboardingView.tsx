@@ -105,7 +105,7 @@ export function OnboardingView() {
 			{/* Top chrome — progress + escape hatch */}
 			<header className="flex items-center justify-between border-b border-line px-6 py-3">
 				<div className="flex items-center gap-3">
-					<div className="meta text-ink-3">omp·deck onboarding</div>
+					<div className="meta text-ink-3">NPI deck onboarding</div>
 					<ol className="flex items-center gap-1.5">
 						{STEP_ORDER.map((s, i) => (
 							<li
@@ -167,7 +167,7 @@ function Step1Welcome({ onNext }: { onNext: () => void }) {
 	return (
 		<div className="flex flex-col gap-5">
 			<div>
-				<h1 className="text-2xl font-semibold text-ink">Welcome to omp·deck</h1>
+				<h1 className="text-2xl font-semibold text-ink">Welcome to NPI deck</h1>
 				<p className="mt-2 text-sm text-ink-2">
 					A local cockpit for your AI coding agent — multi-session chat, kanban,
 					routines, knowledge base, all loopback-only on this machine.
@@ -249,7 +249,7 @@ function Step2Kb({
 			<div>
 				<h1 className="text-xl font-semibold text-ink">Knowledge base</h1>
 				<p className="mt-2 text-sm text-ink-2">
-					omp·deck's <code className="font-mono">/kb</code> view is a
+					NPI deck's <code className="font-mono">/kb</code> view is a
 					plaintext-portable wiki the agent reads and writes. Set one up now and
 					the agent has somewhere to put long-term memory.
 				</p>

@@ -47,7 +47,7 @@ export function Layout({ sidebar, main, inspector, topBar }: Props) {
 					<Menu className="h-4 w-4" />
 				</button>
 				<div className="font-mono text-[13px] font-medium tracking-tight text-ink">
-					omp<span className="text-ink-3">·</span>deck
+					NPI<span className="text-ink-3">·</span>deck
 				</div>
 				<div className="ml-auto flex min-w-0 items-center gap-2 overflow-hidden">
 					<div className="hidden min-w-0 truncate sm:block">{topBar}</div>
