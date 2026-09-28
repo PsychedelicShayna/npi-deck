@@ -35,11 +35,25 @@ export interface ImageBlock {
 	mimeType: string;
 }
 
+/**
+ * A content block this client has no renderer for (NeoPi's
+ * `anthropicServerTool`, `fallback`, `anthropicCompaction`, … and anything
+ * added later). Rendered as a visible, collapsible placeholder instead of
+ * being dropped.
+ */
+export interface UnknownBlock {
+	type: "unknown";
+	blockType: string;
+	raw: unknown;
+}
+
 export type AssistantContentBlock =
 	| TextBlock
 	| ThinkingBlock
 	| RedactedThinkingBlock
-	| ToolCallBlock;
+	| ToolCallBlock
+	| ImageBlock
+	| UnknownBlock;
 
 // ─── Messages ──────────────────────────────────────────────────────────────
 
@@ -146,6 +160,8 @@ export interface ToolCallStream {
 	intent?: string;
 	status: "running" | "complete" | "error";
 	partialResult?: unknown;
+	/** Latest `tool_stream_update` projection (e.g. a diff preview) while the call runs. */
+	streamUpdate?: unknown;
 	result?: unknown;
 	isError: boolean;
 	startedAt: number;
@@ -185,6 +201,14 @@ export interface UsageRollup {
 
 export interface SessionUi {
 	sessionId: string;
+	/** NeoPi refuses background jobs in this session (not the first live root; neopi#121). */
+	backgroundJobsUnavailable?: boolean;
+	/**
+	 * A persisted session opened from the sidebar without starting an SDK
+	 * session: the transcript is shown read-only until the user resumes or
+	 * sends. `sessionId` is the file's session id; nothing is subscribed.
+	 */
+	readOnly?: { path: string };
 	cwd: string;
 	sessionFile?: string;
 	sessionName?: string;

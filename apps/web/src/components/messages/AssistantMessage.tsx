@@ -15,7 +15,7 @@ export function AssistantMessage({ msg, toolCalls }: Props) {
 	return (
 		<div className="space-y-2">
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-2xs uppercase tracking-meta text-ink-3">
-				<span className="text-ink-2">omp</span>
+				<span className="text-ink-2">npi</span>
 				{msg.model ? <span className="text-ink-4 normal-case tracking-normal">{msg.model}</span> : null}
 				{msg.isStreaming ? <span className="text-accent">· streaming</span> : null}
 				{msg.stopReason && !msg.isStreaming ? (
@@ -79,7 +79,22 @@ export function AssistantMessage({ msg, toolCalls }: Props) {
 							/>
 						);
 					}
-					return null;
+					if (b.type === "image") {
+						return (
+							<img
+								key={i}
+								src={`data:${b.mimeType};base64,${b.data}`}
+								alt="assistant image"
+								className="max-h-96 rounded border border-line"
+							/>
+						);
+					}
+					return (
+						<details key={i} className="rounded border border-dashed border-line px-2 py-1 font-mono text-2xs text-ink-3">
+							<summary className="cursor-pointer">unsupported content block: {b.blockType}</summary>
+							<pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap">{JSON.stringify(b.raw, null, 2)}</pre>
+						</details>
+					);
 				})}
 			</div>
 		</div>

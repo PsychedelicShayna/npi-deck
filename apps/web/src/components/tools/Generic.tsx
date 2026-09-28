@@ -5,7 +5,14 @@ import { CodeBlock, MaybeJsonBlock } from "@/lib/code";
 export function GenericTool({ args, stream }: ToolRendererProps) {
 	const result = stream?.result;
 	const partial = stream?.partialResult;
-	const text = result ? extractResultText(result) : partial ? extractResultText(partial) : "";
+	const update = stream?.streamUpdate;
+	const text = result
+		? extractResultText(result)
+		: partial
+			? extractResultText(partial)
+			: update !== undefined
+				? extractResultText(update)
+				: "";
 	// Args are always a structured object at this protocol boundary — render
 	// as JSON so keys/strings/numbers colorize. Pretty-print for readability.
 	const argsText = JSON.stringify(args, null, 2);

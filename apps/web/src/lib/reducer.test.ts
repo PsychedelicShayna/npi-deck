@@ -223,3 +223,37 @@ describe("reducer queuedPrompts snapshot hydration", () => {
 		expect(s.queuedPrompts[1]?.behavior).toBe("steer");
 	});
 });
+
+describe("run status across NeoPi's agent_end", () => {
+	test("a non-terminal agent_end and turn_end keep the chat busy; the terminal agent_end idles it", () => {
+		let s = fresh();
+		s = applyEvent(s, { type: "agent_start" } as never);
+		s = applyEvent(s, { type: "turn_start" } as never);
+		s = applyEvent(s, { type: "turn_end" } as never);
+		expect(s.status).toBe("streaming");
+		s = applyEvent(s, { type: "agent_end", isTerminal: false } as never);
+		expect(s.status).toBe("streaming");
+		s = applyEvent(s, { type: "agent_end" } as never);
+		expect(s.status).toBe("idle");
+	});
+});
+
+describe("assistant content blocks", () => {
+	test("a block type the client doesn't know is kept as a visible placeholder", () => {
+		let s = fresh();
+		s = applyEvent(s, {
+			type: "message_start",
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "text", text: "hi" },
+					{ type: "anthropicServerTool", name: "web_fetch", input: {} },
+				],
+				timestamp: 1700000000000,
+			},
+		} as never);
+		const msg = s.messages.find((m) => m.role === "assistant") as { blocks: Array<{ type: string; blockType?: string }> };
+		expect(msg.blocks.map((b) => b.type)).toEqual(["text", "unknown"]);
+		expect(msg.blocks[1]?.blockType).toBe("anthropicServerTool");
+	});
+});

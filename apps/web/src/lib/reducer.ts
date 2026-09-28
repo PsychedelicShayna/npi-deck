@@ -39,6 +39,7 @@ const EMPTY_USAGE: UsageRollup = {
 export function initSession(snapshot: SessionSnapshot): SessionUi {
 	const state: SessionUi = {
 		sessionId: snapshot.sessionId,
+		...(snapshot.backgroundJobsUnavailable ? { backgroundJobsUnavailable: true } : {}),
 		cwd: snapshot.cwd,
 		sessionFile: snapshot.sessionFile,
 		sessionName: snapshot.sessionName,
@@ -65,9 +66,12 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 	switch (event.type) {
 		// ─── Agent lifecycle ───────────────────────────────────────────────
 		case "agent_start":
-			return { ...state, lastError: undefined };
+			return { ...state, status: "streaming", lastError: undefined };
+		// A run ends only at a terminal agent_end. NeoPi emits
+		// `isTerminal: false` when queued input or an async delivery will
+		// resume the session, so the chat must stay busy through it.
 		case "agent_end":
-			return { ...state, status: "idle" };
+			return (event as { isTerminal?: boolean }).isTerminal === false ? state : { ...state, status: "idle" };
 
 		// ─── Turn lifecycle ────────────────────────────────────────────────
 		case "turn_start":
@@ -77,8 +81,10 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 				turnCount: state.turnCount + 1,
 				lastError: undefined,
 			};
+		// turn_end separates the turns of one run (a tool round-trip, a
+		// continuation); the run is still going until agent_end.
 		case "turn_end":
-			return { ...state, status: "idle" };
+			return state;
 
 		// Synthetic event the deck's bridge emits after the SDK's own turn-end
 		// or compaction-complete, carrying the freshly-computed context-window
@@ -147,6 +153,15 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 					...state.toolCalls,
 					[id]: { ...prev, partialResult: (event as any).partialResult },
 				},
+			};
+		}
+		case "tool_stream_update": {
+			const id = String((event as any).toolCallId ?? "");
+			const prev = state.toolCalls[id];
+			if (!prev) return state;
+			return {
+				...state,
+				toolCalls: { ...state.toolCalls, [id]: { ...prev, streamUpdate: (event as any).update } },
 			};
 		}
 		case "tool_execution_end": {
@@ -290,6 +305,26 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 				...state,
 				goal: { goal: (event as any).goal, state: (event as any).state },
 			};
+		// NeoPi config/advisor signals without payload the chat renders; the
+		// deck's Settings views fetch their own state.
+		case "config_warnings_changed":
+		case "advisor_cost_changed":
+		case "advisor_yielded":
+		case "mixture_hop_end":
+		case "mixture_checkpoint":
+			return state;
+		case "mixture_limit":
+			return pushNotice(state, {
+				level: "warning",
+				message: `Mixture limit reached: ${mixtureSummary((event as any).details)}`,
+				source: "mixture",
+			});
+		case "mixture_run_end":
+			return pushNotice(state, {
+				level: "info",
+				message: `Mixture run finished: ${mixtureSummary((event as any).details)}`,
+				source: "mixture",
+			});
 		case "irc_message": {
 			const msg = (event as any).message;
 			if (!msg) return state;
@@ -539,9 +574,21 @@ function extractAssistantBlocks(content: unknown): AssistantContentBlock[] {
 				arguments: ((c as any).arguments ?? {}) as Record<string, unknown>,
 				intent: (c as any).intent as string | undefined,
 			});
+		} else if (type === "image" && typeof (c as any).data === "string") {
+			out.push({ type: "image", data: (c as any).data, mimeType: String((c as any).mimeType ?? "image/png") });
+		} else {
+			out.push({ type: "unknown", blockType: String(type ?? "?"), raw: c });
 		}
 	}
 	return out;
+}
+
+/** One-line text for a NeoPi mixture trace event; the shape varies by kind. */
+function mixtureSummary(details: unknown): string {
+	if (!details || typeof details !== "object") return "";
+	const d = details as Record<string, unknown>;
+	const text = d.summary ?? d.message ?? d.reason ?? d.kind;
+	return typeof text === "string" ? text : "";
 }
 
 function normalizeTextOrImage(c: any): TextBlock | ImageBlock | null {
