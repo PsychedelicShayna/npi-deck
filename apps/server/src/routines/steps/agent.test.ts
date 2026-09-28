@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, test } from "bun:test";
@@ -39,11 +39,13 @@ describe("NeoPi JSON agent stream", () => {
 		expect(adapter.result()).toMatchObject({ error: "NeoPi JSON stream ended without agent_end", tokensIn: 30, tokensOut: 4, costMicros: 1000 });
 	});
 
-	test("rejects nonempty MCP allowlist before spawning on the current backend", async () => {
-		const step = { id: "agent", type: "agent", prompt: "hello", mcp_servers_allowed: ["server"] } as Extract<RoutineStep, { type: "agent" }>;
-		const result = await executeAgentStep(step, context, new AbortController().signal, "/tmp", ["bun", "/nonexistent/packages/coding-agent/src/cli.ts"]);
-		expect(result.status).toBe("failed");
-		expect(result.error).toContain("mcp.includeServers and --mcp");
+	test("rejects MCP restrictions on an unverified backend before spawning", async () => {
+		for (const names of [["server"], []]) {
+			const step = { id: "agent", type: "agent", prompt: "hello", mcp_servers_allowed: names } as Extract<RoutineStep, { type: "agent" }>;
+			const result = await executeAgentStep(step, context, new AbortController().signal, "/tmp", ["bun", "/nonexistent/packages/coding-agent/src/cli.ts"]);
+			expect(result.status).toBe("failed");
+			expect(result.error).toContain("MCP allowlist requires a backend supporting");
+		}
 	});
 });
 
@@ -71,11 +73,23 @@ if (process.argv.some(arg => arg.startsWith("warn"))) process.stderr.write("Unre
 		expect(invalid.llmCostMicros).toBe(2000);
 		expect(readFileSync(argsFile, "utf8")).toContain('"--skills","alpha,beta"');
 		expect(readFileSync(argsFile, "utf8")).toContain('"--model","openrouter/openai/gpt-4o-mini"');
-		const disabled = await executeAgentStep({ ...step, mcp_servers_allowed: [], skills_allowed: [],
+		unlinkSync(argsFile);
+		const unsupported = await executeAgentStep({ ...step, mcp_servers_allowed: [], skills_allowed: [],
+			structured_output: { schema: { type: "object" } } }, context, new AbortController().signal, dir, [process.execPath, script]);
+		expect(unsupported.status).toBe("failed");
+		expect(unsupported.error).toContain("MCP allowlist requires a backend supporting");
+		expect(existsSync(argsFile)).toBe(false);
+		const disabled = await executeAgentStep({ ...step, skills_allowed: [],
 			structured_output: { schema: { type: "object" } } }, context, new AbortController().signal, dir, [process.execPath, script]);
 		expect(disabled.status).toBe("success");
-		expect(readFileSync(argsFile, "utf8")).toContain('"--no-mcp"');
 		expect(readFileSync(argsFile, "utf8")).toContain('"--no-skills"');
+		for (const names of [["*"], ["!alpha"], ["alpha,beta"], ["alpha\\*"]]) {
+			if (existsSync(argsFile)) unlinkSync(argsFile);
+			const widened = await executeAgentStep({ ...step, skills_allowed: names }, context, new AbortController().signal, dir, [process.execPath, script]);
+			expect(widened.status).toBe("failed");
+			expect(widened.error).toContain("not a literal skill name");
+			expect(existsSync(argsFile)).toBe(false);
+		}
 		const warned = await executeAgentStep({ ...step, prompt: "warn", structured_output: { schema: { type: "object" } } }, context, new AbortController().signal, dir, [process.execPath, script]);
 		expect(warned.status).toBe("failed");
 		expect(warned.error).toContain("agent rejected CLI flag");

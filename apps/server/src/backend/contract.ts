@@ -259,17 +259,23 @@ await check("multi-root: duplicate root identity leaves original registered", ["
 	return "duplicate root rejected; original registry ref unchanged";
 });
 
-await check("MCP: per-session override is non-persisting and rejects unknown names", [
+await check("MCP: per-session override rejects unknown and shadowed names", [
 	"cfgMcpIncludeServers", "MCPUnknownServerError", "loadAllMCPConfigs",
 ], async () => {
 	const cwd = mkdir("root-mcp");
 	mkdirSync(path.join(cwd, ".omp"), { recursive: true });
 	const server = path.join(backendPath, "packages/coding-agent/test/fixtures/mcp-marker-server.ts");
-	const markers = ["admitted", "excluded"].map(name => path.join(cwd, `ran-${name}`));
+	const markers = ["admitted", "excluded", "disabled-project", "shadowed-user"].map(name => path.join(cwd, `ran-${name}`));
 	writeFileSync(path.join(cwd, ".omp", "mcp.json"), JSON.stringify({
-		mcpServers: Object.fromEntries(["admitted", "excluded"].map((name, i) => [
-			name, { command: process.execPath, args: [server, name, markers[i]] },
-		])),
+		mcpServers: {
+			...Object.fromEntries(["admitted", "excluded"].map((name, i) => [
+				name, { command: process.execPath, args: [server, name, markers[i]] },
+			])),
+			shared: { command: process.execPath, args: [server, "disabled-project", markers[2]], enabled: false },
+		},
+	}));
+	writeFileSync(path.join(agentDir, "mcp.json"), JSON.stringify({
+		mcpServers: { shared: { command: process.execPath, args: [server, "shadowed-user", markers[3]] } },
 	}));
 	const discovered = await mcp.loadAllMCPConfigs(cwd, { includeServers: ["admitted"] });
 	assert(Object.keys(discovered.configs).join(",") === "admitted", "MCP discovery admitted the wrong servers");
@@ -295,7 +301,16 @@ await check("MCP: per-session override is non-persisting and rejects unknown nam
 	assert(failure instanceof mcp.MCPUnknownServerError, `unknown MCP name was not typed: ${String(failure)}`);
 	assert(failure.serverNames.join(",") === "unknown", `unexpected unknown names: ${failure.serverNames}`);
 	assert(!(await Bun.file(markers[1]!).exists()), "unknown allowlist spawned excluded server");
-	return "allowed fixture process spawned; excluded never spawned; config unchanged; unknown ID rejected by typed error";
+	const shadowedLookup = await mcp.loadAllMCPConfigs(cwd, { includeServers: ["shared"] });
+	assert(shadowedLookup.unmatchedIncludes?.join(",") === "shared", "disabled project server was rescued by a shadowed user name");
+	const shadowedSettings = await core.Settings.loadIsolated({ cwd, agentDir });
+	mcp.cfgMcpIncludeServers.override(shadowedSettings, ["shared"]);
+	const shadowedFailure = await newSession(cwd, { agentId: "Contract-shadowed", settings: shadowedSettings }).then(
+		async result => { await result.session.dispose(); return undefined; }, (error: unknown) => error,
+	);
+	assert(shadowedFailure instanceof mcp.MCPUnknownServerError, `shadowed MCP name did not fail before session startup: ${String(shadowedFailure)}`);
+	assert(!(await Bun.file(markers[2]!).exists()) && !(await Bun.file(markers[3]!).exists()), "disabled or shadowed MCP server was spawned");
+	return "allowed fixture spawned; excluded never spawned; config unchanged; unknown and shadowed IDs rejected before startup";
 });
 
 await check("commands: builtin registry, ACP dispatch, session commands", [

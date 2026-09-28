@@ -208,12 +208,18 @@ errors if anything is off.
 ## Limitations in V1
 
 - The `mcp` step type is **stubbed**. For `agent` steps, omitting
-  `mcp_servers_allowed` inherits the backend's configured MCP servers and `[]`
-  disables them. A nonempty allowlist requires NeoPi's `mcp.includeServers`
-  and `--mcp` capability (neopi#120); older backends reject it before spawning.
-  Literal allowlisted names must be present in the configured MCP servers.
-- `skills_allowed: [name]` restricts skills with NeoPi's `--skills` flag;
-  `skills_allowed: []` disables skills.
+  `mcp_servers_allowed` inherits the backend's configured MCP servers; `[]`
+  disables them. Any explicit MCP restriction requires a probed backend with
+  NeoPi's `mcp.includeServers` and `--mcp`/`--no-mcp` support (neopi#120);
+  older backends reject the step before spawning. Entries must be literal
+  enabled server names, not globs. Typos, disabled servers and names shadowed
+  by a disabled higher-priority config fail before a session starts.
+- Omitting `skills_allowed` inherits all installed skills. Literal
+  `skills_allowed: [name]` restricts skills with NeoPi's `--skills` flag;
+  globs are rejected before spawning, and `skills_allowed: []` disables
+  skills. In the visual builder, select **Only listed** to restrict either
+  surface; removing its last tag preserves the empty deny-all list. Select
+  **All** explicitly to restore the unrestricted default.
 - DnD step reordering lands in V1.5. Up/down arrows work today.
 - No "test this step in isolation" runner yet — full re-run is the only
   way to debug. Coming in V2.

@@ -47,9 +47,42 @@ export function RunStepForm({ step, onChange }: FormProps<"run">) {
 
 // ─── agent ────────────────────────────────────────────────────────────────
 
+function AllowlistField({ label, allLabel, placeholder, values, onChange }: {
+	label: string;
+	allLabel: string;
+	placeholder: string;
+	values?: string[];
+	onChange: (values?: string[]) => void;
+}) {
+	return (
+		<Field label={label}>
+			<select
+				aria-label={`${label} scope`}
+				value={values === undefined ? "all" : "listed"}
+				onChange={(e) => onChange(e.target.value === "all" ? undefined : values ?? [])}
+				className="field h-7 w-full px-2 font-mono text-2xs"
+			>
+				<option value="all">{allLabel}</option>
+				<option value="listed">Only listed (empty: none)</option>
+			</select>
+			{values !== undefined && (
+				<div className="mt-1">
+					<TagInput values={values} onChange={onChange} placeholder={placeholder} />
+				</div>
+			)}
+		</Field>
+	);
+}
+
 export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
 	function patch(p: Partial<Extract2<"agent">>): void {
 		onChange({ ...step, ...p });
+	}
+	function updateAllowlist(key: "skills_allowed" | "mcp_servers_allowed", names?: string[]): void {
+		const next = { ...step };
+		if (names === undefined) delete next[key];
+		else next[key] = names;
+		onChange(next);
 	}
 	return (
 		<div className="space-y-2">
@@ -75,30 +108,20 @@ export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
 				/>
 			</Field>
 			<div className="grid grid-cols-2 gap-2">
-				<Field label="skills_allowed">
-					<TagInput
-						values={step.skills_allowed ?? []}
-						onChange={(v) => {
-							const next = { ...step };
-							if (v.length === 0) delete next.skills_allowed;
-							else next.skills_allowed = v;
-							onChange(next);
-						}}
-						placeholder="skill-name"
-					/>
-				</Field>
-				<Field label="mcp_servers_allowed">
-					<TagInput
-						values={step.mcp_servers_allowed ?? []}
-						onChange={(v) => {
-							const next = { ...step };
-							if (v.length === 0) delete next.mcp_servers_allowed;
-							else next.mcp_servers_allowed = v;
-							onChange(next);
-						}}
-						placeholder="server-name"
-					/>
-				</Field>
+				<AllowlistField
+					label="skills_allowed"
+					allLabel="All installed skills"
+					placeholder="skill-name"
+					values={step.skills_allowed}
+					onChange={(names) => updateAllowlist("skills_allowed", names)}
+				/>
+				<AllowlistField
+					label="mcp_servers_allowed"
+					allLabel="All configured MCP servers"
+					placeholder="server-name"
+					values={step.mcp_servers_allowed}
+					onChange={(names) => updateAllowlist("mcp_servers_allowed", names)}
+				/>
 			</div>
 		</div>
 	);

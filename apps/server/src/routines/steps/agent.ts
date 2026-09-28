@@ -1,5 +1,6 @@
 import { validateStructuredOutput, type RoutineStep } from "@npi-deck/protocol";
 import { spawnOwned, terminateOwned } from "../../owned-process.ts";
+import { isLiteralAllowlistName } from "../../literal-allowlist-name.ts";
 import { feature } from "../../backend/runtime.ts";
 import { routineAgentCommand, routineAgentSupportsMcpAllowlist } from "../agent-command.ts";
 import { renderString } from "../template.ts";
@@ -144,15 +145,27 @@ async function drainEvents(stream: ReadableStream<Uint8Array> | null, adapter: A
 	adapter.finish();
 }
 
+function skillsFlags(step: AgentStep): string[] {
+	const names = step.skills_allowed;
+	if (!names) return [];
+	if (!names.length) return ["--no-skills"];
+	for (const name of names) {
+		if (!isLiteralAllowlistName(name)) {
+			throw new Error(`Skills allowlist ${JSON.stringify(name)} is not a literal skill name expressible by --skills`);
+		}
+	}
+	return ["--skills", names.join(",")];
+}
+
 async function mcpFlags(step: AgentStep, command: string[], cwd: string): Promise<string[]> {
 	const names = step.mcp_servers_allowed;
 	if (!names) return [];
-	if (!names.length) return ["--no-mcp"];
 	if (!routineAgentSupportsMcpAllowlist(command)) {
-		throw new Error("MCP allowlist requires a backend supporting mcp.includeServers and --mcp (neopi#120)");
+		throw new Error("MCP allowlist requires a backend supporting mcp.includeServers and --mcp/--no-mcp (neopi#120)");
 	}
+	if (!names.length) return ["--no-mcp"];
 	for (const name of names) {
-		if (typeof name !== "string" || !name || name !== name.trim() || /[,*?[\]{}]/.test(name)) {
+		if (!isLiteralAllowlistName(name)) {
 			throw new Error(`MCP allowlist server ${JSON.stringify(name)} is not a literal server name expressible by --mcp`);
 		}
 	}
@@ -188,7 +201,7 @@ export async function executeAgentStep(
 	try {
 		const command = pinnedCommand ?? routineAgentCommand([]);
 		const args = ["-p", "--mode", "json", "--no-session", ...(step.model ? ["--model", step.model] : []),
-			...(step.skills_allowed ? step.skills_allowed.length ? ["--skills", step.skills_allowed.join(",")] : ["--no-skills"] : []),
+			...skillsFlags(step),
 			...await mcpFlags(step, command, defaultCwd), prompt];
 		const proc = spawnOwned([...command, ...args], {
 			cwd: defaultCwd, stdin: "ignore", stdout: "pipe", stderr: "pipe", windowsHide: true,

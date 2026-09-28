@@ -38,12 +38,12 @@
         "skills_allowed": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Restrict the agent's native skill surface to this allowlist. Default (omitted): all installed skills available."
+          "description": "Literal installed skill names (not globs). Omitted: all installed skills; []: no skills. Removing the last name does not remove the restriction."
         },
         "mcp_servers_allowed": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Restrict the agent's MCP tool surface to these server ids. Default (omitted): all installed MCP servers available."
+          "description": "Literal configured MCP server ids (not globs). Omitted: all configured servers; []: no MCP. Unknown or disabled names fail the step."
         }
       }
     }

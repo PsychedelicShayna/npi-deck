@@ -9,7 +9,7 @@ export function routineAgentCommand(args: string[]): string[] {
 	return [resolveBunExecutable(), path.join(tree, "packages/coding-agent/src/cli.ts"), ...args];
 }
 
-/** Only a probed backend with both MCP exports may accept a nonempty allowlist. */
+/** Only a probed backend with both MCP exports may accept an MCP restriction. */
 export function routineAgentSupportsMcpAllowlist(command: readonly string[]): boolean {
 	const backend = activeBackend();
 	return !!backend && command[1] === path.join(backend.selection.path, "packages/coding-agent/src/cli.ts")

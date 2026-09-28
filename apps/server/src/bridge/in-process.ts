@@ -34,6 +34,7 @@ import { getDeckModelRegistry } from "../auth-singleton.ts";
 import { looksLikePlaceholderKey } from "../credential-quality.ts";
 import { notificationService } from "../notifications/index.ts";
 import { workRegistry } from "../work-registry.ts";
+import { isLiteralAllowlistName } from "../literal-allowlist-name.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import { SubagentTree } from "./subagent-tree.ts";
@@ -133,7 +134,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		// this instance only; a deck allowlist must never write user config.yml.
 		const settings = await sdk().Settings.loadIsolated({ cwd, agentDir: sdk().getAgentDir() });
 		if (mcpServersAllowed !== undefined) {
-			if (mcpServersAllowed.some(name => !name || name !== name.trim() || /[,*?[\]{}]/.test(name))) {
+			if (mcpServersAllowed.some(name => !isLiteralAllowlistName(name))) {
 				throw new McpAllowlistError("MCP allowlist requires configured literal server names (no glob metacharacters)");
 			}
 			if (mcpServersAllowed.length && !hasFeature("mcp-allowlist")) {
