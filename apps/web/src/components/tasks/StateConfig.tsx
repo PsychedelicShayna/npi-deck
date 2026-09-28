@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2, X } from "lucide-react";
-import type { TaskState } from "@omp-deck/protocol";
+import type { TaskState } from "@npi-deck/protocol";
 import { tasksApi } from "@/lib/tasks-api";
 
 interface Props {

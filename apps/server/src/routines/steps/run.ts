@@ -3,7 +3,7 @@
  * substitutes `command` and `cwd` before exec.
  */
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
 

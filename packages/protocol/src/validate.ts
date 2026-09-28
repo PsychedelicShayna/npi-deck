@@ -4,7 +4,7 @@
  * files to drive per-step form rendering.
  *
  * Schemas are registered with Ajv by their `$id` (e.g.
- * `omp-deck/schemas/step-common.json`), and the root `routine-spec.json`
+ * `npi-deck/schemas/step-common.json`), and the root `routine-spec.json`
  * `$ref`-resolves against that namespace.
  */
 

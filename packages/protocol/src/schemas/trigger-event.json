@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/trigger-event.json",
+  "$id": "https://npi-deck.app/schemas/trigger-event.json",
   "title": "RoutineTrigger — event",
   "description": "Event-source trigger. V1 sources: telegram, deck_inbox, deck_task, routine_finished. MCP-notification sources land in V2.",
   "type": "object",

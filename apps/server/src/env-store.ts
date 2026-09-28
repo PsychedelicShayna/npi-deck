@@ -24,14 +24,14 @@ export interface ManagedEnvFile {
 }
 
 export function getDataDir(): string {
-	const explicit = process.env.OMP_DECK_DATA_DIR?.trim();
+	const explicit = process.env.NPI_DECK_DATA_DIR?.trim();
 	if (explicit) return path.resolve(explicit);
 	if (process.platform === "win32") {
 		const local = process.env.LOCALAPPDATA?.trim() || path.join(os.homedir(), "AppData", "Local");
-		return path.join(local, "omp-deck");
+		return path.join(local, "npi-deck");
 	}
 	const xdg = process.env.XDG_CONFIG_HOME?.trim();
-	return path.join(xdg ? path.resolve(xdg) : path.join(os.homedir(), ".config"), "omp-deck");
+	return path.join(xdg ? path.resolve(xdg) : path.join(os.homedir(), ".config"), "npi-deck");
 }
 
 export function getManagedEnvPath(): string {
@@ -115,8 +115,8 @@ export async function writeManagedEnvUpdates(
 		if (nextLines.length > 0 && nextLines[nextLines.length - 1]?.kind !== "raw") {
 			nextLines.push({ kind: "raw", raw: "" });
 		}
-		if (!nextLines.some((line) => line.kind === "raw" && line.raw === "# omp-deck managed")) {
-			nextLines.push({ kind: "raw", raw: "# omp-deck managed" });
+		if (!nextLines.some((line) => line.kind === "raw" && line.raw === "# npi-deck managed")) {
+			nextLines.push({ kind: "raw", raw: "# npi-deck managed" });
 		}
 		for (const [key, value] of additions) nextLines.push({ kind: "entry", key, value });
 	}

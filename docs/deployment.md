@@ -1,6 +1,6 @@
 # Deployment
 
-omp-deck ships **without an authentication layer**. It is designed to be
+npi-deck ships **without an authentication layer**. It is designed to be
 loopback-only with network access gated by something else — Tailscale, an SSH
 tunnel, or a reverse proxy with its own auth. Do not bind it to a public
 interface without one of these.
@@ -18,7 +18,7 @@ HTTPS with mTLS-style identity.
 
 ```sh
 # Run the deck loopback-only — the default
-OMP_DECK_HOST=127.0.0.1 OMP_DECK_PORT=8787 bun run start
+NPI_DECK_HOST=127.0.0.1 NPI_DECK_PORT=8787 bun run start
 
 # Then on the same host:
 tailscale serve --bg --https=443 http://127.0.0.1:8787
@@ -65,10 +65,10 @@ Host deck-host
 ## Production knobs worth setting
 
 ```sh
-OMP_DECK_DB_PATH=/var/lib/omp-deck/deck.db    # outside the checkout
-OMP_DECK_DATA_DIR=/var/lib/omp-deck           # managed .env + audit + bridge db
+NPI_DECK_DB_PATH=/var/lib/npi-deck/deck.db    # outside the checkout
+NPI_DECK_DATA_DIR=/var/lib/npi-deck           # managed .env + audit + bridge db
 PI_CODING_AGENT_DIR=/var/lib/omp/agent        # NeoPi agent dir: sessions + auth
-OMP_DECK_DEFAULT_CWD=/workspace               # mount your code here
+NPI_DECK_DEFAULT_CWD=/workspace               # mount your code here
 LOG_LEVEL=warn                                # quieter in steady state
 ```
 
@@ -76,12 +76,12 @@ LOG_LEVEL=warn                                # quieter in steady state
 
 Before exposing the deck on a network anyone else can reach:
 
-- [ ] `OMP_DECK_HOST=127.0.0.1` (default). Confirm with `ss -tlnp` or `netstat`.
+- [ ] `NPI_DECK_HOST=127.0.0.1` (default). Confirm with `ss -tlnp` or `netstat`.
 - [ ] Front it with Tailscale Serve, an SSH tunnel, or a reverse proxy that
       enforces auth. Never bind `0.0.0.0` without one.
 - [ ] Provider API keys live in env vars (via shell profile or the deck's
       managed `.env`) — never committed in the repo or shipped in an image.
-- [ ] The data dir (`OMP_DECK_DATA_DIR`) is user-only readable. `chmod 700` on
+- [ ] The data dir (`NPI_DECK_DATA_DIR`) is user-only readable. `chmod 700` on
       Unix; Windows `%LOCALAPPDATA%` is per-user by default.
 - [ ] The audit log (`env-audit.log`) is rotated or archived if the deck runs
       for a long time. Today it grows unbounded.

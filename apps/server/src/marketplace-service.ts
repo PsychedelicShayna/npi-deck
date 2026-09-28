@@ -3,7 +3,7 @@ import type {
 	ListMarketplaceResponse,
 	MarketplaceCatalogEntry,
 	MarketplaceSource,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 import type { MarketplaceManager } from "@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace";
 
 import { sdk } from "./backend/runtime.ts";

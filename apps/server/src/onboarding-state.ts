@@ -35,7 +35,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 
-import type { OnboardingState, OnboardingStateProvider } from "@omp-deck/protocol";
+import type { OnboardingState, OnboardingStateProvider } from "@npi-deck/protocol";
 
 import { getDeckAuthStorage } from "./auth-singleton.ts";
 import { sdk } from "./backend/runtime.ts";

@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { SlashCommand, SlashCommandScope } from "@omp-deck/protocol";
+import type { SlashCommand, SlashCommandScope } from "@npi-deck/protocol";
 import { cn } from "@/lib/utils";
 
 const SCOPE_STYLE: Record<SlashCommandScope, { className: string; label: string; title: string }> = {

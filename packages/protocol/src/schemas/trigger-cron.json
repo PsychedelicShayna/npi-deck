@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/trigger-cron.json",
+  "$id": "https://npi-deck.app/schemas/trigger-cron.json",
   "title": "RoutineTrigger — cron",
   "description": "Cron-scheduled trigger. Multiple cron triggers can be combined on one routine.",
   "type": "object",

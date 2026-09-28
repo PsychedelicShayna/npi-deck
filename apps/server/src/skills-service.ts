@@ -28,7 +28,7 @@ import type {
 	SkillFrontmatter,
 	SkillProvider,
 	SkillSummary,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
@@ -94,7 +94,7 @@ export class SkillsService {
 
 		// Stable order: provider priority, then by displayed name, then dirName
 		// as a final tiebreaker. The UI can re-sort, but native-first is the
-		// default the omp-deck cockpit lives by.
+		// default the npi-deck cockpit lives by.
 		skills.sort((a, b) => {
 			const pa = PROVIDER_PRIORITY[a.provider] ?? 100;
 			const pb = PROVIDER_PRIORITY[b.provider] ?? 100;

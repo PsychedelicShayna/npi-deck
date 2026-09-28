@@ -1,8 +1,8 @@
 ---
-description: Pick the next active task from the omp-deck kanban and start working
+description: Pick the next active task from the npi-deck kanban and start working
 argument-hint: [top|t_<id>|<title-fragment>]
 ---
-You are about to start work on an omp-deck task. Discover before you act — do not move tasks around the kanban yourself.
+You are about to start work on an npi-deck task. Discover before you act — do not move tasks around the kanban yourself.
 
 1. **Read state**. `curl -s http://127.0.0.1:8787/api/tasks` returns `{ tasks, states }`. Find the `id` of the state whose `name` matches `"active"` case-insensitively. Filter `tasks` to that state, exclude archived, sort by `orderInState` ascending. The top of the column is the highest priority by user-curated order.
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Maximize2, Trash2, X } from "lucide-react";
-import type { Routine, RoutineActionKind, RoutineRun } from "@omp-deck/protocol";
+import type { Routine, RoutineActionKind, RoutineRun } from "@npi-deck/protocol";
 
 import { routinesApi } from "@/lib/routines-api";
 import { formatDurationMs } from "@/lib/utils";

@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/step-http.json",
+  "$id": "https://npi-deck.app/schemas/step-http.json",
   "title": "RoutineStep — http",
   "description": "HTTP request. Localhost requests automatically get the internal routine-runner bearer token. Templating applied to url, headers, query, and body.",
   "type": "object",
   "allOf": [
-    { "$ref": "https://omp-deck.app/schemas/step-common.json" },
+    { "$ref": "https://npi-deck.app/schemas/step-common.json" },
     {
       "type": "object",
       "required": ["type", "method", "url"],

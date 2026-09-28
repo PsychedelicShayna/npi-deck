@@ -1,6 +1,6 @@
 /**
  * Internal types for the V1 routine runner. Public types live in
- * `@omp-deck/protocol` (RoutineSpec, RoutineStep, RoutineStepRun, etc.); this
+ * `@npi-deck/protocol` (RoutineSpec, RoutineStep, RoutineStepRun, etc.); this
  * file is for runner-internal contracts.
  */
 
@@ -9,7 +9,7 @@ import type {
 	RoutineSpec,
 	RoutineStep,
 	RoutineStepStatus,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 /** What a step executor returns. Always non-throwing — exceptions become this shape. */
 export interface StepResult {

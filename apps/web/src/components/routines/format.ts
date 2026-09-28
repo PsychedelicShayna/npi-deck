@@ -1,4 +1,4 @@
-import type { Routine } from "@omp-deck/protocol";
+import type { Routine } from "@npi-deck/protocol";
 
 /** Human-readable cron expression — "07:00 daily", "every minute", etc. */
 export function describeCron(expr: string): string {

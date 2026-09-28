@@ -1,4 +1,4 @@
-import type { SlashCommand, Task } from "@omp-deck/protocol";
+import type { SlashCommand, Task } from "@npi-deck/protocol";
 
 import { broadcastBus } from "./broadcast-bus.ts";
 import {

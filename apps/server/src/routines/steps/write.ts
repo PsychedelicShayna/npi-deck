@@ -6,7 +6,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
 

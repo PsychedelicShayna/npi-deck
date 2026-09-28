@@ -11,8 +11,8 @@ import type {
 	NotificationLevel,
 	PreludeResponse,
 	StartCommand,
-} from "@omp-deck/protocol";
-import type { ProviderInfo } from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
+import type { ProviderInfo } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Badge } from "@/components/ui/Badge";
@@ -131,7 +131,7 @@ function EnvSection() {
 	const grouped = useMemo(() => {
 		const entries = data?.entries ?? [];
 		const isDeckKey = (key: string) =>
-			key.startsWith("OMP_DECK_") ||
+			key.startsWith("NPI_DECK_") ||
 			key === "LOG_LEVEL" ||
 			key === "PI_NO_TITLE" ||
 			key === "OMP_MODEL";
@@ -192,7 +192,7 @@ function EnvSection() {
 			{loading ? <div className="text-sm text-ink-3">Loading...</div> : null}
 			{data ? (
 				<>
-					<EnvTable title="omp-deck" entries={grouped.deck} onEdit={setEditing} />
+					<EnvTable title="npi-deck" entries={grouped.deck} onEdit={setEditing} />
 					<EnvTable title="messaging bridges" entries={grouped.messaging} onEdit={setEditing} />
 					<EnvTable title="omp SDK / providers" entries={grouped.sdk} onEdit={setEditing} />
 				</>
@@ -273,7 +273,7 @@ function MessagingSection() {
 
 			<BridgeCard
 				title="Telegram"
-				description="DM-only long-poll bridge to local omp-deck."
+				description="DM-only long-poll bridge to local npi-deck."
 				info={telegramInfo}
 				credentialRows={[
 					{ label: "Bot token", entry: telegramToken },
@@ -768,7 +768,7 @@ function NotificationsSection() {
 				permission={permission}
 				onReset={() => {
 					try {
-						localStorage.removeItem("omp-deck:notifications:banner-dismissed");
+						localStorage.removeItem("npi-deck:notifications:banner-dismissed");
 					} catch {
 						/* quota / private */
 					}
@@ -1500,7 +1500,7 @@ function MaintenanceGateCard() {
 				<div className="mt-1 space-y-0.5 font-mono text-2xs text-ink-3">
 					<div>extension: {data?.installedExtensionPath ?? "..."}</div>
 					<div>installed: {data ? (data.installedExtensionPresent ? "yes" : "missing") : "..."}</div>
-					<div>OMP_DECK_ORG_ROOT: {data?.orgRoot ?? "(unset)"} ({data?.orgRootSource ?? ""})</div>
+					<div>NPI_DECK_ORG_ROOT: {data?.orgRoot ?? "(unset)"} ({data?.orgRootSource ?? ""})</div>
 				</div>
 			</div>
 			<div className="space-y-4 p-4">
@@ -1526,7 +1526,7 @@ function MaintenanceGateCard() {
 							/>
 							<span>Enabled</span>
 							<span className="ml-2 font-mono text-2xs text-ink-3">
-								OMP_DECK_MAINTENANCE_GATE_DISABLED = {data.disabledRaw ?? "(unset)"} ({data.disabledSource})
+								NPI_DECK_MAINTENANCE_GATE_DISABLED = {data.disabledRaw ?? "(unset)"} ({data.disabledSource})
 							</span>
 						</label>
 

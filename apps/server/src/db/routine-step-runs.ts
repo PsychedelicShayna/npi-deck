@@ -6,7 +6,7 @@
  * tables flow through here.
  */
 
-import type { RoutineStepRun, RoutineStepStatus } from "@omp-deck/protocol";
+import type { RoutineStepRun, RoutineStepStatus } from "@npi-deck/protocol";
 
 import { getDb, id, nowIso } from "./index.ts";
 

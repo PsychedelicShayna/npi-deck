@@ -5,7 +5,7 @@ import type {
 	ListRoutinesResponse,
 	Routine,
 	UpdateRoutineRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 

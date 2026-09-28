@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ForceGraph2D from "react-force-graph-2d";
 import type { ForceGraphMethods } from "react-force-graph-2d";
 import { AlertTriangle, EyeOff, Loader2, Search } from "lucide-react";
-import type { KbGraphEdge, KbGraphNode, KbGraphResponse } from "@omp-deck/protocol";
+import type { KbGraphEdge, KbGraphNode, KbGraphResponse } from "@npi-deck/protocol";
 
 import { kbApi } from "@/lib/kb-api";
 import { cn } from "@/lib/utils";

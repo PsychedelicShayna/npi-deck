@@ -76,7 +76,7 @@ const toolCalls: Record<string, ToolCallStream> = {
 			content: [
 				{
 					type: "text",
-					text: `{\n  "name": "omp-deck",\n  "version": "0.1.0",\n  "scripts": {\n    "dev": "bun run --filter='@omp-deck/*' dev",\n    "build": "bun run --filter '@omp-deck/web' build"\n  }\n}`,
+					text: `{\n  "name": "npi-deck",\n  "version": "0.1.0",\n  "scripts": {\n    "dev": "bun run --filter='@npi-deck/*' dev",\n    "build": "bun run --filter '@npi-deck/web' build"\n  }\n}`,
 				},
 			],
 		},
@@ -102,7 +102,7 @@ const toolCalls: Record<string, ToolCallStream> = {
 	"tc-bash": tcStream({
 		id: "tc-bash",
 		name: "bash",
-		args: { command: "bun run typecheck && bun run --filter '@omp-deck/web' build" },
+		args: { command: "bun run typecheck && bun run --filter '@npi-deck/web' build" },
 		result: { exitCode: 0, output: "tsc -b — OK\nvite v5.4.21 building for production...\n✓ 2081 modules transformed.\n✓ built in 3.44s" },
 	}),
 	"tc-search": tcStream({
@@ -206,7 +206,7 @@ export function PreviewPage() {
 		<div className="h-full w-full overflow-y-auto bg-paper">
 			<div className="mx-auto max-w-[920px] space-y-10 px-6 py-10">
 				<header className="space-y-2 border-b border-line pb-4">
-					<div className="meta">omp-deck preview</div>
+					<div className="meta">npi-deck preview</div>
 					<h1 className="font-mono text-lg text-ink">Renderer gallery</h1>
 					<p className="text-sm text-ink-3">
 						Static fixtures for every message + tool renderer. Use this to inspect

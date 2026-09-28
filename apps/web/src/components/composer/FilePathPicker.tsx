@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { FileIcon, FolderIcon } from "lucide-react";
-import type { FilePathMatch } from "@omp-deck/protocol";
+import type { FilePathMatch } from "@npi-deck/protocol";
 import { cn } from "@/lib/utils";
 
 interface Props {

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ListTasksResponse, Task } from "@omp-deck/protocol";
+import type { ListTasksResponse, Task } from "@npi-deck/protocol";
 
 import { closeDb, getDb, openDb } from "./db/index.ts";
 import { buildTasksRouter } from "./routes-tasks.ts";

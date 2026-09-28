@@ -28,7 +28,7 @@ import type {
 	RoutineRun,
 	RoutineStepRun,
 	ServerFrame,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { routinesApi } from "@/lib/routines-api";
 import { useStore } from "@/lib/store";

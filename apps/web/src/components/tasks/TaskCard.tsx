@@ -1,6 +1,6 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Task } from "@omp-deck/protocol";
+import type { Task } from "@npi-deck/protocol";
 import { projectLabel } from "@/lib/kanban-project";
 import { formatBriefTime } from "@/lib/time";
 import { cn, truncate } from "@/lib/utils";

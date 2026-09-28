@@ -1,4 +1,4 @@
-import type { RoutineSpec, RoutineStep, ValidationError } from "@omp-deck/protocol";
+import type { RoutineSpec, RoutineStep, ValidationError } from "@npi-deck/protocol";
 
 export const STEP_ID_PATTERN = /^[a-z][a-z0-9_]*$/;
 export const STEP_ID_REQUIREMENT = "use lowercase letters, numbers, and underscores; start with a letter";

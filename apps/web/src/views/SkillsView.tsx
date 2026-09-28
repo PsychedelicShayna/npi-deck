@@ -4,7 +4,7 @@ import type {
 	ListSkillsResponse,
 	SkillDetailResponse,
 	SkillSummary,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Markdown } from "@/lib/markdown";

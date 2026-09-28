@@ -13,11 +13,11 @@
  *     only.
  */
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import { costMicros } from "../budget.ts";
 import { renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
-import { validateRoutineSpec as _vrs } from "@omp-deck/protocol";
+import { validateRoutineSpec as _vrs } from "@npi-deck/protocol";
 
 void _vrs; // keep import; unused but ensures protocol re-export typechecks here
 

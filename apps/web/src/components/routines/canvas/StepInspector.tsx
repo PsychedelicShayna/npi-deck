@@ -16,7 +16,7 @@ import { useEffect, useState } from "react";
 import { ExternalLink, Trash2, X } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import type { RoutineStep, RoutineStepRun, RoutineStepStatus } from "@omp-deck/protocol";
+import type { RoutineStep, RoutineStepRun, RoutineStepStatus } from "@npi-deck/protocol";
 
 import { cn } from "@/lib/utils";
 

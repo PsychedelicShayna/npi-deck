@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Archive, MessageSquarePlus, RotateCcw, Trash2, X } from "lucide-react";
-import type { Task, TaskState } from "@omp-deck/protocol";
+import type { Task, TaskState } from "@npi-deck/protocol";
 
 import { MarkdownEdit } from "@/components/MarkdownEdit";
 import { Modal } from "@/components/ui/Modal";

@@ -32,13 +32,13 @@ import {
 	BrowserNotificationChannel,
 	notificationService,
 } from "./notifications/index.ts";
-import type { RestartServerResponse } from "@omp-deck/protocol";
+import type { RestartServerResponse } from "@npi-deck/protocol";
 
 const log = logger("server");
 
 async function main(): Promise<void> {
 	const config = loadConfig();
-	log.info(`omp-deck server starting`, {
+	log.info(`npi-deck server starting`, {
 		host: config.host,
 		port: config.port,
 		defaultCwd: config.defaultCwd,
@@ -74,18 +74,18 @@ async function main(): Promise<void> {
 	// that the upstream detector looks for. Routine agent subprocesses inherit
 	// this env via Bun.spawn defaults, so a single set here covers both surfaces.
 	//
-	// Honors OMP_DECK_MAINTENANCE_GATE_DISABLED (set via Settings → Orientation):
+	// Honors NPI_DECK_MAINTENANCE_GATE_DISABLED (set via Settings → Orientation):
 	// when truthy we don't set the org root, so even an unaltered installed copy
 	// of the extension stays inactive. The extension itself also checks the flag.
-	const gateDisabledRaw = (process.env.OMP_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
+	const gateDisabledRaw = (process.env.NPI_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
 	const gateDisabled = ["1", "true", "yes", "on"].includes(gateDisabledRaw);
-	if (!process.env.OMP_DECK_ORG_ROOT && !gateDisabled) {
-		process.env.OMP_DECK_ORG_ROOT = resolveKbRoot();
+	if (!process.env.NPI_DECK_ORG_ROOT && !gateDisabled) {
+		process.env.NPI_DECK_ORG_ROOT = resolveKbRoot();
 	}
 
 	// Register the deck's `kb://` URI handler on the SDK's process-global
 	// router so `read kb://system/foo.md` resolves the same way the user's
-	// configured KB root (OMP_DECK_KB_ROOT or ~/kb) is served over REST.
+	// configured KB root (NPI_DECK_KB_ROOT or ~/kb) is served over REST.
 	// MUST run before the first `createAgentSession` — the router is a
 	// process singleton consulted by the `read` tool on every call.
 	sdk().InternalUrlRouter.instance().register(new KbProtocolHandler());
@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 	}
 	// Sync bundled starter skills into ~/.omp/agent/skills/ before the watcher
 	// spins up. Idempotent — never overwrites a user-edited target — so this
-	// is safe on every boot. Disable with OMP_DECK_INSTALL_STARTER_SKILLS=0.
+	// is safe on every boot. Disable with NPI_DECK_INSTALL_STARTER_SKILLS=0.
 	await installStarterSkills();
 	await installStarterExtensions();
 
@@ -288,11 +288,11 @@ function scheduleRestart(server: Server<ConnectionData>): RestartServerResponse 
 }
 
 const LANDING_HTML = `<!doctype html>
-<html><head><meta charset="utf-8"><title>omp-deck server</title>
+<html><head><meta charset="utf-8"><title>npi-deck server</title>
 <style>body{font-family:system-ui;max-width:48em;margin:4em auto;padding:0 1em;color:#e6edf3;background:#0d1117}code{background:#161b22;padding:.1em .4em;border-radius:.3em}a{color:#58a6ff}</style>
 </head><body>
-<h1>omp-deck server</h1>
-<p>Backend is running. The browser UI is served by the <code>@omp-deck/web</code> Vite dev server (typically <a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a> in dev), or the built static assets in production.</p>
+<h1>npi-deck server</h1>
+<p>Backend is running. The browser UI is served by the <code>@npi-deck/web</code> Vite dev server (typically <a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a> in dev), or the built static assets in production.</p>
 <p>API base: <code>/api</code> &nbsp;&nbsp; WebSocket: <code>/ws</code></p>
 </body></html>`;
 

@@ -1,6 +1,6 @@
 # Themes
 
-omp-deck ships with three themes:
+npi-deck ships with three themes:
 
 - **Paper** — warm cream surfaces, rust accent, near-black ink. Engineer's
   notebook aesthetic. Light mode.
@@ -43,7 +43,7 @@ source changes. Tailwind reads each token through
 
 ## Persistence
 
-The chosen theme is saved in `localStorage` under `omp-deck:theme`. An
+The chosen theme is saved in `localStorage` under `npi-deck:theme`. An
 inline `<script>` in `apps/web/index.html`'s head runs **before** React
 mounts, reads the stored value, and sets `<html data-theme="…">` — so there
 is no flash-of-default. Reload preserves the choice.

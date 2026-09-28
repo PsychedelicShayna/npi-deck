@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/routine-spec.json",
+  "$id": "https://npi-deck.app/schemas/routine-spec.json",
   "title": "RoutineSpec (V1)",
   "description": "The parsed V1 routine spec. Source-of-truth lives in routines.spec_yaml; this schema validates the deserialized object.",
   "type": "object",
@@ -22,10 +22,10 @@
       "minItems": 1,
       "items": {
         "oneOf": [
-          { "$ref": "https://omp-deck.app/schemas/trigger-cron.json" },
-          { "$ref": "https://omp-deck.app/schemas/trigger-webhook.json" },
-          { "$ref": "https://omp-deck.app/schemas/trigger-manual.json" },
-          { "$ref": "https://omp-deck.app/schemas/trigger-event.json" }
+          { "$ref": "https://npi-deck.app/schemas/trigger-cron.json" },
+          { "$ref": "https://npi-deck.app/schemas/trigger-webhook.json" },
+          { "$ref": "https://npi-deck.app/schemas/trigger-manual.json" },
+          { "$ref": "https://npi-deck.app/schemas/trigger-event.json" }
         ]
       },
       "description": "At least one trigger. Multiple triggers compose via union semantics (any one fires the routine)."
@@ -70,20 +70,20 @@
       "minItems": 1,
       "items": {
         "oneOf": [
-          { "$ref": "https://omp-deck.app/schemas/step-run.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-agent.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-write.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-http.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-deck.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-mcp.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-transform.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-wait.json" },
-          { "$ref": "https://omp-deck.app/schemas/step-set_state.json" }
+          { "$ref": "https://npi-deck.app/schemas/step-run.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-agent.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-write.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-http.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-deck.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-mcp.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-transform.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-wait.json" },
+          { "$ref": "https://npi-deck.app/schemas/step-set_state.json" }
         ]
       }
     },
     "layout": {
-      "$ref": "https://omp-deck.app/schemas/routine-layout.json"
+      "$ref": "https://npi-deck.app/schemas/routine-layout.json"
     }
   },
   "additionalProperties": false

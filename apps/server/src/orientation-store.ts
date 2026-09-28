@@ -27,7 +27,7 @@ import { getDataDir, readManagedEnvFile } from "./env-store.ts";
 
 /**
  * System-prompt block prepended to every omp session created or resumed via
- * this bridge. Tells the agent omp-deck exists, where to find its REST API,
+ * this bridge. Tells the agent npi-deck exists, where to find its REST API,
  * and how the kanban / cron / inbox surfaces are shaped — so it can read and
  * mutate them via `bash` + `curl` without needing the user to re-explain.
  *
@@ -35,9 +35,9 @@ import { getDataDir, readManagedEnvFile } from "./env-store.ts";
  * `kb://system/imperatives-belong-in-orchestrator-not-prelude.md`. This file
  * is reference material; the orchestrator drives the turn.
  */
-export const DEFAULT_PRELUDE = `# omp-deck context
+export const DEFAULT_PRELUDE = `# npi-deck context
 
-You are running inside an omp-deck session. omp-deck is a local web UI for
+You are running inside an npi-deck session. npi-deck is a local web UI for
 the omp coding agent that also exposes a kanban, cron scheduler, and inbox
 over HTTP on the loopback interface.
 
@@ -189,11 +189,11 @@ export const MAINTENANCE_GATE_DEFAULTS = {
 } as const;
 
 export const MAINTENANCE_GATE_ENV_KEYS = {
-	disabled: "OMP_DECK_MAINTENANCE_GATE_DISABLED",
+	disabled: "NPI_DECK_MAINTENANCE_GATE_DISABLED",
 	minOpMsgs: "OMP_MAINTENANCE_GATE_MIN_OP_MSGS",
 	minReleaseAgeMs: "OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS",
 	fireFloorMs: "OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS",
-	orgRoot: "OMP_DECK_ORG_ROOT",
+	orgRoot: "NPI_DECK_ORG_ROOT",
 } as const;
 
 export type GateValueSource = "process-env" | "env-file" | "default" | "unset";

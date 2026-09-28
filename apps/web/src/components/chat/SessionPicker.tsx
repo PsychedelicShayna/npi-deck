@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Clock, ClipboardList, MessagesSquare, Plus } from "lucide-react";
-import type { SessionSummary } from "@omp-deck/protocol";
+import type { SessionSummary } from "@npi-deck/protocol";
 
 import { selectActiveSession, useStore } from "@/lib/store";
 import { cn, shortPath } from "@/lib/utils";
@@ -214,12 +214,12 @@ function formatRelative(ts: string): string {
 function OnboardingReminderTile() {
 	const [visible, setVisible] = useState(false);
 	useEffect(() => {
-		if (localStorage.getItem("omp-deck:onboarding-skip-toast-pending") === "1") {
+		if (localStorage.getItem("npi-deck:onboarding-skip-toast-pending") === "1") {
 			setVisible(true);
 		}
 	}, []);
 	function dismiss(): void {
-		localStorage.removeItem("omp-deck:onboarding-skip-toast-pending");
+		localStorage.removeItem("npi-deck:onboarding-skip-toast-pending");
 		setVisible(false);
 	}
 	if (!visible) return null;

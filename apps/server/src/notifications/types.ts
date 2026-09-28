@@ -1,10 +1,10 @@
 /**
  * Internal types for the deck's notification service. The wire-level shape
  * (`NotificationPayload`, `NotificationLevel`) is re-exported from
- * `@omp-deck/protocol` so producers don't import server-internal modules.
+ * `@npi-deck/protocol` so producers don't import server-internal modules.
  */
 
-import type { NotificationLevel, NotificationPayload } from "@omp-deck/protocol";
+import type { NotificationLevel, NotificationPayload } from "@npi-deck/protocol";
 
 export type { NotificationLevel, NotificationPayload };
 

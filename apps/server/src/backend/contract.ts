@@ -247,7 +247,7 @@ await check("extension handlers: set model; compact present", ["runExtensionSetM
 await check("internal URLs: kb:// handler through the router", ["InternalUrlRouter"], async () => {
 	const kbRoot = mkdir("kb");
 	writeFileSync(path.join(kbRoot, "note.md"), "# contract\n");
-	process.env.OMP_DECK_KB_ROOT = kbRoot;
+	process.env.NPI_DECK_KB_ROOT = kbRoot;
 	const { KbProtocolHandler } = await import("../kb-protocol.ts");
 	core.InternalUrlRouter.instance().register(new KbProtocolHandler());
 	const res = await core.InternalUrlRouter.instance().resolve("kb://note.md");

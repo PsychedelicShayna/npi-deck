@@ -1,6 +1,6 @@
-# Installing omp-deck
+# Installing npi-deck
 
-omp-deck is the cockpit UI for [`oh-my-pi`](https://github.com/can1357/oh-my-pi)
+npi-deck is the cockpit UI for [`oh-my-pi`](https://github.com/can1357/oh-my-pi)
 (`omp`).
 
 The deck runs from a git checkout. There is no npm package, Docker image, or
@@ -97,8 +97,8 @@ That's it.
 ### Optional: custom data dir
 
 The deck writes its own SQLite database, env file, and bridge state under
-`%LOCALAPPDATA%/omp-deck` (Windows) or `$XDG_CONFIG_HOME/omp-deck` (Linux /
-macOS). To override, set `OMP_DECK_DATA_DIR` before `bun run dev`.
+`%LOCALAPPDATA%/npi-deck` (Windows) or `$XDG_CONFIG_HOME/npi-deck` (Linux /
+macOS). To override, set `NPI_DECK_DATA_DIR` before `bun run dev`.
 
 ---
 
@@ -124,7 +124,7 @@ Confirm with `bun --version`.
 bun add -g @oh-my-pi/pi-coding-agent
 ```
 
-This installs the `omp` binary. omp-deck embeds the SDK in-process, so the
+This installs the `omp` binary. npi-deck embeds the SDK in-process, so the
 global CLI is optional for running the deck — but installing it gives you the
 terminal experience too, and the auth flow is friendlier from a TTY.
 
@@ -155,7 +155,7 @@ bun run dev
 
 Open <http://127.0.0.1:5173>.
 
-You'll see a single "Welcome to omp-deck" task in the kanban. Read it; it
+You'll see a single "Welcome to npi-deck" task in the kanban. Read it; it
 covers the next 10 minutes of orientation.
 
 ---
@@ -170,7 +170,7 @@ A quick smoke list after either path:
 3. **First session**: click "+ new session" in the sidebar, send any prompt.
    You should see streaming text within a couple of seconds.
 4. **Settings**: navigate to `/settings`. The Env section lists
-   `OMP_DECK_HOST`, `OMP_DECK_PORT`, `OMP_MODEL`, provider keys (masked), etc.
+   `NPI_DECK_HOST`, `NPI_DECK_PORT`, `OMP_MODEL`, provider keys (masked), etc.
 
 If any of those fail, see [troubleshooting](#troubleshooting) below.
 
@@ -180,7 +180,7 @@ If any of those fail, see [troubleshooting](#troubleshooting) below.
 
 - **omp session/auth data**: `~/.omp/agent/` (NeoPi's `getAgentDir()`; `PI_CODING_AGENT_DIR` overrides).
 - **Deck kanban + routines + inbox**: `apps/server/data/deck.db` by default;
-  override via `OMP_DECK_DB_PATH`.
+  override via `NPI_DECK_DB_PATH`.
 - **Deck-managed env file + audit log**: `<dataDir>/.env` and
   `<dataDir>/env-audit.log` — see [configuration.md](./configuration.md)
   for `dataDir` resolution rules.
@@ -198,8 +198,8 @@ To wipe deck state while preserving omp's own data:
 ```sh
 # Stop the deck (Ctrl+C in its terminal)
 rm -rf apps/server/data/                    # kanban + routines + inbox
-rm -rf ~/.config/omp-deck/                  # Linux/macOS dataDir
-rmdir /S /Q %LOCALAPPDATA%\omp-deck         # Windows dataDir
+rm -rf ~/.config/npi-deck/                  # Linux/macOS dataDir
+rmdir /S /Q %LOCALAPPDATA%\npi-deck         # Windows dataDir
 ```
 
 To also drop omp:
@@ -218,7 +218,7 @@ rm -rf ~/.omp/                              # sessions + auth
 retry usually succeeds. If you're behind a corporate proxy, set
 `BUN_INSTALL_CACHE_DIR` and `HTTPS_PROXY`.
 
-**Port 8787 is already in use.** Set `OMP_DECK_PORT=8788` (or any free port)
+**Port 8787 is already in use.** Set `NPI_DECK_PORT=8788` (or any free port)
 before `bun run dev`. The vite proxy auto-follows.
 
 **No models appear in the model picker.** Open Settings → Env and confirm

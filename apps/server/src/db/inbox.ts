@@ -1,4 +1,4 @@
-import type { InboxItem, InboxKind } from "@omp-deck/protocol";
+import type { InboxItem, InboxKind } from "@npi-deck/protocol";
 
 import { getDb, id, nowIso } from "./index.ts";
 

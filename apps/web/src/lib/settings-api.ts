@@ -4,7 +4,7 @@ import type {
 	PatchEnvSettingsResponse,
 	RestartServerResponse,
 	RevealEnvValueResponse,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 

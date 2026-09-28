@@ -6,7 +6,7 @@
  * boundary stays narrow.
  */
 
-import type { AgentSessionEventJson, SessionSnapshot } from "@omp-deck/protocol";
+import type { AgentSessionEventJson, SessionSnapshot } from "@npi-deck/protocol";
 
 import type {
 	AssistantContentBlock,
@@ -84,7 +84,7 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 		// or compaction-complete, carrying the freshly-computed context-window
 		// utilization. Lets the header indicator update without re-snapshotting.
 		case "context_usage": {
-			const usage = (event as { contextUsage?: import("@omp-deck/protocol").ContextUsage }).contextUsage;
+			const usage = (event as { contextUsage?: import("@npi-deck/protocol").ContextUsage }).contextUsage;
 			if (!usage) return state;
 			return { ...state, contextUsage: usage };
 		}

@@ -4,7 +4,7 @@ import type {
 	ListMarketplaceResponse,
 	MarketplaceCatalogEntry,
 	MarketplaceSource,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Badge } from "@/components/ui/Badge";

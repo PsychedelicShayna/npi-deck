@@ -6,7 +6,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus } from "lucide-react";
-import type { Task, TaskState } from "@omp-deck/protocol";
+import type { Task, TaskState } from "@npi-deck/protocol";
 import { cn } from "@/lib/utils";
 import { TaskCard } from "./TaskCard";
 

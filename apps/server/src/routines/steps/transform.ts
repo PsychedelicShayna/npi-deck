@@ -4,7 +4,7 @@
  * step's json output for downstream steps.
  */
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import { evaluate } from "../sandbox.ts";
 import type { RunContext, StepResult } from "../types.ts";
 

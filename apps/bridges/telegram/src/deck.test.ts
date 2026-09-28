@@ -3,7 +3,7 @@
  * replays scripted server frames, pinning when a Telegram prompt settles.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ServerFrame } from "@omp-deck/protocol";
+import type { ServerFrame } from "@npi-deck/protocol";
 
 import { DeckClient } from "./deck.ts";
 

@@ -164,7 +164,7 @@ Three checks, in this order:
 
 1. **File is on disk.** `bash ls -la ~/.omp/agent/skills/<dir-name>/`
    (or `dir` on Windows). Confirm SKILL.md is present and non-empty.
-2. **omp can see it.** If the user is running omp-deck, hit
+2. **omp can see it.** If the user is running npi-deck, hit
    `GET http://127.0.0.1:8787/api/skills` and confirm the new skill
    appears with `provider: "native"`. If the user is on bare omp, ask
    them to run `omp` once and check the system prompt loaded it.

@@ -1,4 +1,4 @@
-import type { ListSkillsResponse, SkillDetailResponse } from "@omp-deck/protocol";
+import type { ListSkillsResponse, SkillDetailResponse } from "@npi-deck/protocol";
 
 const BASE = "/api";
 

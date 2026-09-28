@@ -11,7 +11,7 @@ import {
 	Trash2,
 	X,
 } from "lucide-react";
-import type { InboxItem, InboxKind } from "@omp-deck/protocol";
+import type { InboxItem, InboxKind } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { MarkdownEdit } from "@/components/MarkdownEdit";

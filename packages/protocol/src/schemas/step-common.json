@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/step-common.json",
+  "$id": "https://npi-deck.app/schemas/step-common.json",
   "title": "RoutineStepCommon",
   "description": "Fields shared by every routine step type. Step-specific schemas allOf-merge this with their own required fields.",
   "type": "object",

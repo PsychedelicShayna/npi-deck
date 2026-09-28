@@ -1,5 +1,5 @@
 /**
- * omp-deck local data store.
+ * npi-deck local data store.
  *
  * Backed by Bun's built-in sqlite (`bun:sqlite`). Single-process write model —
  * we don't expect concurrent writers because the server is one Bun process.
@@ -109,7 +109,7 @@ function seedWelcomeTaskIfEmpty(db: Database): void {
 
 	const taskId = `t_${id().toLowerCase().slice(0, 18)}`;
 	const now = nowIso();
-	const title = "Welcome to omp-deck";
+	const title = "Welcome to npi-deck";
 	const body = WELCOME_BODY;
 
 	db.transaction(() => {
@@ -127,7 +127,7 @@ function seedWelcomeTaskIfEmpty(db: Database): void {
 	log.info(`seeded welcome task (T-1) on empty kanban`);
 }
 
-const WELCOME_BODY = `Welcome to omp-deck. A few orientation pointers; mark this task done when you've finished.
+const WELCOME_BODY = `Welcome to npi-deck. A few orientation pointers; mark this task done when you've finished.
 
 ### Nav rail (left edge)
 - **Chat** — multi-session conversations with the omp agent.
@@ -149,7 +149,7 @@ Summarize the current workspace's state. Mention any active tasks (from the kanb
 recent git activity, and anything that looks blocked.
 \`\`\`
 
-Then in **Settings → Env**, set \`OMP_DECK_AUTO_START\` to \`/start\`. The deck fires it once per new session, after you subscribe.
+Then in **Settings → Env**, set \`NPI_DECK_AUTO_START\` to \`/start\`. The deck fires it once per new session, after you subscribe.
 
 ### Themes
 

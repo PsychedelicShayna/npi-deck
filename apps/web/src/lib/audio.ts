@@ -16,7 +16,7 @@
  * carries `sound?: boolean` from the server; respect that flag.
  */
 
-import type { NotificationLevel } from "@omp-deck/protocol";
+import type { NotificationLevel } from "@npi-deck/protocol";
 
 type ToneSpec = { freq: number; durationMs: number; gapMs: number };
 

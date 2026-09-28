@@ -29,7 +29,7 @@ import type {
 	RoutineLayoutEdge,
 	RoutineLayoutEdgeKind,
 	RoutineSpec,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const DEFAULT_EDGE_KIND: RoutineLayoutEdgeKind = "success";
 

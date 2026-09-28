@@ -13,7 +13,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { validateRoutineSpec } from "@omp-deck/protocol";
+import { validateRoutineSpec } from "@npi-deck/protocol";
 
 import { listTemplates, loadTemplate } from "./templates.ts";
 

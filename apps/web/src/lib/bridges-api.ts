@@ -1,4 +1,4 @@
-import type { BridgeInfo, BridgeLogsResponse, BridgeName, ListBridgesResponse } from "@omp-deck/protocol";
+import type { BridgeInfo, BridgeLogsResponse, BridgeName, ListBridgesResponse } from "@npi-deck/protocol";
 
 const BASE = "/api";
 

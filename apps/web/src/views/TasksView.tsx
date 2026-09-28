@@ -15,7 +15,7 @@ import {
 } from "@dnd-kit/sortable";
 import { Settings2 } from "lucide-react";
 
-import type { Task, TaskProject, TaskState } from "@omp-deck/protocol";
+import type { Task, TaskProject, TaskState } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Column } from "@/components/tasks/Column";

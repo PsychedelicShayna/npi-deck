@@ -10,7 +10,7 @@
 
 import type { Node, Edge } from "@xyflow/react";
 
-import type { RoutineLayoutEdgeKind, RoutineStep, RoutineStepRun } from "@omp-deck/protocol";
+import type { RoutineLayoutEdgeKind, RoutineStep, RoutineStepRun } from "@npi-deck/protocol";
 
 /**
  * Per-node payload attached to React Flow nodes. Carries the originating

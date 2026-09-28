@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import * as path from "node:path";
 
-import type { FilePathMatch, ListFilePathsResponse } from "@omp-deck/protocol";
+import type { FilePathMatch, ListFilePathsResponse } from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 

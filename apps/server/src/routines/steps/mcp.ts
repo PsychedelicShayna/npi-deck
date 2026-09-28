@@ -14,7 +14,7 @@
  * step starts working without a spec migration.
  */
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import type { StepResult } from "../types.ts";
 
 export async function executeMcpStep(

@@ -11,7 +11,7 @@
  * switch is the load-bearing reason this module exists.
  */
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 
 import {
 	AgentStepForm,

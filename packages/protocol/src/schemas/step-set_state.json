@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/step-set_state.json",
+  "$id": "https://npi-deck.app/schemas/step-set_state.json",
   "title": "RoutineStep — set_state",
   "description": "Atomically upsert key/value pairs into the routine's cross-run state. Values are templated; they may reference any prior step's output.",
   "type": "object",
   "allOf": [
-    { "$ref": "https://omp-deck.app/schemas/step-common.json" },
+    { "$ref": "https://npi-deck.app/schemas/step-common.json" },
     {
       "type": "object",
       "required": ["type", "state"],

@@ -1,4 +1,4 @@
-import type { EnvRestartTarget, EnvValueType } from "@omp-deck/protocol";
+import type { EnvRestartTarget, EnvValueType } from "@npi-deck/protocol";
 
 export interface EnvSchemaEntry {
 	key: string;
@@ -14,7 +14,7 @@ export interface EnvSchemaEntry {
 
 export const ENV_SCHEMA: EnvSchemaEntry[] = [
 	{
-		key: "OMP_DECK_HOST",
+		key: "NPI_DECK_HOST",
 		defaultValue: "127.0.0.1",
 		valueType: "string",
 		sensitive: false,
@@ -23,7 +23,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Backend bind host.",
 	},
 	{
-		key: "OMP_DECK_PORT",
+		key: "NPI_DECK_PORT",
 		defaultValue: "8787",
 		valueType: "int",
 		sensitive: false,
@@ -32,7 +32,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Backend HTTP/WebSocket port.",
 	},
 	{
-		key: "OMP_DECK_WEB_PORT",
+		key: "NPI_DECK_WEB_PORT",
 		defaultValue: "5173",
 		valueType: "int",
 		sensitive: false,
@@ -41,7 +41,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Vite dev server port.",
 	},
 	{
-		key: "OMP_DECK_DEFAULT_CWD",
+		key: "NPI_DECK_DEFAULT_CWD",
 		valueType: "path",
 		sensitive: false,
 		restartRequired: false,
@@ -49,7 +49,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Default cwd for new sessions.",
 	},
 	{
-		key: "OMP_DECK_WORKSPACES",
+		key: "NPI_DECK_WORKSPACES",
 		valueType: "string",
 		sensitive: false,
 		restartRequired: false,
@@ -57,7 +57,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Comma-separated extra workspace roots.",
 	},
 	{
-		key: "OMP_DECK_IDLE_TIMEOUT_MS",
+		key: "NPI_DECK_IDLE_TIMEOUT_MS",
 		defaultValue: "300000",
 		valueType: "int",
 		sensitive: false,
@@ -66,7 +66,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Milliseconds before unsubscribed idle sessions are reaped. 0 disables reaping.",
 	},
 	{
-		key: "OMP_DECK_WEB_DIST",
+		key: "NPI_DECK_WEB_DIST",
 		valueType: "path",
 		sensitive: false,
 		restartRequired: true,
@@ -74,7 +74,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Static web bundle directory for production serving.",
 	},
 	{
-		key: "OMP_DECK_DB_PATH",
+		key: "NPI_DECK_DB_PATH",
 		valueType: "path",
 		sensitive: false,
 		restartRequired: true,
@@ -82,15 +82,15 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "SQLite database path.",
 	},
 	{
-		key: "OMP_DECK_DB",
+		key: "NPI_DECK_DB",
 		valueType: "path",
 		sensitive: false,
 		restartRequired: true,
 		hotApply: false,
-		description: "Legacy SQLite database path alias. Prefer OMP_DECK_DB_PATH.",
+		description: "Legacy SQLite database path alias. Prefer NPI_DECK_DB_PATH.",
 	},
 	{
-		key: "OMP_DECK_DATA_DIR",
+		key: "NPI_DECK_DATA_DIR",
 		valueType: "path",
 		sensitive: false,
 		restartRequired: true,
@@ -98,13 +98,13 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Directory for deck-managed .env and audit log.",
 	},
 	{
-		key: "OMP_DECK_API_BASE",
+		key: "NPI_DECK_API_BASE",
 		defaultValue: "http://127.0.0.1:8787",
 		valueType: "string",
 		sensitive: false,
 		restartRequired: false,
 		hotApply: false,
-		description: "Loopback API base used by standalone bridge processes. If unset, bridges derive it from OMP_DECK_HOST and OMP_DECK_PORT.",
+		description: "Loopback API base used by standalone bridge processes. If unset, bridges derive it from NPI_DECK_HOST and NPI_DECK_PORT.",
 	},
 	{
 		key: "LOG_LEVEL",
@@ -175,13 +175,13 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Provider API key used by the omp SDK. Replace only; never revealed in list responses.",
 	})),
 	{
-		key: "OMP_DECK_MAINTENANCE_GATE_DISABLED",
+		key: "NPI_DECK_MAINTENANCE_GATE_DISABLED",
 		valueType: "boolean",
 		sensitive: false,
 		restartRequired: false,
 		hotApply: true,
 		description:
-			"Disable the maintenance-gate extension for new sessions when truthy. Honored by the deck (skips setting OMP_DECK_ORG_ROOT) and by the installed extension itself when present.",
+			"Disable the maintenance-gate extension for new sessions when truthy. Honored by the deck (skips setting NPI_DECK_ORG_ROOT) and by the installed extension itself when present.",
 	},
 	{
 		key: "OMP_MAINTENANCE_GATE_MIN_OP_MSGS",
@@ -212,7 +212,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Floor: wall-clock ms between consecutive fires (cross-session via disk state).",
 	},
 	{
-		key: "OMP_DECK_ORG_ROOT",
+		key: "NPI_DECK_ORG_ROOT",
 		valueType: "path",
 		sensitive: false,
 		restartRequired: false,

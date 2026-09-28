@@ -5,7 +5,7 @@
  * indicator.
  *
  * Resolution order for `buildSha`:
- *   1. `OMP_DECK_BUILD_SHA` env var (set by CI)
+ *   1. `NPI_DECK_BUILD_SHA` env var (set by CI)
  *   2. `apps/server/.buildinfo` file (`{ "sha": "...", "version": "..." }`)
  *   3. `git rev-parse HEAD` from the repo root (dev fallback)
  *   4. `null` (no git, no env, no .buildinfo)
@@ -32,7 +32,7 @@ export interface BuildInfo {
 }
 
 function resolveBuildSha(): string | null {
-	const envSha = process.env.OMP_DECK_BUILD_SHA?.trim();
+	const envSha = process.env.NPI_DECK_BUILD_SHA?.trim();
 	if (envSha) return envSha;
 
 	const here = path.dirname(fileURLToPath(import.meta.url));

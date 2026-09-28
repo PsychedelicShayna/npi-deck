@@ -25,7 +25,7 @@ export function loadTelegramBridgeConfig(): TelegramBridgeConfig {
 		throw new Error("TELEGRAM_ALLOWED_USERS must contain at least one numeric Telegram user id");
 	}
 
-	const deckApiBase = normalizeBaseUrl(process.env.OMP_DECK_API_BASE?.trim() || `http://127.0.0.1:${deck.port}`);
+	const deckApiBase = normalizeBaseUrl(process.env.NPI_DECK_API_BASE?.trim() || `http://127.0.0.1:${deck.port}`);
 	const deckWsUrl = toWsUrl(deckApiBase);
 	const dbPath = path.resolve(process.env.TELEGRAM_BRIDGE_DB_PATH?.trim() || path.join(getDataDir(), "telegram-bridge.db"));
 
@@ -56,7 +56,7 @@ function parseAllowedUsers(raw: string | undefined): Set<string> {
 function normalizeBaseUrl(raw: string): string {
 	const url = new URL(raw);
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new Error(`OMP_DECK_API_BASE must be http or https, got ${url.protocol}`);
+		throw new Error(`NPI_DECK_API_BASE must be http or https, got ${url.protocol}`);
 	}
 	url.pathname = url.pathname.replace(/\/+$/, "");
 	url.search = "";

@@ -21,7 +21,7 @@ import type {
 	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
@@ -565,7 +565,7 @@ export class InProcessSessionHandle implements SessionHandle {
 	 * for cancel/edit targeting, so client and server agree without a
 	 * separate id mapping table.
 	 */
-	private shadowQueue: import("@omp-deck/protocol").QueuedPromptWire[] = [];
+	private shadowQueue: import("@npi-deck/protocol").QueuedPromptWire[] = [];
 
 	constructor(args: {
 		session: AgentSession;
@@ -679,13 +679,13 @@ export class InProcessSessionHandle implements SessionHandle {
 		return snap;
 	}
 
-	getContextUsage(): import("@omp-deck/protocol").ContextUsage | undefined {
+	getContextUsage(): import("@npi-deck/protocol").ContextUsage | undefined {
 		// The SDK exposes `session.getContextUsage()` returning
 		// `{ tokens: number | null, contextWindow: number, percent: number | null }`
 		// or `undefined` when the model has no declared window. We pass it through
 		// verbatim — the deck's protocol type mirrors the SDK shape.
 		const s = this.session as unknown as {
-			getContextUsage?: () => import("@omp-deck/protocol").ContextUsage | undefined;
+			getContextUsage?: () => import("@npi-deck/protocol").ContextUsage | undefined;
 		};
 		if (typeof s.getContextUsage !== "function") return undefined;
 		try {
@@ -806,7 +806,7 @@ export class InProcessSessionHandle implements SessionHandle {
 
 	async prompt(
 		text: string,
-		opts?: { streamingBehavior?: "steer" | "followUp"; images?: import("@omp-deck/protocol").ImageAttachment[] },
+		opts?: { streamingBehavior?: "steer" | "followUp"; images?: import("@npi-deck/protocol").ImageAttachment[] },
 	): Promise<void> {
 		// Snapshot the streaming flag BEFORE calling the SDK so we can tell
 		// whether the SDK queued this prompt (was streaming) or ran it immediately.
@@ -829,7 +829,7 @@ export class InProcessSessionHandle implements SessionHandle {
 			// slash/template expansion) so head-drain matching survives expansion.
 			// Falls back to the raw text when the SDK doesn't expose getQueuedMessages.
 			const storedText = this.readLastQueuedText(behavior) ?? text;
-			const entry: import("@omp-deck/protocol").QueuedPromptWire = {
+			const entry: import("@npi-deck/protocol").QueuedPromptWire = {
 				id: queuedId,
 				text: storedText,
 				behavior,
@@ -859,7 +859,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		return typeof s.queuedMessageCount === "number" ? s.queuedMessageCount : 0;
 	}
 
-	getQueueSnapshot(): import("@omp-deck/protocol").QueuedPromptWire[] {
+	getQueueSnapshot(): import("@npi-deck/protocol").QueuedPromptWire[] {
 		return [...this.shadowQueue];
 	}
 
@@ -892,7 +892,7 @@ export class InProcessSessionHandle implements SessionHandle {
 	async editQueuedById(
 		id: string,
 		text: string,
-		images?: import("@omp-deck/protocol").ImageAttachment[],
+		images?: import("@npi-deck/protocol").ImageAttachment[],
 	): Promise<boolean> {
 		const idx = this.shadowQueue.findIndex((q) => q.id === id);
 		if (idx < 0) return false;
@@ -915,7 +915,7 @@ export class InProcessSessionHandle implements SessionHandle {
 	 */
 	private async rebuildQueueExcept(
 		targetIdx: number,
-		replace: { text: string; images?: import("@omp-deck/protocol").ImageAttachment[] } | undefined,
+		replace: { text: string; images?: import("@npi-deck/protocol").ImageAttachment[] } | undefined,
 	): Promise<void> {
 		const queueApi = this.session as unknown as {
 			popLastQueuedMessage?: () => string | undefined;
@@ -926,12 +926,12 @@ export class InProcessSessionHandle implements SessionHandle {
 		}
 		// Capture survivors with original ids preserved. The edited entry
 		// keeps its id so the deck bubble doesn't re-key.
-		const survivors: import("@omp-deck/protocol").QueuedPromptWire[] = [];
+		const survivors: import("@npi-deck/protocol").QueuedPromptWire[] = [];
 		for (let i = 0; i < this.shadowQueue.length; i++) {
 			const entry = this.shadowQueue[i]!;
 			if (i === targetIdx) {
 				if (!replace) continue;
-				const next: import("@omp-deck/protocol").QueuedPromptWire = {
+				const next: import("@npi-deck/protocol").QueuedPromptWire = {
 					id: entry.id,
 					text: replace.text,
 					behavior: entry.behavior,
@@ -1002,13 +1002,13 @@ export class InProcessSessionHandle implements SessionHandle {
 	 * keep their id; any extras get a fresh uuid.
 	 */
 	private resyncShadowFromSdk(
-		previous: import("@omp-deck/protocol").QueuedPromptWire[],
-	): import("@omp-deck/protocol").QueuedPromptWire[] {
+		previous: import("@npi-deck/protocol").QueuedPromptWire[],
+	): import("@npi-deck/protocol").QueuedPromptWire[] {
 		const q = this.readQueuedTextsByBehavior();
 		const ordered: { text: string; behavior: "steer" | "followUp" }[] = [];
 		for (const t of q.steering) ordered.push({ text: t, behavior: "steer" });
 		for (const t of q.followUp) ordered.push({ text: t, behavior: "followUp" });
-		const out: import("@omp-deck/protocol").QueuedPromptWire[] = [];
+		const out: import("@npi-deck/protocol").QueuedPromptWire[] = [];
 		for (let i = 0; i < ordered.length; i++) {
 			const prev = previous[i];
 			const e = ordered[i]!;

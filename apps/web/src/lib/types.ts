@@ -6,7 +6,7 @@
  * raw SDK events.
  */
 
-import type { ModelRef, PendingPlanApprovalWire, PlanModeContextWire } from "@omp-deck/protocol";
+import type { ModelRef, PendingPlanApprovalWire, PlanModeContextWire } from "@npi-deck/protocol";
 
 // ─── Content blocks ────────────────────────────────────────────────────────
 
@@ -225,7 +225,7 @@ export interface SessionUi {
 	 * declare a window. Updated by the bridge's synthetic `context_usage` event
 	 * after every turn-end / compaction.
 	 */
-	contextUsage?: import("@omp-deck/protocol").ContextUsage;
+	contextUsage?: import("@npi-deck/protocol").ContextUsage;
 
 	/** Latest provider error displayed in chrome (cleared on next turn_start). */
 	lastError?: string;

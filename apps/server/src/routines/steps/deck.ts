@@ -1,4 +1,4 @@
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 
 import { createInbox, getInbox, listInbox, updateInbox } from "../../db/inbox.ts";
 import {

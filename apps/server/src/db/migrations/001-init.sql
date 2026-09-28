@@ -1,5 +1,5 @@
 -- 001-init.sql
--- Initial schema for omp-deck's local data: tasks, configurable task states,
+-- Initial schema for npi-deck's local data: tasks, configurable task states,
 -- inbox items, cron routines, and routine run history.
 --
 -- Conventions

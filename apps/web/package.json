@@ -1,5 +1,5 @@
 {
-	"name": "@omp-deck/web",
+	"name": "@npi-deck/web",
 	"version": "0.6.1",
 	"private": true,
 	"type": "module",
@@ -15,7 +15,7 @@
 		"@dnd-kit/utilities": "^3.2.2",
 		"@fontsource/ibm-plex-mono": "^5.2.7",
 		"@fontsource/ibm-plex-sans": "^5.2.8",
-		"@omp-deck/protocol": "workspace:*",
+		"@npi-deck/protocol": "workspace:*",
 		"@xyflow/react": "^12.10.2",
 		"clsx": "^2.1.1",
 		"highlight.js": "^11.10.0",

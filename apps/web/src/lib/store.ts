@@ -11,7 +11,7 @@ import type {
 	SessionSummary,
 	ServerFrame,
 	WorkspaceEntry,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 /**
  * In-app notification record. Mirrors the wire frame plus client-side
@@ -161,7 +161,7 @@ interface StoreState {
 	refreshSessions(cwd?: string): Promise<void>;
 	createSession(opts: { cwd: string; resumeFromPath?: string }): Promise<string>;
 	selectSession(id: string): void;
-	sendPrompt(text: string, images?: import("@omp-deck/protocol").ImageAttachment[]): void;
+	sendPrompt(text: string, images?: import("@npi-deck/protocol").ImageAttachment[]): void;
 	abort(): void;
 	/** Drop every queued (followUp / steering) prompt for the active session.
 	 *  Server echoes a `queue_cleared` session event that reconciles
@@ -171,7 +171,7 @@ interface StoreState {
 	 *  a `queue_state` session event with the new ordered queue. */
 	cancelQueued(queuedId: string): void;
 	/** Edit a queued prompt's text (and optionally images) in place. */
-	editQueued(queuedId: string, text: string, images?: import("@omp-deck/protocol").ImageAttachment[]): void;
+	editQueued(queuedId: string, text: string, images?: import("@npi-deck/protocol").ImageAttachment[]): void;
 	disposeSession(id: string): Promise<void>;
 	renameSession(id: string, name: string): Promise<void>;
 	toggleAllToolCards(): void;
@@ -224,8 +224,8 @@ export const useStore = create<StoreState>()(
 		// Hydrate chrome state from localStorage at module init so first render
 		// matches the user's last preference — but only on desktop. On mobile the
 		// panels are overlay drawers and always start closed.
-		sidebarOpen: readChromeOpen("omp-deck:sidebar-open", true),
-		inspectorOpen: readChromeOpen("omp-deck:inspector-open", false),
+		sidebarOpen: readChromeOpen("npi-deck:sidebar-open", true),
+		inspectorOpen: readChromeOpen("npi-deck:inspector-open", false),
 
 		async bootstrap() {
 			get().connect();
@@ -381,7 +381,7 @@ export const useStore = create<StoreState>()(
 			// on the page from a wider screen.
 			if (isDesktopViewport()) {
 				try {
-					localStorage.setItem("omp-deck:sidebar-open", open ? "1" : "0");
+					localStorage.setItem("npi-deck:sidebar-open", open ? "1" : "0");
 				} catch {}
 			}
 			set({ sidebarOpen: open });
@@ -390,7 +390,7 @@ export const useStore = create<StoreState>()(
 		setInspectorOpen(open) {
 			if (isDesktopViewport()) {
 				try {
-					localStorage.setItem("omp-deck:inspector-open", open ? "1" : "0");
+					localStorage.setItem("npi-deck:inspector-open", open ? "1" : "0");
 				} catch {}
 			}
 			set({ inspectorOpen: open });

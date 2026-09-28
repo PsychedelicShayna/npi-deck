@@ -28,7 +28,7 @@ import type {
 	ProviderAuthState,
 	ProviderInfo,
 	StartOAuthResponse,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { broadcastBus } from "./broadcast-bus.ts";
 import { getDeckAuthStorage, getDeckModelRegistry } from "./auth-singleton.ts";

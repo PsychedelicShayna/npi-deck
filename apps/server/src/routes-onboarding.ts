@@ -23,7 +23,7 @@ import type {
 	OnboardingState,
 	SeedKbSystemRequest,
 	SeedKbSystemResponse,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { resolveKbRoot } from "./kb-service.ts";
 import { logger } from "./log.ts";
@@ -43,7 +43,7 @@ const log = logger("routes:onboarding");
  * starter file so the first-time visitor sees what a kb article looks
  * like (frontmatter shape + wikilink convention) and where to point new
  * content. Inlined here so the wizard can scaffold at any path the user
- * chooses, not just the server's resolved `OMP_DECK_KB_ROOT`.
+ * chooses, not just the server's resolved `NPI_DECK_KB_ROOT`.
  */
 const KB_README_BODY = [
 	"---",
@@ -53,7 +53,7 @@ const KB_README_BODY = [
 	"",
 	"# Welcome to your KB",
 	"",
-	"This is a fresh knowledge base scaffolded by omp-deck onboarding. The deck",
+	"This is a fresh knowledge base scaffolded by npi-deck onboarding. The deck",
 	"reads this folder as a Karpathy-style llm-wiki — hand-tended markdown with",
 	"YAML frontmatter and `[[wikilinks]]` between articles.",
 	"",
@@ -108,7 +108,7 @@ const KB_SYSTEM_STUBS: ReadonlyArray<{ name: string; body: string }> = [
 			"",
 			"# Deck orientation",
 			"",
-			"Quick reference for what omp-deck is and the local API surface.",
+			"Quick reference for what npi-deck is and the local API surface.",
 			"",
 			"## Capabilities",
 			"",
@@ -205,7 +205,7 @@ export function buildOnboardingRouter(): Hono {
 		// Top-level README — same intent as kb-service.initialize() but writes
 		// to whatever path the caller passes, not the server's resolved root.
 		// (Lets the wizard scaffold at a user-chosen location without first
-		// restarting the server to repoint OMP_DECK_KB_ROOT.)
+		// restarting the server to repoint NPI_DECK_KB_ROOT.)
 		const readmePath = path.join(kbRoot, "README.md");
 		if (!existsSync(readmePath)) {
 			try {

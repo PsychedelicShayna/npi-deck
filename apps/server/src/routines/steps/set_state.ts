@@ -3,7 +3,7 @@
  * templated; objects/arrays preserved through render() value-mode.
  */
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import { render } from "../template.ts";
 import { saveState } from "../state.ts";
 import type { RunContext, StepResult } from "../types.ts";

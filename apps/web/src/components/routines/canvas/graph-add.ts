@@ -19,7 +19,7 @@ import type {
 	RoutineLayoutNode,
 	RoutineSpec,
 	RoutineStep,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { insertStep } from "../spec-yaml";
 import { CANVAS_DEFAULT_X, CANVAS_NODE_VERTICAL_GAP } from "./graph-types";

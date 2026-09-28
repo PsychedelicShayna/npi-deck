@@ -13,7 +13,7 @@ import { Cron } from "croner";
 import { parse as parseYaml } from "yaml";
 import * as path from "node:path";
 
-import type { Routine, RoutineActionKind, RoutineSpec, RoutineTrigger } from "@omp-deck/protocol";
+import type { Routine, RoutineActionKind, RoutineSpec, RoutineTrigger } from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 import {

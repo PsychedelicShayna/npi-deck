@@ -12,7 +12,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import type { RoutineSpec } from "@omp-deck/protocol";
+import type { RoutineSpec } from "@npi-deck/protocol";
 
 import { parseSpec, replaceStep, stringifySpec } from "./spec-yaml";
 

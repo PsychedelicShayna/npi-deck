@@ -4,7 +4,7 @@
  * request completed (Telegram's per-chat queue waits on it).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ServerFrame } from "@omp-deck/protocol";
+import type { ServerFrame } from "@npi-deck/protocol";
 
 import { WsHub } from "./ws.ts";
 

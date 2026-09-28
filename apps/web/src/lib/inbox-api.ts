@@ -6,7 +6,7 @@ import type {
 	PromoteInboxItemRequest,
 	PromoteInboxItemResponse,
 	UpdateInboxItemRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 

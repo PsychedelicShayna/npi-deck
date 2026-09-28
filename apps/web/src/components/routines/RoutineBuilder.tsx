@@ -18,7 +18,7 @@ import {
 	type RoutineStep,
 	type RoutineTrigger,
 	type ValidationError,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { routinesApi } from "@/lib/routines-api";
 import { formatDurationMs } from "@/lib/utils";

@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 function bootDb(): void {
-	dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-deck-webhook-db-"));
+	dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "npi-deck-webhook-db-"));
 	openDb({ path: path.join(dbDir, "deck.db") });
 }
 

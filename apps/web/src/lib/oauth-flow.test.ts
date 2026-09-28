@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ServerFrame } from "@omp-deck/protocol";
+import type { ServerFrame } from "@npi-deck/protocol";
 
 import { createOAuthFrameGate, type OAuthFlowFrame } from "./oauth-flow";
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Search, X } from "lucide-react";
-import type { ModelInfo } from "@omp-deck/protocol";
+import type { ModelInfo } from "@npi-deck/protocol";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";

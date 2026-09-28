@@ -9,7 +9,7 @@ import { ExternalLink, Plug } from "lucide-react";
  * through the chat's `/mcp install` command. The dedicated install UI lands
  * in V1.5; this view documents the path in the meantime.
  *
- * See `omp-deck/docs/proposals/routines-v1-plan.md` §5 for the design.
+ * See `npi-deck/docs/proposals/routines-v1-plan.md` §5 for the design.
  */
 export function IntegrationsView() {
 	return (

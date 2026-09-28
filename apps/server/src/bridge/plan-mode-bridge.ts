@@ -12,7 +12,7 @@
  * `enter()` rejects with PlanModeUnavailableError so the UI's toggle shows a
  * clear error instead of half-entering a mode NeoPi can't complete.
  */
-import type { PendingPlanApprovalWire, PlanModeContextWire, ServerFrame } from "@omp-deck/protocol";
+import type { PendingPlanApprovalWire, PlanModeContextWire, ServerFrame } from "@npi-deck/protocol";
 
 import type { PlanApprovalResponse } from "./types.ts";
 

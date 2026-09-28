@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { ArrowLeft, Play, RefreshCcw, X } from "lucide-react";
-import type { Routine, RoutineRun, RoutineStepRun, RoutineStepStatus } from "@omp-deck/protocol";
+import type { Routine, RoutineRun, RoutineStepRun, RoutineStepStatus } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { routinesApi } from "@/lib/routines-api";

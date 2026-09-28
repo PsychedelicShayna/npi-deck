@@ -1,6 +1,6 @@
 # `/start` command template
 
-omp-deck ships with `OMP_DECK_AUTO_START` **disabled by default**. If you want
+npi-deck ships with `NPI_DECK_AUTO_START` **disabled by default**. If you want
 the agent to greet you with a workspace summary every time you open a fresh
 chat, define `/start` as a user-global slash command and turn the env var on.
 
@@ -39,21 +39,21 @@ people use:
 
 ## Step 2 — Turn on auto-start
 
-In the deck: **Settings → Env → `OMP_DECK_AUTO_START`**, replace with `/start`,
+In the deck: **Settings → Env → `NPI_DECK_AUTO_START`**, replace with `/start`,
 Save. Hot-applied — no restart needed.
 
 Or via env:
 
 ```sh
-OMP_DECK_AUTO_START=/start bun run dev
+NPI_DECK_AUTO_START=/start bun run dev
 ```
 
 Or write to the managed `.env`:
 
 ```sh
-# ~/.config/omp-deck/.env  (Linux/macOS)
-# %LOCALAPPDATA%\omp-deck\.env  (Windows)
-OMP_DECK_AUTO_START=/start
+# ~/.config/npi-deck/.env  (Linux/macOS)
+# %LOCALAPPDATA%\npi-deck\.env  (Windows)
+NPI_DECK_AUTO_START=/start
 ```
 
 ## Step 3 — Verify
@@ -61,7 +61,7 @@ OMP_DECK_AUTO_START=/start
 Click "+ new session" in the sidebar. The composer fires `/start` after the
 WS subscription lands. You'll see a streaming response within a few seconds.
 
-If nothing fires: the `OMP_DECK_AUTO_START` value isn't visible to the deck
+If nothing fires: the `NPI_DECK_AUTO_START` value isn't visible to the deck
 process. Check Settings → Env — the "Source" column should read `env-file` or
 `process env` (not `unset`).
 
@@ -74,7 +74,7 @@ expand the slash command. Confirm `start.md` is in `~/.omp/agent/commands/`
 Auto-start can pass arguments to the slash command:
 
 ```sh
-OMP_DECK_AUTO_START="/start --focus 'continue last work'"
+NPI_DECK_AUTO_START="/start --focus 'continue last work'"
 ```
 
 Inside `start.md`, `$ARGUMENTS` expands to whatever follows the command name.
@@ -86,7 +86,7 @@ See the omp SDK's slash-command docs for the full templating reference.
 Set the env var to empty, `0`, or `false`. All three disable it.
 
 ```sh
-OMP_DECK_AUTO_START= bun run dev
+NPI_DECK_AUTO_START= bun run dev
 ```
 
 The Settings UI shows the value as `unset` when empty.

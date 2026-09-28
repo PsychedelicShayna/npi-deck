@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ContextUsage } from "@omp-deck/protocol";
+import type { ContextUsage } from "@npi-deck/protocol";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 

@@ -25,7 +25,7 @@ import type {
 	RoutineLayoutEdge,
 	RoutineLayoutEdgeKind,
 	RoutineSpec,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import {
 	CANVAS_DEFAULT_X,

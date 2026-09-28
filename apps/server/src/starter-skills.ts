@@ -10,7 +10,7 @@
  *
  * Rationale: omp doesn't ship a first-party authoring skill, and the upstream
  * `skill-creator` is Claude-Code-bound. Bundling our own native authoring
- * skill removes the bootstrapping gap — a fresh `omp` install with omp-deck
+ * skill removes the bootstrapping gap — a fresh `omp` install with npi-deck
  * gets `/skill:create-skill` immediately, no marketplace dance required.
  *
  * Path resolution:
@@ -19,9 +19,9 @@
  *   workspace's `starter-skills/`.
  * - In bundled prod the resolution still works as long as the build copies
  *   `starter-skills/` next to the bundled entry point (or the env var
- *   `OMP_DECK_STARTER_SKILLS_DIR` overrides). Both knobs are checked.
+ *   `NPI_DECK_STARTER_SKILLS_DIR` overrides). Both knobs are checked.
  *
- * Disable with `OMP_DECK_INSTALL_STARTER_SKILLS=0`.
+ * Disable with `NPI_DECK_INSTALL_STARTER_SKILLS=0`.
  */
 
 import { existsSync } from "node:fs";
@@ -39,8 +39,8 @@ export interface StarterInstallResult {
 }
 
 export async function installStarterSkills(): Promise<StarterInstallResult> {
-	if (process.env.OMP_DECK_INSTALL_STARTER_SKILLS === "0") {
-		log.info("starter skills install disabled via OMP_DECK_INSTALL_STARTER_SKILLS=0");
+	if (process.env.NPI_DECK_INSTALL_STARTER_SKILLS === "0") {
+		log.info("starter skills install disabled via NPI_DECK_INSTALL_STARTER_SKILLS=0");
 		return { installed: [], skipped: [] };
 	}
 
@@ -103,7 +103,7 @@ export async function installStarterSkills(): Promise<StarterInstallResult> {
 
 function resolveStarterSourceDir(): string | undefined {
 	// Explicit override wins.
-	const override = process.env.OMP_DECK_STARTER_SKILLS_DIR;
+	const override = process.env.NPI_DECK_STARTER_SKILLS_DIR;
 	if (override && existsSync(override) && isDirSync(override)) return override;
 
 	// Walk up from this file looking for a sibling `starter-skills/` dir.

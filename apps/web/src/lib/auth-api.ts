@@ -3,7 +3,7 @@ import type {
 	OAuthManualCodeRequest,
 	OAuthPromptReplyRequest,
 	StartOAuthResponse,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api/auth/oauth";
 

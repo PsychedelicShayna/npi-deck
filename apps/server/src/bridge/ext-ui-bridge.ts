@@ -30,7 +30,7 @@ import type {
 	ExtensionWidgetOptions,
 	TerminalInputHandler,
 } from "@oh-my-pi/pi-coding-agent/extensibility/extensions";
-import type { ExtUiDialogResponse, ServerFrame } from "@omp-deck/protocol";
+import type { ExtUiDialogResponse, ServerFrame } from "@npi-deck/protocol";
 
 import { logger } from "../log.ts";
 

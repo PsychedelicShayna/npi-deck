@@ -35,7 +35,7 @@ apps/bridges/telegram (standalone Bun process — only when started)
   event stream; reduces events into a structured `SessionUi` in
   `lib/reducer.ts`.
 - **`apps/bridges/telegram`** — Standalone Bun process. Independent
-  package, depends on `@omp-deck/protocol` for shared types.
+  package, depends on `@npi-deck/protocol` for shared types.
 - **`packages/protocol`** — Dep-free shared types (REST + WS frames + DB
   shapes). The contract layer.
 
@@ -122,7 +122,7 @@ Tables:
 - `sequences` — monotonic counters (currently just `tasks`).
 
 On first boot against an empty `tasks` table the deck seeds a single
-"Welcome to omp-deck" backlog task — see `apps/server/src/db/index.ts`
+"Welcome to npi-deck" backlog task — see `apps/server/src/db/index.ts`
 `seedWelcomeTaskIfEmpty`.
 
 ## Theming
@@ -146,7 +146,7 @@ Chat is fully store-driven because it needs cross-session state.
 ## Build outputs
 
 - `apps/web/dist/` — production static bundle. Served by the deck server
-  when `OMP_DECK_WEB_DIST` resolves to it (auto-detected).
+  when `NPI_DECK_WEB_DIST` resolves to it (auto-detected).
 - `apps/server/dist/` — bundled server (`bun build --target=bun`). Dev
   mode (`bun run dev` with `bun --hot`) is the supported workflow during
   iteration; production deployments run the bundle via `bun start`.

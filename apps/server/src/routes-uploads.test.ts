@@ -24,7 +24,7 @@ afterEach(async () => {
 });
 
 async function boot(): Promise<string> {
-	workdir = await fs.mkdtemp(path.join(os.tmpdir(), "omp-deck-uploads-"));
+	workdir = await fs.mkdtemp(path.join(os.tmpdir(), "npi-deck-uploads-"));
 	return workdir;
 }
 

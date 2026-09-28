@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/trigger-webhook.json",
+  "$id": "https://npi-deck.app/schemas/trigger-webhook.json",
   "title": "RoutineTrigger — webhook",
   "description": "HMAC-verified webhook trigger. Mounted at /hooks/<path> on the deck server.",
   "type": "object",

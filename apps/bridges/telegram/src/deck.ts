@@ -1,4 +1,4 @@
-import type { CreateSessionRequest, CreateSessionResponse, ImageAttachment, ServerFrame } from "@omp-deck/protocol";
+import type { CreateSessionRequest, CreateSessionResponse, ImageAttachment, ServerFrame } from "@npi-deck/protocol";
 
 export class SessionNotActiveError extends Error {
 	constructor(sessionId: string) {

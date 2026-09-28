@@ -10,7 +10,7 @@
  * Anything (create, write, rename, delete) under any of these fires a debounced
  * `skills_changed` broadcast so the UI refetches without polling.
  *
- * Gated by `OMP_DECK_WATCH_SKILLS` (default on). Set `=0` to disable when
+ * Gated by `NPI_DECK_WATCH_SKILLS` (default on). Set `=0` to disable when
  * running on filesystems that misbehave under recursive watch (some VPNs,
  * network drives, OneDrive shadowing). Per-root watch errors degrade to no-op
  * for that root only; the rest keep working.
@@ -38,8 +38,8 @@ const log = logger("skills:watcher");
 const DEBOUNCE_MS = 250;
 
 export function startSkillsWatcher(config: Config): () => void {
-	if (process.env.OMP_DECK_WATCH_SKILLS === "0") {
-		log.info("skills watcher disabled via OMP_DECK_WATCH_SKILLS=0");
+	if (process.env.NPI_DECK_WATCH_SKILLS === "0") {
+		log.info("skills watcher disabled via NPI_DECK_WATCH_SKILLS=0");
 		return () => {};
 	}
 

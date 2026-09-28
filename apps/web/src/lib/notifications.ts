@@ -16,8 +16,8 @@ import { useEffect, useState } from "react";
 import { playNotificationTone, unlockAudio } from "./audio";
 import { useStore, type NotificationItem } from "./store";
 
-const AUDIO_PREF_KEY = "omp-deck:notifications:audio-enabled";
-const BANNER_DISMISSED_KEY = "omp-deck:notifications:banner-dismissed";
+const AUDIO_PREF_KEY = "npi-deck:notifications:audio-enabled";
+const BANNER_DISMISSED_KEY = "npi-deck:notifications:banner-dismissed";
 
 /** Web Notification API permission, narrowed to the values we read. */
 export type NotificationPermissionState = "default" | "granted" | "denied" | "unsupported";

@@ -17,8 +17,8 @@
  * - "Edit canvas" closes the dialog without saving (`onCancel`).
  *
  * Opt-out:
- * - The parent (RoutineBuilder) checks `import.meta.env.OMP_DECK_CANVAS_SKIP_PREVIEW`
- *   AND `localStorage["omp-deck:canvas-skip-preview"]`. When either is "1",
+ * - The parent (RoutineBuilder) checks `import.meta.env.NPI_DECK_CANVAS_SKIP_PREVIEW`
+ *   AND `localStorage["npi-deck:canvas-skip-preview"]`. When either is "1",
  *   the dialog is bypassed entirely and save commits directly. This component
  *   doesn't read those settings itself — the policy lives in the caller.
  */
@@ -176,9 +176,9 @@ function DiffLineRow({ line }: { line: DiffLine }): JSX.Element {
 /**
  * Pure helper extracted for testing. Returns true when the parent should
  * bypass the dialog. Reads:
- *  - `import.meta.env.OMP_DECK_CANVAS_SKIP_PREVIEW` (vite build-time, requires
- *    the `envPrefix` to include `OMP_DECK_`)
- *  - `localStorage["omp-deck:canvas-skip-preview"]` (runtime opt-out)
+ *  - `import.meta.env.NPI_DECK_CANVAS_SKIP_PREVIEW` (vite build-time, requires
+ *    the `envPrefix` to include `NPI_DECK_`)
+ *  - `localStorage["npi-deck:canvas-skip-preview"]` (runtime opt-out)
  *
  * Either value of "1" skips the preview.
  */
@@ -187,13 +187,13 @@ export function shouldSkipSavePreview(): boolean {
 		// Vite injects `import.meta.env` at build time. Cast through unknown to
 		// keep this file dependency-free of the vite types module.
 		const envRaw = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
-		if (envRaw?.OMP_DECK_CANVAS_SKIP_PREVIEW === "1") return true;
+		if (envRaw?.NPI_DECK_CANVAS_SKIP_PREVIEW === "1") return true;
 	} catch {
 		// Build-time env unavailable (test runtime); fall through.
 	}
 	try {
 		if (typeof localStorage !== "undefined") {
-			if (localStorage.getItem("omp-deck:canvas-skip-preview") === "1") return true;
+			if (localStorage.getItem("npi-deck:canvas-skip-preview") === "1") return true;
 		}
 	} catch {
 		// localStorage can throw in private-browsing or SSR; ignore.

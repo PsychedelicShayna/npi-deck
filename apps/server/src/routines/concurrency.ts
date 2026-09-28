@@ -11,7 +11,7 @@
  * along with (for cancel-previous) the AbortController of the in-flight run.
  */
 
-import type { RoutineConcurrency } from "@omp-deck/protocol";
+import type { RoutineConcurrency } from "@npi-deck/protocol";
 
 interface ActiveRun {
 	runId: string;

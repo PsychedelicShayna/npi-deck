@@ -18,7 +18,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import type { RoutineSpec, RoutineStep } from "@omp-deck/protocol";
+import type { RoutineSpec, RoutineStep } from "@npi-deck/protocol";
 
 import { compileGraph } from "./graph-compile";
 import { applyAddNodeAtBottom } from "./graph-add";

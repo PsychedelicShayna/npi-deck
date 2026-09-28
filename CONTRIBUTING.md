@@ -1,6 +1,6 @@
-# Contributing to omp-deck
+# Contributing to npi-deck
 
-Thanks for your interest. omp-deck is a small enough project that there is no
+Thanks for your interest. npi-deck is a small enough project that there is no
 heavyweight process — but a few conventions keep the codebase tidy.
 
 ## Repo layout
@@ -46,14 +46,14 @@ The fix is a parallel checkout via `git worktree`, env-isolated:
 
 ```sh
 # from the existing checkout
-git worktree add ../omp-deck-dev -b dev/<feature>
-cd ../omp-deck-dev
+git worktree add ../npi-deck-dev -b dev/<feature>
+cd ../npi-deck-dev
 bun install
 cat > .env <<'EOF'
-OMP_DECK_PORT=8889
-OMP_DECK_WEB_PORT=5273
-OMP_DECK_DB_PATH=$PWD/apps/server/data/deck.dev.db
-OMP_DECK_DATA_DIR=$PWD/.deck-data
+NPI_DECK_PORT=8889
+NPI_DECK_WEB_PORT=5273
+NPI_DECK_DB_PATH=$PWD/apps/server/data/deck.dev.db
+NPI_DECK_DATA_DIR=$PWD/.deck-data
 EOF
 bun run dev      # dev deck lives at http://127.0.0.1:5273
 ```
@@ -63,10 +63,10 @@ state separation:
 
 | Concern                  | prod tree            | dev worktree                     |
 | ------------------------ | -------------------- | -------------------------------- |
-| Server port              | `OMP_DECK_PORT=8787` | `OMP_DECK_PORT=8889`             |
-| Web (Vite) port          | `5173`               | `OMP_DECK_WEB_PORT=5273`         |
+| Server port              | `NPI_DECK_PORT=8787` | `NPI_DECK_PORT=8889`             |
+| Web (Vite) port          | `5173`               | `NPI_DECK_WEB_PORT=5273`         |
 | Kanban / inbox / routines| `deck.db`            | `deck.dev.db`                    |
-| Managed `.env`, audit log| default `DATA_DIR`   | `OMP_DECK_DATA_DIR=.deck-data`   |
+| Managed `.env`, audit log| default `DATA_DIR`   | `NPI_DECK_DATA_DIR=.deck-data`   |
 | OAuth credentials + sessions | `~/.omp/agent/`  | same by default; set `OMP_AGENT_DIR` to isolate when testing the OAuth flow itself |
 
 Leave `OMP_AGENT_DIR` unset for routine dev so you don't re-login to Claude /
@@ -74,7 +74,7 @@ Codex on every dev iteration. Set it to a fresh dir only when the change
 under test touches `auth.db` and you need to repeatedly clear the
 no-credentials state.
 
-Merge the branch back when ready; `git worktree remove ../omp-deck-dev`
+Merge the branch back when ready; `git worktree remove ../npi-deck-dev`
 tears down the tree but keeps the branch and its commits.
 
 ### What survives vs. dies on restart
@@ -92,7 +92,7 @@ now" deck only restarts when **you** decide to merge and bounce it.
 ## Code quality
 
 - `bun run typecheck` must pass before opening a PR.
-- `bun run --filter '@omp-deck/web' build` must build clean.
+- `bun run --filter '@npi-deck/web' build` must build clean.
 - New REST routes go through `packages/protocol` types — no `any` at the wire.
 - New SDK touchpoints go through `apps/server/src/bridge` — the route layer
   must not import `@oh-my-pi/pi-coding-agent` directly.

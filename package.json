@@ -1,5 +1,5 @@
 {
-	"name": "omp-deck",
+	"name": "npi-deck",
 	"version": "0.6.1",
 	"private": true,
 	"description": "Cockpit web UI for the omp (oh-my-pi) coding agent — multi-session chat, kanban, cron routines, inbox, messaging bridges, and a marketplace browser. Designed to be served loopback-only behind a Tailscale gate or SSH tunnel.",
@@ -16,20 +16,20 @@
 		"packages/*"
 	],
 	"scripts": {
-		"dev": "bun run --filter '@omp-deck/server' --filter '@omp-deck/web' dev",
-		"dev:server": "bun run --filter '@omp-deck/server' dev",
-		"dev:web": "bun run --filter '@omp-deck/web' dev",
-		"dev:telegram": "bun run --filter '@omp-deck/telegram-bridge' dev",
-		"build": "bun run --filter '@omp-deck/web' build && bun run --filter '@omp-deck/server' build",
-		"start": "bun run --filter '@omp-deck/server' start",
-		"typecheck": "bun run --filter='@omp-deck/*' typecheck",
+		"dev": "bun run --filter '@npi-deck/server' --filter '@npi-deck/web' dev",
+		"dev:server": "bun run --filter '@npi-deck/server' dev",
+		"dev:web": "bun run --filter '@npi-deck/web' dev",
+		"dev:telegram": "bun run --filter '@npi-deck/telegram-bridge' dev",
+		"build": "bun run --filter '@npi-deck/web' build && bun run --filter '@npi-deck/server' build",
+		"start": "bun run --filter '@npi-deck/server' start",
+		"typecheck": "bun run --filter='@npi-deck/*' typecheck",
 		"clean": "rm -rf apps/*/dist apps/*/node_modules apps/bridges/*/node_modules packages/*/node_modules node_modules"
 	},
 	"engines": {
 		"bun": ">=1.3.14"
 	},
 	"dependencies": {
-		"@omp-deck/protocol": "0.6.1",
+		"@npi-deck/protocol": "0.6.1",
 		"ajv": "^8.17.1",
 		"ajv-formats": "^3.0.1",
 		"croner": "^10.0.1",

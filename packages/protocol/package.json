@@ -1,5 +1,5 @@
 {
-	"name": "@omp-deck/protocol",
+	"name": "@npi-deck/protocol",
 	"version": "0.6.1",
 	"private": true,
 	"type": "module",

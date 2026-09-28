@@ -14,7 +14,7 @@
 		<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
 		<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 		<link rel="shortcut icon" href="/favicon-32.png" />
-		<title>omp-deck</title>
+		<title>npi-deck</title>
 		<script>
 			// Apply the theme BEFORE React mounts so there is no flash of the
 			// wrong palette. Kept tiny on purpose; mirrored by `apps/web/src/lib/theme.ts`.
@@ -22,7 +22,7 @@
 				var THEMES = ["paper", "slate", "horizon"];
 				var stored = null;
 				try {
-					stored = localStorage.getItem("omp-deck:theme");
+					stored = localStorage.getItem("npi-deck:theme");
 				} catch (_) {}
 				var theme;
 				if (stored && THEMES.indexOf(stored) !== -1) {

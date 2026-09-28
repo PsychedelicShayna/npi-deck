@@ -25,7 +25,7 @@
  * to validate, original order preserved.
  */
 
-import type { RoutineLayoutEdgeKind, RoutineSpec, RoutineStep } from "@omp-deck/protocol";
+import type { RoutineLayoutEdgeKind, RoutineSpec, RoutineStep } from "@npi-deck/protocol";
 
 export type CompileErrorCode =
 	| "duplicate-id"

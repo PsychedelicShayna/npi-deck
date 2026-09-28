@@ -10,10 +10,10 @@
  *
  * Rationale: extensions ride on top of omp's SDK and are loaded for every
  * omp session (TUI, deck, ACP, etc.). Bundling them through the deck means
- * a fresh `omp` install with omp-deck picks them up automatically; deleting
+ * a fresh `omp` install with npi-deck picks them up automatically; deleting
  * the destination dir + restarting the deck restores them.
  *
- * Disable with `OMP_DECK_INSTALL_STARTER_EXTENSIONS=0`.
+ * Disable with `NPI_DECK_INSTALL_STARTER_EXTENSIONS=0`.
  *
  * Path resolution mirrors StarterSkillsInstaller.
  */
@@ -33,8 +33,8 @@ export interface StarterExtensionInstallResult {
 }
 
 export async function installStarterExtensions(): Promise<StarterExtensionInstallResult> {
-	if (process.env.OMP_DECK_INSTALL_STARTER_EXTENSIONS === "0") {
-		log.info("starter extensions install disabled via OMP_DECK_INSTALL_STARTER_EXTENSIONS=0");
+	if (process.env.NPI_DECK_INSTALL_STARTER_EXTENSIONS === "0") {
+		log.info("starter extensions install disabled via NPI_DECK_INSTALL_STARTER_EXTENSIONS=0");
 		return { installed: [], skipped: [] };
 	}
 
@@ -96,7 +96,7 @@ export async function installStarterExtensions(): Promise<StarterExtensionInstal
 }
 
 function resolveStarterSourceDir(): string | undefined {
-	const override = process.env.OMP_DECK_STARTER_EXTENSIONS_DIR;
+	const override = process.env.NPI_DECK_STARTER_EXTENSIONS_DIR;
 	if (override && existsSync(override)) return override;
 
 	const candidates = [

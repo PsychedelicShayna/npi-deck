@@ -13,7 +13,7 @@ import { describe, expect, test } from "bun:test";
 
 import type { NodePositionChange } from "@xyflow/react";
 
-import type { RoutineSpec } from "@omp-deck/protocol";
+import type { RoutineSpec } from "@npi-deck/protocol";
 
 import { applyPositionCommits } from "./RoutineCanvas";
 

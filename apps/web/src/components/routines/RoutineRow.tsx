@@ -1,5 +1,5 @@
 import { Power, Zap } from "lucide-react";
-import type { Routine } from "@omp-deck/protocol";
+import type { Routine } from "@npi-deck/protocol";
 
 import type { RoutineMetrics } from "@/lib/routines-api";
 import { cn } from "@/lib/utils";

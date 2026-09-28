@@ -10,8 +10,8 @@ import type {
 	ListRoutinesResponse,
 	RoutineSpec,
 	UpdateRoutineRequest,
-} from "@omp-deck/protocol";
-import { validateRoutineSpec } from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
+import { validateRoutineSpec } from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 import {

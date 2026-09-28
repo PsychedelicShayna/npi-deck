@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ServerFrame } from "@omp-deck/protocol";
+import type { ServerFrame } from "@npi-deck/protocol";
 
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 

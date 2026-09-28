@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
-import type { BridgeInfo, BridgeLogLine, BridgeName, BridgeStatus } from "@omp-deck/protocol";
+import type { BridgeInfo, BridgeLogLine, BridgeName, BridgeStatus } from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 import { resolveBunExecutable } from "./runtime-bun.ts";

@@ -45,16 +45,16 @@
  *   OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS  (default 8 * 60_000)
  *   OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS       (default 25 * 60_000)
  *   OMP_MAINTENANCE_GATE_ROOTS               (CSV of explicit org roots)
- *   OMP_DECK_ORG_ROOT                        (deck-session org root; set by
+ *   NPI_DECK_ORG_ROOT                        (deck-session org root; set by
  *                                             the deck server before spawning
  *                                             sessions so the gate activates
  *                                             regardless of session cwd)
- *   OMP_DECK_MAINTENANCE_GATE_DISABLED       (truthy => gate stays silent;
+ *   NPI_DECK_MAINTENANCE_GATE_DISABLED       (truthy => gate stays silent;
  *                                             checked at session_start AND
  *                                             every turn_end so a mid-session
  *                                             toggle takes effect immediately)
  *
- * Installed by omp-deck's StarterExtensionsInstaller into
+ * Installed by npi-deck's StarterExtensionsInstaller into
  * `~/.omp/agent/extensions/maintenance-gate/`. Idempotent — never
  * overwrites a user-edited copy.
  */
@@ -73,7 +73,7 @@ const FIRE_MARKER = "## Maintenance check";
 
 // Tuning floors are read per-fire, not at module init, so the deck Settings
 // → Orientation panel can hot-apply changes without requiring the user to
-// reload every session. The `OMP_DECK_MAINTENANCE_GATE_DISABLED` flag bails
+// reload every session. The `NPI_DECK_MAINTENANCE_GATE_DISABLED` flag bails
 // the gate at activation time and again on every turn_end as a safety net.
 function getMinOpMsgsSinceRelease(): number {
 	return envInt("OMP_MAINTENANCE_GATE_MIN_OP_MSGS", 4);
@@ -85,7 +85,7 @@ function getMinTimeBetweenFiresMs(): number {
 	return envInt("OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS", 25 * 60 * 1000);
 }
 function isGateDisabled(): boolean {
-	const raw = (process.env.OMP_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
+	const raw = (process.env.NPI_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
 	return ["1", "true", "yes", "on"].includes(raw);
 }
 
@@ -155,7 +155,7 @@ function detectOrgRoot(cwd: string): string | null {
 	// Highest priority: deck-session marker. The deck server sets this for
 	// every session it spawns so the gate activates regardless of cwd, which
 	// for deck sessions rarely matches the flat-file org structure below.
-	const deckRoot = process.env.OMP_DECK_ORG_ROOT?.trim();
+	const deckRoot = process.env.NPI_DECK_ORG_ROOT?.trim();
 	if (deckRoot && deckRoot.length > 0) return deckRoot;
 
 	const explicit = (process.env.OMP_MAINTENANCE_GATE_ROOTS ?? "")
@@ -211,7 +211,7 @@ function writeGateState(orgDir: string, state: GateDiskState): void {
 }
 
 function buildReminder(): string {
-	const deckMode = !!process.env.OMP_DECK_ORG_ROOT?.trim();
+	const deckMode = !!process.env.NPI_DECK_ORG_ROOT?.trim();
 
 	// In deck-managed sessions, kanban + inbox live behind the REST API; file
 	// paths like `inbox/captures/foo.md` resolve nowhere useful. Flat-file

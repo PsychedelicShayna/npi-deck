@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/step-transform.json",
+  "$id": "https://npi-deck.app/schemas/step-transform.json",
   "title": "RoutineStep — transform",
   "description": "Pure-JS expression over the run context. Evaluated in a quickjs sandbox; no network, no fs, no timers > 100ms wall clock. Result captured to steps.<id>.json.",
   "type": "object",
   "allOf": [
-    { "$ref": "https://omp-deck.app/schemas/step-common.json" },
+    { "$ref": "https://npi-deck.app/schemas/step-common.json" },
     {
       "type": "object",
       "required": ["type", "body"],

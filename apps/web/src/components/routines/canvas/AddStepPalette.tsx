@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Plus } from "lucide-react";
 
-import type { RoutineDeckAction, RoutineStep } from "@omp-deck/protocol";
+import type { RoutineDeckAction, RoutineStep } from "@npi-deck/protocol";
 
 import { STEP_CATEGORIES } from "./step-categories";
 

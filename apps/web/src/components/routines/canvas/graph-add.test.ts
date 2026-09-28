@@ -16,7 +16,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import type { RoutineSpec, RoutineStep } from "@omp-deck/protocol";
+import type { RoutineSpec, RoutineStep } from "@npi-deck/protocol";
 
 import { applyAddNodeAtBottom, computeNextNodeY } from "./graph-add";
 import { CANVAS_DEFAULT_X, CANVAS_NODE_VERTICAL_GAP } from "./graph-types";

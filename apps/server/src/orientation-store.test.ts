@@ -16,12 +16,12 @@ import {
 } from "./orientation-store.ts";
 
 const ENV_KEYS = [
-	"OMP_DECK_DATA_DIR",
-	"OMP_DECK_MAINTENANCE_GATE_DISABLED",
+	"NPI_DECK_DATA_DIR",
+	"NPI_DECK_MAINTENANCE_GATE_DISABLED",
 	"OMP_MAINTENANCE_GATE_MIN_OP_MSGS",
 	"OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS",
 	"OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS",
-	"OMP_DECK_ORG_ROOT",
+	"NPI_DECK_ORG_ROOT",
 	"HOME",
 	"USERPROFILE",
 ];
@@ -32,9 +32,9 @@ let tmpHomeDir: string;
 
 beforeEach(() => {
 	saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-	tmpDataDir = mkdtempSync(path.join(os.tmpdir(), "omp-deck-orient-data-"));
-	tmpHomeDir = mkdtempSync(path.join(os.tmpdir(), "omp-deck-orient-home-"));
-	process.env.OMP_DECK_DATA_DIR = tmpDataDir;
+	tmpDataDir = mkdtempSync(path.join(os.tmpdir(), "npi-deck-orient-data-"));
+	tmpHomeDir = mkdtempSync(path.join(os.tmpdir(), "npi-deck-orient-home-"));
+	process.env.NPI_DECK_DATA_DIR = tmpDataDir;
 	// os.homedir() honors USERPROFILE on Windows and HOME on POSIX. Override
 	// both so the test never writes to the real user home no matter which
 	// platform Bun picks up.
@@ -42,7 +42,7 @@ beforeEach(() => {
 	process.env.USERPROFILE = tmpHomeDir;
 	for (const k of ENV_KEYS) {
 		if (
-			k !== "OMP_DECK_DATA_DIR" &&
+			k !== "NPI_DECK_DATA_DIR" &&
 			k !== "HOME" &&
 			k !== "USERPROFILE"
 		) {
@@ -155,8 +155,8 @@ describe("maintenance gate state", () => {
 		expect(state.orgRoot).toBeNull();
 	});
 
-	test("OMP_DECK_MAINTENANCE_GATE_DISABLED=1 reports enabled=false", () => {
-		process.env.OMP_DECK_MAINTENANCE_GATE_DISABLED = "1";
+	test("NPI_DECK_MAINTENANCE_GATE_DISABLED=1 reports enabled=false", () => {
+		process.env.NPI_DECK_MAINTENANCE_GATE_DISABLED = "1";
 		const state = readMaintenanceGateState();
 		expect(state.enabled).toBe(false);
 		expect(state.disabledRaw).toBe("1");
@@ -165,7 +165,7 @@ describe("maintenance gate state", () => {
 
 	test("non-truthy disable values leave the gate enabled", () => {
 		for (const value of ["", "0", "false", "no", "off"]) {
-			process.env.OMP_DECK_MAINTENANCE_GATE_DISABLED = value;
+			process.env.NPI_DECK_MAINTENANCE_GATE_DISABLED = value;
 			const state = readMaintenanceGateState();
 			expect(state.enabled).toBe(true);
 		}

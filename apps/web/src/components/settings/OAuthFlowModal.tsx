@@ -11,7 +11,7 @@
  * see docs/oauth-deck-sdk-findings.md.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ServerFrame } from "@omp-deck/protocol";
+import type { ServerFrame } from "@npi-deck/protocol";
 import { Modal } from "@/components/ui/Modal";
 import { Button } from "@/components/ui/Button";
 import { authApi } from "@/lib/auth-api";

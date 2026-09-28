@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 function bootDb(): void {
-	dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "omp-deck-step-"));
+	dbDir = fs.mkdtempSync(path.join(os.tmpdir(), "npi-deck-step-"));
 	openDb({ path: path.join(dbDir, "deck.db") });
 }
 

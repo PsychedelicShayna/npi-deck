@@ -113,4 +113,4 @@ Don't leave variant components or the switcher lying around. They rot fast and c
 
 ---
 
-_Sourced from [mattpocock/skills @ b8be62f](https://github.com/mattpocock/skills/blob/b8be62ffacb0118fa3eaa29a0923c87c8c11985c/skills/engineering/prototype/UI.md), MIT-licensed. Bundled with omp-deck starter skills on 2026-05-23._
+_Sourced from [mattpocock/skills @ b8be62f](https://github.com/mattpocock/skills/blob/b8be62ffacb0118fa3eaa29a0923c87c8c11985c/skills/engineering/prototype/UI.md), MIT-licensed. Bundled with npi-deck starter skills on 2026-05-23._

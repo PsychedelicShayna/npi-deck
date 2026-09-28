@@ -15,7 +15,7 @@ import type {
 	UpdateMaintenanceGateRequest,
 	UpdatePreludeRequest,
 	UpdateStartCommandRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import {
 	DEFAULT_PRELUDE,
@@ -110,7 +110,7 @@ export function buildOrientationRouter(): Hono {
 
 		if (Object.prototype.hasOwnProperty.call(body, "enabled")) {
 			// `enabled` is the UI affordance; we store its inverse as
-			// OMP_DECK_MAINTENANCE_GATE_DISABLED=1 (truthy = off). `null`
+			// NPI_DECK_MAINTENANCE_GATE_DISABLED=1 (truthy = off). `null`
 			// clears the override and reverts to the implicit default (on).
 			if (body.enabled === false) {
 				updates[MAINTENANCE_GATE_ENV_KEYS.disabled] = "1";

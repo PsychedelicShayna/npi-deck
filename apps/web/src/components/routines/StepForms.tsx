@@ -4,7 +4,7 @@
  * on_failure, retry, timeout_secs) live in <StepCommonFields/>; this file only
  * renders the type-specific tail.
  */
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 
 import { Field, KeyValueEditor, NumInput, TagInput, TextArea, TextInput } from "./form-primitives";
 

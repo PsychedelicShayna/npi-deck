@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import type { RoutineSpec } from "@omp-deck/protocol";
+import type { RoutineSpec } from "@npi-deck/protocol";
 
 import {
 	CANVAS_DEFAULT_X,

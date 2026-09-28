@@ -128,7 +128,7 @@ flags risky installs at a glance.
 
 ## Environment
 
-- `OMP_DECK_WATCH_SKILLS=0` disables the disk watcher (useful on filesystems
+- `NPI_DECK_WATCH_SKILLS=0` disables the disk watcher (useful on filesystems
   that misbehave under recursive `fs.watch` — some VPNs, network drives,
   OneDrive shadowing). The view still works; it just won't auto-refresh
   when changes happen outside the deck's own REST endpoints.

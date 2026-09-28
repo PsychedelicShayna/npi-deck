@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, Trash2 } from "lucide-react";
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 
 import { StepCommonFields } from "./StepCommonFields";
 import { STEP_TYPE_BG, renderStepForm } from "./step-form-render";

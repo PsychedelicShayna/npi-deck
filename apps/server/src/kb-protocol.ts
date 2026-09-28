@@ -19,7 +19,7 @@
  * Path traversal is rejected the same way `local-protocol.ts` rejects it —
  * the resolved real path MUST stay under the resolved real KB root.
  *
- * Honors `OMP_DECK_KB_ROOT` (same env var `kb-service.ts` reads), so users
+ * Honors `NPI_DECK_KB_ROOT` (same env var `kb-service.ts` reads), so users
  * who relocate their kb get `kb://` resolution against the new location
  * automatically.
  */
@@ -171,7 +171,7 @@ export class KbProtocolHandler implements ProtocolHandler {
 			resolvedRoot = await fs.realpath(kbRoot);
 		} catch {
 			throw new Error(
-				`kb:// unavailable: KB root does not exist (${kbRoot}). Set OMP_DECK_KB_ROOT to point at your wiki.`,
+				`kb:// unavailable: KB root does not exist (${kbRoot}). Set NPI_DECK_KB_ROOT to point at your wiki.`,
 			);
 		}
 

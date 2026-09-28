@@ -1,9 +1,9 @@
 ---
-description: Scaffold a new omp-deck routine end-to-end — pick triggers, compose typed steps via the deck step family, gate cross-run state, validate the spec, and either save as a built-in template or POST to /api/routines. Use when the user says "build a routine that ...", "scaffold a routine", or asks how to wire a recurring deck workflow.
+description: Scaffold a new npi-deck routine end-to-end — pick triggers, compose typed steps via the deck step family, gate cross-run state, validate the spec, and either save as a built-in template or POST to /api/routines. Use when the user says "build a routine that ...", "scaffold a routine", or asks how to wire a recurring deck workflow.
 argument-hint: <purpose, e.g. "daily summary of yesterday's PR merges">
 ---
 
-You are authoring a new routine for omp-deck's V1 pipeline engine. Build the smallest correct spec that solves the stated purpose. Don't ship a stub.
+You are authoring a new routine for npi-deck's V1 pipeline engine. Build the smallest correct spec that solves the stated purpose. Don't ship a stub.
 
 ## 1. Understand the ask in one sentence
 
@@ -116,7 +116,7 @@ In `when:` and `transform.body:` (JS sandbox-mode):
 The protocol package exposes `validateRoutineSpec` which runs Ajv + cross-ref checks (missing step ids in `when:`, missing layout edges, etc).
 
 ```bash
-cd /c/Users/bryan/enclave/omp-deck
+cd /c/Users/bryan/enclave/npi-deck
 bun -e '
   import("yaml").then(y =>
     import("./packages/protocol/dist/index.js").then(p => {
@@ -134,7 +134,7 @@ If you don't have the protocol package built, the server's PATCH/POST endpoints 
 
 Pick ONE path:
 
-### A. Built-in template (ships with omp-deck)
+### A. Built-in template (ships with npi-deck)
 - File: `apps/server/src/templates/<slug>.yaml`
 - Loaded at server boot, available to all installs
 - Required when the routine is part of the product itself (daily-briefing, observer-daily, etc)

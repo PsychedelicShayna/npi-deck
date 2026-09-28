@@ -1,4 +1,4 @@
-# Upgrading omp-deck
+# Upgrading npi-deck
 
 How to update your install, what changed, what might break, and how to roll back if you need to. Most upgrades are non-breaking — read this only when something behaves differently than you expected, or before jumping more than one minor version.
 
@@ -13,7 +13,7 @@ How to update your install, what changed, what might break, and how to roll back
 
 ## The general upgrade procedure
 
-omp-deck never auto-updates, never migrates your data without your explicit say-so, and never replaces user-edited files. Upgrades are an explicit `git pull` you run in your checkout, followed by a deck restart. There is no npm package or Docker image; an `npi-deck` launcher is planned.
+npi-deck never auto-updates, never migrates your data without your explicit say-so, and never replaces user-edited files. Upgrades are an explicit `git pull` you run in your checkout, followed by a deck restart. There is no npm package or Docker image; an `npi-deck` launcher is planned.
 
 ```sh
 cd /path/to/your/npi-deck/checkout
@@ -24,11 +24,11 @@ bun scripts/neopi-setup.ts   # prepares the NeoPi tree if neopi.pin moved
 bun run dev
 ```
 
-The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. Re-running `scripts/neopi-setup.ts` is safe. If you're skipping a major version, also run a `bun run --filter '@omp-deck/*' typecheck` once to catch any local divergence before booting.
+The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. Re-running `scripts/neopi-setup.ts` is safe. If you're skipping a major version, also run a `bun run --filter '@npi-deck/*' typecheck` once to catch any local divergence before booting.
 
 The deck:
 
-- Re-uses your existing `~/.omp-deck/` data dir (deck.db, managed `.env`, uploads, onboarding flag).
+- Re-uses your existing `~/.npi-deck/` data dir (deck.db, managed `.env`, uploads, onboarding flag).
 - Re-uses your existing `~/.omp/agent/` (auth credentials, sessions, skills, extensions).
 - Applies any new SQLite migrations on first boot — idempotent, additive only (we never drop columns).
 - Picks up any new starter skills / extensions only if the user hasn't already created a file by the same name (we don't overwrite).
@@ -64,7 +64,7 @@ Released 2026-05-29. See [CHANGELOG.md](../CHANGELOG.md#060--2026-05-29--first-r
 Nothing required. But if you want to:
 
 - **Try the new onboarding wizard yourself** (after settling silently), navigate manually to `http://127.0.0.1:8787/onboarding`. The "Skip setup" link in the top right exits without changes.
-- **Get the wizard back for a real first-run test**, delete `<dataDir>/onboarding.json` (default location: `~/.omp-deck/onboarding.json` on macOS/Linux, `%LOCALAPPDATA%\omp-deck\onboarding.json` on Windows) AND make sure your seed welcome task (T-1) is still in backlog AND you have zero persisted sessions. Then refresh.
+- **Get the wizard back for a real first-run test**, delete `<dataDir>/onboarding.json` (default location: `~/.npi-deck/onboarding.json` on macOS/Linux, `%LOCALAPPDATA%\npi-deck\onboarding.json` on Windows) AND make sure your seed welcome task (T-1) is still in backlog AND you have zero persisted sessions. Then refresh.
 
 #### What did NOT change
 

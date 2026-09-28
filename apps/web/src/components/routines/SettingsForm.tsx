@@ -2,7 +2,7 @@
  * Routine settings form: concurrency, budget caps, timezone, tags, declared
  * state keys. Lives under the Builder tab's "Settings" subsection.
  */
-import type { RoutineBudget, RoutineConcurrency, RoutineSpec } from "@omp-deck/protocol";
+import type { RoutineBudget, RoutineConcurrency, RoutineSpec } from "@npi-deck/protocol";
 
 import { Field, NumInput, TagInput, TextInput } from "./form-primitives";
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Hash, Loader2, Search, Tag, Type, X } from "lucide-react";
-import type { KbSearchResponse, KbSearchResult } from "@omp-deck/protocol";
+import type { KbSearchResponse, KbSearchResult } from "@npi-deck/protocol";
 
 import { kbApi } from "@/lib/kb-api";
 import { cn } from "@/lib/utils";

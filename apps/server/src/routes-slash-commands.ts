@@ -8,7 +8,7 @@ import type {
 	SlashCommand,
 	SlashCommandScope,
 	SlashSubcommand,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { deckSlashCommandEntries } from "./deck-slash-commands.ts";
 

@@ -9,7 +9,7 @@ import type {
 	PatchEnvSettingsResponse,
 	RestartServerResponse,
 	RevealEnvValueResponse,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import type { Config } from "./config.ts";
 import { parseInt10, splitList } from "./config.ts";
@@ -157,20 +157,20 @@ function applyHotUpdates(
 	if ("LOG_LEVEL" in updates) {
 		if (setLogLevel(effective.get("LOG_LEVEL") ?? "info")) applied.push("LOG_LEVEL");
 	}
-	if ("OMP_DECK_IDLE_TIMEOUT_MS" in updates) {
-		const next = parseInt10(effective.get("OMP_DECK_IDLE_TIMEOUT_MS"), 5 * 60_000);
+	if ("NPI_DECK_IDLE_TIMEOUT_MS" in updates) {
+		const next = parseInt10(effective.get("NPI_DECK_IDLE_TIMEOUT_MS"), 5 * 60_000);
 		config.idleTimeoutMs = next;
 		bridge.applyEnvUpdate?.({ idleTimeoutMs: next });
-		applied.push("OMP_DECK_IDLE_TIMEOUT_MS");
+		applied.push("NPI_DECK_IDLE_TIMEOUT_MS");
 	}
-	if ("OMP_DECK_DEFAULT_CWD" in updates) {
-		const next = effective.get("OMP_DECK_DEFAULT_CWD")?.trim() || os.homedir();
+	if ("NPI_DECK_DEFAULT_CWD" in updates) {
+		const next = effective.get("NPI_DECK_DEFAULT_CWD")?.trim() || os.homedir();
 		config.defaultCwd = path.resolve(next);
-		applied.push("OMP_DECK_DEFAULT_CWD");
+		applied.push("NPI_DECK_DEFAULT_CWD");
 	}
-	if ("OMP_DECK_WORKSPACES" in updates) {
-		config.extraWorkspaces = splitList(effective.get("OMP_DECK_WORKSPACES")).map((p) => path.resolve(p));
-		applied.push("OMP_DECK_WORKSPACES");
+	if ("NPI_DECK_WORKSPACES" in updates) {
+		config.extraWorkspaces = splitList(effective.get("NPI_DECK_WORKSPACES")).map((p) => path.resolve(p));
+		applied.push("NPI_DECK_WORKSPACES");
 	}
 	return applied;
 }

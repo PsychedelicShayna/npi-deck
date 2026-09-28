@@ -1,5 +1,5 @@
 /**
- * Composer prompt history (omp-deck T-10).
+ * Composer prompt history (npi-deck T-10).
  *
  * Mirrors the omp TUI's `editor.addToHistory(text)` muscle memory: ArrowUp
  * recalls past prompts, ArrowDown walks back toward the live draft. The hook
@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 export const MAX_HISTORY = 100;
 export const PERSIST_DEBOUNCE_MS = 500;
-const STORAGE_PREFIX = "omp-deck:composer-history:";
+const STORAGE_PREFIX = "npi-deck:composer-history:";
 
 function storageKey(cwd: string): string {
 	return `${STORAGE_PREFIX}${cwd}`;

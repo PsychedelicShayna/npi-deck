@@ -20,7 +20,7 @@ import {
 	type RoutineStep,
 	type RoutineTrigger,
 	type ValidationError,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 export interface ParseResult {
 	ok: boolean;

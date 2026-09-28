@@ -29,7 +29,7 @@ import type {
 	Routine,
 	RoutineSpec,
 	RoutineStep,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { broadcastBus } from "../broadcast-bus.ts";
 import { notificationService } from "../notifications/index.ts";

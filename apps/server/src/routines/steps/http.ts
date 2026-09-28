@@ -8,7 +8,7 @@
  * (when body is a string).
  */
 
-import type { RoutineStep } from "@omp-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import { INTERNAL_AUTH_HEADERS, mintInternalToken } from "../internal-auth.ts";
 import { render, renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";

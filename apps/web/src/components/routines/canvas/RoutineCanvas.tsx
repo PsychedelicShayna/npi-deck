@@ -48,7 +48,7 @@ import type {
 	RoutineSpec,
 	RoutineStep,
 	RoutineStepRun,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { removeStep, replaceStep, scaffoldStep } from "../spec-yaml";
 

@@ -62,7 +62,7 @@ export const THEMES: ThemeDefinition[] = [
 ];
 
 export const THEME_IDS = THEMES.map((t) => t.id);
-const STORAGE_KEY = "omp-deck:theme";
+const STORAGE_KEY = "npi-deck:theme";
 
 export function isThemeId(value: string | null | undefined): value is ThemeId {
 	return typeof value === "string" && (THEME_IDS as string[]).includes(value);

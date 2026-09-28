@@ -4,7 +4,7 @@ import type {
 	KbGraphResponse,
 	KbSearchResponse,
 	KbTreeResponse,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 

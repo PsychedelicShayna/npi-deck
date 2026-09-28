@@ -22,15 +22,15 @@ let savedDataDir: string | undefined;
 let tmpDir: string;
 
 beforeEach(() => {
-	savedDataDir = process.env.OMP_DECK_DATA_DIR;
-	tmpDir = mkdtempSync(path.join(os.tmpdir(), "omp-deck-onboarding-"));
-	process.env.OMP_DECK_DATA_DIR = tmpDir;
+	savedDataDir = process.env.NPI_DECK_DATA_DIR;
+	tmpDir = mkdtempSync(path.join(os.tmpdir(), "npi-deck-onboarding-"));
+	process.env.NPI_DECK_DATA_DIR = tmpDir;
 	resetOnboardingForTests();
 });
 
 afterEach(() => {
-	if (savedDataDir === undefined) delete process.env.OMP_DECK_DATA_DIR;
-	else process.env.OMP_DECK_DATA_DIR = savedDataDir;
+	if (savedDataDir === undefined) delete process.env.NPI_DECK_DATA_DIR;
+	else process.env.NPI_DECK_DATA_DIR = savedDataDir;
 	try {
 		rmSync(tmpDir, { recursive: true, force: true });
 	} catch {

@@ -4,7 +4,7 @@ Type `/` in any composer to open the picker. Commands come from four scopes:
 
 | Scope | Source | Dispatch | Example |
 |---|---|---|---|
-| **deck** | Built into omp-deck. | In-process. No model round-trip. | `/task add <title>`, `/plan` |
+| **deck** | Built into npi-deck. | In-process. No model round-trip. | `/task add <title>`, `/plan` |
 | **builtin** | omp SDK. Filtered to commands with text-mode handlers. | In-process via SDK dispatcher. No model round-trip. | `/context`, `/usage`, `/tools`, `/compact`, `/dump`, `/memory view`, `/mcp add ...` |
 | **user** | Markdown files at `~/.omp/agent/commands/*.md`. | Expanded into the prompt; the model interprets. Costs tokens. | Whatever you write. |
 | **project** | Markdown files at `<cwd>/.omp/agent/commands/*.md`. | Same as user, but per-workspace and shadows user with the same name. | Whatever you write. |

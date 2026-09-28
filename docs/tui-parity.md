@@ -1,6 +1,6 @@
 # TUI parity
 
-This is the long-form reference for which omp TUI features omp-deck reaches
+This is the long-form reference for which omp TUI features npi-deck reaches
 parity on. Updated alongside SDK upgrades.
 
 | Surface | Status | Notes |
@@ -53,7 +53,7 @@ TUI-equivalent web UIs (model picker, marketplace) get first-class deck
 features instead of being shoehorned through a chat-side selector. See
 [docs/slash-commands.md](./slash-commands.md) for the dispatch matrix.
 
-## What omp-deck adds on top of the TUI
+## What npi-deck adds on top of the TUI
 
 These are deck-only — the TUI doesn't have them:
 

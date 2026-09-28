@@ -4,7 +4,7 @@
  *   1. Welcome           — value prop + intent
  *   2. Knowledge base    — scaffold ~/kb with README + system stubs
  *   3. Connect provider  — Claude / ChatGPT OAuth, or OpenRouter API key
- *   4. Auto-start prompt — write start.md + set OMP_DECK_AUTO_START
+ *   4. Auto-start prompt — write start.md + set NPI_DECK_AUTO_START
  *   5. Done              — handoff to chat
  *
  * Every step is skippable; the wizard is escapable (top-right "Skip
@@ -19,7 +19,7 @@ import { useEffect, useState } from "react";
 import { BookOpen, CheckCircle2, ChevronRight, ExternalLink, KeyRound, Loader2, Sparkles, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import type { OnboardingState } from "@omp-deck/protocol";
+import type { OnboardingState } from "@npi-deck/protocol";
 
 import { OAuthFlowModal } from "@/components/settings/OAuthFlowModal";
 import { Button } from "@/components/ui/Button";
@@ -66,7 +66,7 @@ export function OnboardingView() {
 			// Mark the toast trigger so a one-time hint shows up in the chat
 			// view explaining how to re-run onboarding from Settings.
 			if (skipped) {
-				localStorage.setItem("omp-deck:onboarding-skip-toast-pending", "1");
+				localStorage.setItem("npi-deck:onboarding-skip-toast-pending", "1");
 			}
 			navigate("/");
 		} catch (err) {
@@ -236,13 +236,13 @@ function Step2Kb({
 			// Seed README + system/ stubs at the user-provided path. The endpoint
 			// is idempotent on existing files. We deliberately don't call
 			// /api/kb/init because that only writes to the SERVER's resolved
-			// `OMP_DECK_KB_ROOT` — ignoring whatever the user just typed.
+			// `NPI_DECK_KB_ROOT` — ignoring whatever the user just typed.
 			await onboardingApi.seedKbSystem(target);
 			// Persist the choice so the next server restart picks it up. Without
 			// this the kb watcher / indexer keeps pointing at the old root and
 			// the /kb tab looks empty until manual env edit.
 			if (pathChanged) {
-				await settingsApi.patchEnv({ OMP_DECK_KB_ROOT: target });
+				await settingsApi.patchEnv({ NPI_DECK_KB_ROOT: target });
 			}
 			setSeeded(true);
 			await onRefresh();
@@ -533,8 +533,8 @@ function Step4AutoStart({
 				}),
 			});
 			if (!res.ok) throw new Error(`start.md write failed: ${res.status}`);
-			// Flip OMP_DECK_AUTO_START on
-			await settingsApi.patchEnv({ OMP_DECK_AUTO_START: "/start" });
+			// Flip NPI_DECK_AUTO_START on
+			await settingsApi.patchEnv({ NPI_DECK_AUTO_START: "/start" });
 			setEnabled(true);
 			await onRefresh();
 		} catch (err) {
@@ -656,7 +656,7 @@ function Step5Done({ onFinish }: { onFinish: () => void }) {
  * every fire, so this stays accurate as the deck grows (new tasks, new
  * routines, new inbox items). Users can edit the file directly afterwards.
  */
-const DEFAULT_START_BODY = `You are starting a new session inside omp-deck. Before responding to the user:
+const DEFAULT_START_BODY = `You are starting a new session inside npi-deck. Before responding to the user:
 
 1. **Read your context.** Fetch these kb files in parallel (skip any that 404):
    - \`kb://system/working-voice.md\` — how the user prefers to communicate

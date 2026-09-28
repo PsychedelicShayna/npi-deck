@@ -10,7 +10,7 @@
  * says. Documented per the V1 plan §10.4.
  */
 
-import type { RoutineBudget } from "@omp-deck/protocol";
+import type { RoutineBudget } from "@npi-deck/protocol";
 
 import type { StepResult } from "./types.ts";
 

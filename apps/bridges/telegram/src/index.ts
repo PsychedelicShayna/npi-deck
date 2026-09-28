@@ -1,4 +1,4 @@
-import type { ImageAttachment } from "@omp-deck/protocol";
+import type { ImageAttachment } from "@npi-deck/protocol";
 
 import { loadTelegramBridgeConfig, type TelegramBridgeConfig } from "./config.ts";
 import { DeckClient, SessionNotActiveError } from "./deck.ts";
@@ -68,7 +68,7 @@ class TelegramBridge {
 		const fromId = message.from?.id;
 		if (fromId === undefined || message.from?.is_bot) return;
 		if (!this.config.allowedUserIds.has(String(fromId))) {
-			await this.telegram.sendMessage(message.chat.id, "This omp-deck bot is private.", message.message_id);
+			await this.telegram.sendMessage(message.chat.id, "This npi-deck bot is private.", message.message_id);
 			return;
 		}
 

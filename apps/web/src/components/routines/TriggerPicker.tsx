@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
-import type { RoutineTrigger } from "@omp-deck/protocol";
+import type { RoutineTrigger } from "@npi-deck/protocol";
 
 import { Field, NumInput as _NumInput, TextInput } from "./form-primitives";
 

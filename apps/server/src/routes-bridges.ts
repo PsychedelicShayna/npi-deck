@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { BridgeLogsResponse, BridgeName, ListBridgesResponse } from "@omp-deck/protocol";
+import type { BridgeLogsResponse, BridgeName, ListBridgesResponse } from "@npi-deck/protocol";
 
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import { logger } from "./log.ts";

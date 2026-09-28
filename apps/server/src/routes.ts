@@ -7,7 +7,7 @@ import type {
 	ListWorkspacesResponse,
 	RestartServerResponse,
 	WorkspaceEntry,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import type { Config } from "./config.ts";
 import { logger } from "./log.ts";

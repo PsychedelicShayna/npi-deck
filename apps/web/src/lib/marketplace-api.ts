@@ -5,7 +5,7 @@ import type {
 	ListMarketplaceResponse,
 	MarketplaceSource,
 	UninstallPluginRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 

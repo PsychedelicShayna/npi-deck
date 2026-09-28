@@ -23,7 +23,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import type { KbBacklink, KbFileResponse, KbTreeEntry, KbTreeResponse } from "@omp-deck/protocol";
+import type { KbBacklink, KbFileResponse, KbTreeEntry, KbTreeResponse } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { CopyButton } from "@/lib/CopyButton";
@@ -331,7 +331,7 @@ function KbEmpty() {
 			<div className="mt-3 text-sm text-ink-2">Pick a file from the tree.</div>
 			<div className="mt-1 max-w-sm text-xs text-ink-3">
 				The KB cockpit reads your wiki at <span className="font-mono text-ink-2">~/kb</span>. Set{" "}
-				<span className="font-mono">OMP_DECK_KB_EXCLUDE_DIRS</span> to hide subtrees if you need to.
+				<span className="font-mono">NPI_DECK_KB_EXCLUDE_DIRS</span> to hide subtrees if you need to.
 			</div>
 		</div>
 	);
@@ -381,7 +381,7 @@ function KbWelcome({
 					<h1 className="text-base font-medium text-ink">Set up your knowledge base</h1>
 				</div>
 				<p className="mt-3 text-sm text-ink-2">
-					omp-deck reads a Karpathy-style llm-wiki from a single folder on disk. The cockpit
+					npi-deck reads a Karpathy-style llm-wiki from a single folder on disk. The cockpit
 					is currently pointed at{" "}
 					<span className="break-all font-mono text-ink">{status.root}</span>
 					{status.exists ? " (which is empty)" : " (which doesn't exist yet)"}.
@@ -402,7 +402,7 @@ function KbWelcome({
 						Create starter README
 					</button>
 					<span className="text-2xs text-ink-3">
-						Or set <span className="font-mono text-ink-2">OMP_DECK_KB_ROOT</span> and restart the deck.
+						Or set <span className="font-mono text-ink-2">NPI_DECK_KB_ROOT</span> and restart the deck.
 					</span>
 				</div>
 				{error ? (
@@ -438,8 +438,8 @@ function KbSidebar() {
 			</div>
 			<div className="min-h-0 flex-1 px-3 py-2 text-xs text-ink-3">
 				The cockpit reads <span className="font-mono">~/kb</span> via{" "}
-				<span className="font-mono">OMP_DECK_KB_ROOT</span>. Hide subtrees via{" "}
-				<span className="font-mono">OMP_DECK_KB_EXCLUDE_DIRS</span>.
+				<span className="font-mono">NPI_DECK_KB_ROOT</span>. Hide subtrees via{" "}
+				<span className="font-mono">NPI_DECK_KB_EXCLUDE_DIRS</span>.
 			</div>
 		</div>
 	);

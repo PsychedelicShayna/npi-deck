@@ -1,4 +1,4 @@
-import type { ServerFrame } from "@omp-deck/protocol";
+import type { ServerFrame } from "@npi-deck/protocol";
 
 export type OAuthFlowFrame = Extract<
 	ServerFrame,

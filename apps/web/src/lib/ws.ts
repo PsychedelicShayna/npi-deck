@@ -1,4 +1,4 @@
-import type { ClientFrame, ServerFrame } from "@omp-deck/protocol";
+import type { ClientFrame, ServerFrame } from "@npi-deck/protocol";
 
 type Listener = (frame: ServerFrame) => void;
 type StatusListener = (status: WsStatus) => void;

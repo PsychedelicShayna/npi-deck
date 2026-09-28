@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/step-write.json",
+  "$id": "https://npi-deck.app/schemas/step-write.json",
   "title": "RoutineStep — write",
   "description": "Write or append a file. Path and content are templated.",
   "type": "object",
   "allOf": [
-    { "$ref": "https://omp-deck.app/schemas/step-common.json" },
+    { "$ref": "https://npi-deck.app/schemas/step-common.json" },
     {
       "type": "object",
       "required": ["type", "path", "content"],

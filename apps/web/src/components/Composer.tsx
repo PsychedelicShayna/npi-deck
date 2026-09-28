@@ -8,13 +8,13 @@ import {
 	type DragEvent,
 	type KeyboardEvent,
 } from "react";
-import type { FilePathMatch, SlashCommand } from "@omp-deck/protocol";
+import type { FilePathMatch, SlashCommand } from "@npi-deck/protocol";
 
 import { api } from "@/lib/api";
 import { FilePathPicker } from "@/components/composer/FilePathPicker";
 import { SlashCommandPicker } from "@/components/composer/SlashCommandPicker";
 import { Paperclip, ArrowUp, Square, X } from "lucide-react";
-import type { ImageAttachment } from "@omp-deck/protocol";
+import type { ImageAttachment } from "@npi-deck/protocol";
 
 import { selectActiveSession, useStore } from "@/lib/store";
 import { useComposerHistory } from "@/lib/use-composer-history";

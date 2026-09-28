@@ -1,5 +1,5 @@
 {
-  "name": "@omp-deck/telegram-bridge",
+  "name": "@npi-deck/telegram-bridge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@omp-deck/protocol": "workspace:*"
+    "@npi-deck/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

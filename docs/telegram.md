@@ -55,7 +55,7 @@ showing the pid and uptime. Expand **Bridge logs** to confirm
 Open Telegram, search for the bot username, hit Start, send any message.
 Within a few seconds the bridge:
 
-1. Creates a new omp session at `OMP_DECK_DEFAULT_CWD` (or the cwd of the
+1. Creates a new omp session at `NPI_DECK_DEFAULT_CWD` (or the cwd of the
    chat-to-session mapping if you've messaged the bot before).
 2. Forwards your text as a prompt.
 3. Streams the agent's reply back, edited in real-time via
@@ -103,7 +103,7 @@ The deck supervises the child process — when the deck server shuts down
 - **Group chats**. DM-only.
 - **Multi-user routing**. Single owner, single bot. If two people in
   `TELEGRAM_ALLOWED_USERS` DM the bot at the same time, they get **separate**
-  sessions (keyed by `chat_id`) but share `OMP_DECK_DEFAULT_CWD` and provider
+  sessions (keyed by `chat_id`) but share `NPI_DECK_DEFAULT_CWD` and provider
   quotas.
 - **Hosting outside the tailnet**. The bridge always uses Telegram's
   outbound API (no inbound port needed), so it works behind NAT/Tailscale
@@ -118,7 +118,7 @@ The deck supervises the child process — when the deck server shuts down
 The credentials saved in Settings aren't reaching the bridge process. The
 deck's managed `.env` writes to `<dataDir>/.env` and the bridge reads from
 the same file. Confirm via `cat <dataDir>/.env` (Linux/macOS) or
-`type %LOCALAPPDATA%\omp-deck\.env` (Windows).
+`type %LOCALAPPDATA%\npi-deck\.env` (Windows).
 
 **Bridge crashes with "TELEGRAM_ALLOWED_USERS must contain at least one numeric Telegram user id".**
 You set a username instead of the numeric ID. Get the numeric ID via
@@ -127,7 +127,7 @@ You set a username instead of the numeric ID. Get the numeric ID via
 **Bot doesn't respond to messages.**
 Check logs (expand "Bridge logs" in the card). The most common cause is
 the user not being in the allowlist — the bridge replies with
-"This omp-deck bot is private." and refuses to process.
+"This npi-deck bot is private." and refuses to process.
 
 **Replies are slow.**
 The bridge debounces `editMessageText` calls at `TELEGRAM_EDIT_INTERVAL_MS`

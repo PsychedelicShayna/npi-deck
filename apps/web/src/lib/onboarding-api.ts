@@ -3,7 +3,7 @@ import type {
 	OnboardingState,
 	SeedKbSystemRequest,
 	SeedKbSystemResponse,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api/onboarding";
 

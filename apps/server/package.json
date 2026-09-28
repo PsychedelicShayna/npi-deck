@@ -1,5 +1,5 @@
 {
-	"name": "@omp-deck/server",
+	"name": "@npi-deck/server",
 	"version": "0.6.1",
 	"private": true,
 	"type": "module",
@@ -12,7 +12,7 @@
 		"test": "bun test"
 	},
 	"dependencies": {
-		"@omp-deck/protocol": "workspace:*",
+		"@npi-deck/protocol": "workspace:*",
 		"croner": "^10.0.1",
 		"hono": "^4.6.14",
 		"quickjs-emscripten": "^0.31.0",

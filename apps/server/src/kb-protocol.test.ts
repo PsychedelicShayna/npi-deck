@@ -8,7 +8,7 @@ import type { InternalUrlRouter } from "@oh-my-pi/pi-coding-agent/internal-urls"
 import { loadBackend, sdk } from "./backend/runtime.ts";
 import { KbProtocolHandler } from "./kb-protocol.ts";
 
-const ENV_KEYS = ["OMP_DECK_KB_ROOT", "HOME", "USERPROFILE"];
+const ENV_KEYS = ["NPI_DECK_KB_ROOT", "HOME", "USERPROFILE"];
 
 let saved: Record<string, string | undefined>;
 let kbRoot: string;
@@ -20,10 +20,10 @@ beforeAll(async () => {
 
 beforeEach(() => {
 	saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
-	kbRoot = mkdtempSync(path.join(os.tmpdir(), "omp-deck-kb-proto-"));
-	process.env.OMP_DECK_KB_ROOT = kbRoot;
-	// Wall off homedir as a safety net even though OMP_DECK_KB_ROOT wins.
-	const tmpHome = mkdtempSync(path.join(os.tmpdir(), "omp-deck-kb-home-"));
+	kbRoot = mkdtempSync(path.join(os.tmpdir(), "npi-deck-kb-proto-"));
+	process.env.NPI_DECK_KB_ROOT = kbRoot;
+	// Wall off homedir as a safety net even though NPI_DECK_KB_ROOT wins.
+	const tmpHome = mkdtempSync(path.join(os.tmpdir(), "npi-deck-kb-home-"));
 	process.env.HOME = tmpHome;
 	process.env.USERPROFILE = tmpHome;
 
@@ -102,17 +102,17 @@ describe("kb:// resolution", () => {
 		await expect(router.resolve("kb://C:/Windows/System32")).rejects.toThrow();
 	});
 
-	test("OMP_DECK_KB_ROOT override is honored on every resolve", async () => {
-		const altRoot = mkdtempSync(path.join(os.tmpdir(), "omp-deck-kb-alt-"));
+	test("NPI_DECK_KB_ROOT override is honored on every resolve", async () => {
+		const altRoot = mkdtempSync(path.join(os.tmpdir(), "npi-deck-kb-alt-"));
 		mkdirSync(path.join(altRoot, "system"), { recursive: true });
 		writeFileSync(path.join(altRoot, "system", "x.md"), "ALT\n", "utf8");
-		process.env.OMP_DECK_KB_ROOT = altRoot;
+		process.env.NPI_DECK_KB_ROOT = altRoot;
 		const res = await router.resolve("kb://system/x.md");
 		expect(res.content).toBe("ALT\n");
 	});
 
 	test("missing KB root yields an actionable error", async () => {
-		process.env.OMP_DECK_KB_ROOT = path.join(os.tmpdir(), "does-not-exist-here", String(Math.random()));
-		await expect(router.resolve("kb://anything")).rejects.toThrow(/OMP_DECK_KB_ROOT/);
+		process.env.NPI_DECK_KB_ROOT = path.join(os.tmpdir(), "does-not-exist-here", String(Math.random()));
+		await expect(router.resolve("kb://anything")).rejects.toThrow(/NPI_DECK_KB_ROOT/);
 	});
 });

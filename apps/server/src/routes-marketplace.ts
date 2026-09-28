@@ -6,7 +6,7 @@ import type {
 	ListMarketplaceResponse,
 	MarketplaceSource,
 	UninstallPluginRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";

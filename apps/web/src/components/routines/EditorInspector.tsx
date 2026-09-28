@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Power, RefreshCcw, Trash2, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
-import type { Routine, RoutineRun } from "@omp-deck/protocol";
+import type { Routine, RoutineRun } from "@npi-deck/protocol";
 
 import { routinesApi, type RoutineMetrics } from "@/lib/routines-api";
 

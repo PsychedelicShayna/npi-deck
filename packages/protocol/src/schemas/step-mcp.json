@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://omp-deck.app/schemas/step-mcp.json",
+  "$id": "https://npi-deck.app/schemas/step-mcp.json",
   "title": "RoutineStep — mcp",
   "description": "Deterministic MCP tool call. The named server must be installed via /mcp install. Args are validated against the tool's input schema (cached from tools/list) at runtime before invocation.",
   "type": "object",
   "allOf": [
-    { "$ref": "https://omp-deck.app/schemas/step-common.json" },
+    { "$ref": "https://npi-deck.app/schemas/step-common.json" },
     {
       "type": "object",
       "required": ["type", "server", "tool"],

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Clock, Plus, Power, Zap } from "lucide-react";
-import type { Routine } from "@omp-deck/protocol";
+import type { Routine } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { EditorInspector } from "@/components/routines/EditorInspector";

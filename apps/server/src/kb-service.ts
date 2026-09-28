@@ -1,7 +1,7 @@
 /**
  * KB Cockpit backend.
  *
- * Walks the user's Karpathy-style llm-wiki at `~/kb` (or `OMP_DECK_KB_ROOT`),
+ * Walks the user's Karpathy-style llm-wiki at `~/kb` (or `NPI_DECK_KB_ROOT`),
  * caches an inventory of every reachable markdown file, and resolves
  * `[[wikilinks]]` against it. The deck cockpit's `/kb` view + graph view
  * consume the output of this service.
@@ -43,7 +43,7 @@ import type {
 	KbSearchMatchKind,
 	KbSearchResponse,
 	KbSearchResult,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 
@@ -53,9 +53,9 @@ const log = logger("kb");
 // canonical set in my-org-new/scripts/orphan-census.py — vendor-noise
 // directories that nobody wants in a knowledge graph. To add your own
 // (e.g. a personal `drafts/` folder, a `private/` subtree), set
-// `OMP_DECK_KB_EXCLUDE_DIRS` to a comma-separated list and restart.
+// `NPI_DECK_KB_EXCLUDE_DIRS` to a comma-separated list and restart.
 //
-// The list is intentionally minimal by default: omp-deck shows your kb the
+// The list is intentionally minimal by default: npi-deck shows your kb the
 // way you organized it on disk. If you want to keep a directory out of the
 // cockpit (e.g. it's full of vendor markdown or a checked-in node_modules),
 // either add it to the env override below or rely on the built-in
@@ -78,7 +78,7 @@ const SKIP_DIR_NAMES = new Set<string>([
 ]);
 
 function parseExcludeDirsFromEnv(): string[] {
-	const raw = process.env.OMP_DECK_KB_EXCLUDE_DIRS;
+	const raw = process.env.NPI_DECK_KB_EXCLUDE_DIRS;
 	if (!raw) return [];
 	return raw
 		.split(",")
@@ -1127,8 +1127,8 @@ function renderStarterReadme(today: string): string {
 		"",
 		"# Welcome to your KB",
 		"",
-		"This is a fresh knowledge base, scaffolded by omp-deck. The cockpit reads",
-		"this folder (`~/kb` by default; overridable via `OMP_DECK_KB_ROOT`) as a",
+		"This is a fresh knowledge base, scaffolded by npi-deck. The cockpit reads",
+		"this folder (`~/kb` by default; overridable via `NPI_DECK_KB_ROOT`) as a",
 		"Karpathy-style llm-wiki: hand-tended markdown with frontmatter metadata and",
 		"`[[wiki-links]]` between articles.",
 		"",
@@ -1162,7 +1162,7 @@ function renderStarterReadme(today: string): string {
 }
 
 export function resolveKbRoot(): string {
-	const fromEnv = process.env.OMP_DECK_KB_ROOT;
+	const fromEnv = process.env.NPI_DECK_KB_ROOT;
 	if (fromEnv && fromEnv.trim().length > 0) return path.resolve(fromEnv.trim());
 	return path.join(os.homedir(), "kb");
 }

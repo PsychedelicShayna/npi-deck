@@ -6,7 +6,7 @@ import type {
 	PromoteInboxItemRequest,
 	PromoteInboxItemResponse,
 	UpdateInboxItemRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { createInbox, deleteInbox, getInbox, listInbox, updateInbox } from "./db/inbox.ts";
 import { createTask, getDefaultState, getState } from "./db/tasks.ts";

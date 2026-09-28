@@ -32,7 +32,7 @@ export function splitList(value: string | undefined): string[] {
 }
 
 function resolveWebDist(): string | undefined {
-	const explicit = process.env.OMP_DECK_WEB_DIST?.trim();
+	const explicit = process.env.NPI_DECK_WEB_DIST?.trim();
 	const candidates = [
 		explicit,
 		// Common deployment layouts:
@@ -52,31 +52,31 @@ function resolveWebDist(): string | undefined {
 
 export function loadConfig(): Config {
 	const home = os.homedir();
-	const defaultCwd = process.env.OMP_DECK_DEFAULT_CWD?.trim() || home;
-	const extra = splitList(process.env.OMP_DECK_WORKSPACES);
+	const defaultCwd = process.env.NPI_DECK_DEFAULT_CWD?.trim() || home;
+	const extra = splitList(process.env.NPI_DECK_WORKSPACES);
 	const webDist = resolveWebDist();
 
 	return {
-		host: process.env.OMP_DECK_HOST?.trim() || "127.0.0.1",
-		port: parseInt10(process.env.OMP_DECK_PORT, 8787),
+		host: process.env.NPI_DECK_HOST?.trim() || "127.0.0.1",
+		port: parseInt10(process.env.NPI_DECK_PORT, 8787),
 		defaultCwd: path.resolve(defaultCwd),
 		extraWorkspaces: extra.map((p) => path.resolve(p)),
 		webDist,
 		devMode: process.env.NODE_ENV !== "production",
 		// 5 minutes default. Set to 0 to disable reaping (kernels live until SIGINT).
-		idleTimeoutMs: parseInt10(process.env.OMP_DECK_IDLE_TIMEOUT_MS, 5 * 60_000),
+		idleTimeoutMs: parseInt10(process.env.NPI_DECK_IDLE_TIMEOUT_MS, 5 * 60_000),
 		dbPath: path.resolve(
-			process.env.OMP_DECK_DB_PATH?.trim() ||
-				process.env.OMP_DECK_DB?.trim() ||
+			process.env.NPI_DECK_DB_PATH?.trim() ||
+				process.env.NPI_DECK_DB?.trim() ||
 				path.join(process.cwd(), "data", "deck.db"),
 		),
 		uploadsRoot: path.resolve(
-			process.env.OMP_DECK_UPLOADS_ROOT?.trim() ||
+			process.env.NPI_DECK_UPLOADS_ROOT?.trim() ||
 				path.join(
 					path.dirname(
 						path.resolve(
-							process.env.OMP_DECK_DB_PATH?.trim() ||
-								process.env.OMP_DECK_DB?.trim() ||
+							process.env.NPI_DECK_DB_PATH?.trim() ||
+								process.env.NPI_DECK_DB?.trim() ||
 								path.join(process.cwd(), "data", "deck.db"),
 						),
 					),

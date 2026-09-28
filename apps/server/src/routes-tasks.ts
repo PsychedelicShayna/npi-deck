@@ -16,7 +16,7 @@ import type {
 	TaskProject,
 	UpdateTaskRequest,
 	UpdateTaskStateRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
 import { broadcastBus } from "./broadcast-bus.ts";

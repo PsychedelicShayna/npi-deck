@@ -1,5 +1,5 @@
 /**
- * Shared transport types between omp-deck server and web.
+ * Shared transport types between npi-deck server and web.
  *
  * The server embeds @oh-my-pi/pi-coding-agent SDK and re-emits its
  * AgentSessionEvent stream into ServerFrames. To avoid type drift,
@@ -169,7 +169,7 @@ export interface GateKnob {
 
 /** Live state of the maintenance-gate extension as the deck sees it. */
 export interface MaintenanceGateState {
-	/** Inverse of `OMP_DECK_MAINTENANCE_GATE_DISABLED`. */
+	/** Inverse of `NPI_DECK_MAINTENANCE_GATE_DISABLED`. */
 	enabled: boolean;
 	disabledRaw: string | null;
 	disabledSource: GateValueSource;

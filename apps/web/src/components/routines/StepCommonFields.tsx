@@ -1,4 +1,4 @@
-import type { RoutineOnFailure, RoutineRetryPolicy, RoutineStep } from "@omp-deck/protocol";
+import type { RoutineOnFailure, RoutineRetryPolicy, RoutineStep } from "@npi-deck/protocol";
 
 import { Field, NumInput, TextInput } from "./form-primitives";
 import { validateStepId } from "./routine-validation";

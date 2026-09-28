@@ -7,7 +7,7 @@ import type {
 	ListSlashCommandsResponse,
 	ListWorkspacesResponse,
 	ModelRef,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 

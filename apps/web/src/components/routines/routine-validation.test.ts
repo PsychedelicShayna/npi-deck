@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import type { RoutineSpec, ValidationError } from "@omp-deck/protocol";
+import type { RoutineSpec, ValidationError } from "@npi-deck/protocol";
 
 import { summarizeRoutineValidationErrors, validateStepId } from "./routine-validation";
 

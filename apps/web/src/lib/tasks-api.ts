@@ -7,7 +7,7 @@ import type {
 	TaskState,
 	UpdateTaskRequest,
 	UpdateTaskStateRequest,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 

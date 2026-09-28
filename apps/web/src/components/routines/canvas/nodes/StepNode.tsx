@@ -11,7 +11,7 @@
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
 
-import type { RoutineStep, RoutineStepRun, RoutineStepStatus } from "@omp-deck/protocol";
+import type { RoutineStep, RoutineStepRun, RoutineStepStatus } from "@npi-deck/protocol";
 
 import type { StepNode as StepNodeType } from "../graph-types";
 

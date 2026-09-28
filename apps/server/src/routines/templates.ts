@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 import { parse as parseYaml } from "yaml";
 
-import type { RoutineSpec } from "@omp-deck/protocol";
+import type { RoutineSpec } from "@npi-deck/protocol";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.join(here, "..", "templates");

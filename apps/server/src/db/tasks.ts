@@ -6,7 +6,7 @@
  * tricks. A move == one transaction that renumbers the destination column.
  */
 
-import type { Task, TaskState } from "@omp-deck/protocol";
+import type { Task, TaskState } from "@npi-deck/protocol";
 
 import { getDb, id, nowIso } from "./index.ts";
 

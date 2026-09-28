@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Plus } from "lucide-react";
 
-import type { RoutineDeckAction, RoutineStep } from "@omp-deck/protocol";
+import type { RoutineDeckAction, RoutineStep } from "@npi-deck/protocol";
 
 import { STEP_TYPE_DESCRIPTIONS } from "./spec-yaml";
 

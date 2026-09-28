@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import type { ClientFrame, ServerFrame } from "@omp-deck/protocol";
+import type { ClientFrame, ServerFrame } from "@npi-deck/protocol";
 
 import type { AgentBridge } from "./bridge/types.ts";
 import { broadcastBus } from "./broadcast-bus.ts";

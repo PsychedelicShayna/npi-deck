@@ -118,4 +118,4 @@ Required before declaring done:
 
 ---
 
-_Sourced from [mattpocock/skills @ b8be62f](https://github.com/mattpocock/skills/blob/b8be62ffacb0118fa3eaa29a0923c87c8c11985c/skills/engineering/diagnose/SKILL.md), MIT-licensed. Bundled with omp-deck starter skills on 2026-05-23._
+_Sourced from [mattpocock/skills @ b8be62f](https://github.com/mattpocock/skills/blob/b8be62ffacb0118fa3eaa29a0923c87c8c11985c/skills/engineering/diagnose/SKILL.md), MIT-licensed. Bundled with npi-deck starter skills on 2026-05-23._

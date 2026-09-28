@@ -11,7 +11,7 @@ import type {
 	ServerFrame,
 	SessionSnapshot,
 	SessionSummary,
-} from "@omp-deck/protocol";
+} from "@npi-deck/protocol";
 
 /**
  * Abstract bridge to omp. The in-process impl embeds @oh-my-pi/pi-coding-agent
@@ -115,7 +115,7 @@ export interface SessionHandle {
 	 * mirrored from the SDK). Includes stable `id`s the client can use to
 	 * target a specific entry for cancel/edit. Empty when no turn is in flight.
 	 */
-	getQueueSnapshot(): import("@omp-deck/protocol").QueuedPromptWire[];
+	getQueueSnapshot(): import("@npi-deck/protocol").QueuedPromptWire[];
 	/**
 	 * Cancel a single queued prompt by its `id`. Returns true if an entry
 	 * was removed, false if the id was unknown (already drained, etc).
@@ -133,7 +133,7 @@ export interface SessionHandle {
 	editQueuedById(
 		id: string,
 		text: string,
-		images?: import("@omp-deck/protocol").ImageAttachment[],
+		images?: import("@npi-deck/protocol").ImageAttachment[],
 	): Promise<boolean>;
 	abort(): Promise<void>;
 	setName(name: string): Promise<void>;

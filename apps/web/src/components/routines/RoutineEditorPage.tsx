@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Trash2 } from "lucide-react";
-import type { Routine, RoutineActionKind } from "@omp-deck/protocol";
+import type { Routine, RoutineActionKind } from "@npi-deck/protocol";
 
 import { routinesApi } from "@/lib/routines-api";
 

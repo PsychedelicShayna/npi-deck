@@ -1,5 +1,5 @@
 import { Plus } from "lucide-react";
-import type { Routine } from "@omp-deck/protocol";
+import type { Routine } from "@npi-deck/protocol";
 
 interface Props {
 	routines: Routine[];
