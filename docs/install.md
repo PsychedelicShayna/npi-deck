@@ -75,6 +75,27 @@ bun apps/server/src/backend/contract.ts   # isolated; no provider requests
 
 `NPI_DECK_HOME` overrides `~/.npi-deck`. Re-running the script is safe.
 
+If no backend is configured, the deck still starts: kanban, inbox, routine
+editing and settings remain available. Agent-backed endpoints return HTTP 503
+with `backend_unavailable`. Open **Settings → Backend** to choose a prepared
+source tree. The picker runs an isolated preflight (dependencies, native addon
+version sentinel and required SDK exports) before switching. It reports the
+tree's commit, version and whether it matches `neopi.pin`; unsupported
+`kind: gateway` entries cannot be selected.
+
+A normal switch refuses while work is active, listing live sessions and
+prompts without changing the running backend. **Force —
+abort all work** stops them before restarting the worker through the launcher.
+The worker rolls back to the previous backend if the candidate cannot start;
+if the previous backend also fails, it starts without a backend. Browser tabs
+reconnect to the new worker generation without replaying prompts queued while
+offline. Existing transcripts remain available for explicit resume.
+
+`NPI_DECK_BACKEND` pins the entire launch, including the source shown in
+Settings; remove the override and restart the launcher to switch from the UI.
+The backend picker requires the `npi-deck` launcher, not a directly started
+server process.
+
 ---
 
 ## Path A — Existing omp user

@@ -14,6 +14,7 @@ import { logger } from "./log.ts";
 import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
 import { deriveLabel } from "./workspace-label.ts";
 import type { AgentBridge } from "./bridge/types.ts";
+import { listSessionBackends, recordSessionBackend, sessionBackend } from "./backend/session-metadata.ts";
 
 const log = logger("routes");
 
@@ -97,7 +98,11 @@ export function buildRouter(
 	app.get("/sessions", async (c) => {
 		const cwd = c.req.query("cwd");
 		try {
-			const sessions = await bridge.listSessions(cwd ? { cwd } : {});
+			const metadata = listSessionBackends();
+			const sessions = (await bridge.listSessions(cwd ? { cwd } : {})).map(s => {
+				const backendLastRan = metadata[s.path];
+				return backendLastRan ? { ...s, backendLastRan } : s;
+			});
 			const body: ListSessionsResponse = { sessions };
 			return c.json(body);
 		} catch (err) {
@@ -116,7 +121,8 @@ export function buildRouter(
 		try {
 			const transcript = await bridge.readTranscript(sessionPath);
 			if (!transcript) return c.json({ error: "unknown session" }, 404);
-			return c.json(transcript);
+			const backendLastRan = sessionBackend(sessionPath);
+			return c.json(backendLastRan ? { ...transcript, backendLastRan } : transcript);
 		} catch (err) {
 			log.error(`readTranscript failed`, err);
 			return c.json({ error: String(err) }, 500);
@@ -140,6 +146,7 @@ export function buildRouter(
 						cwd,
 						...(body.model ? { model: body.model } : {}),
 					});
+			recordSessionBackend(handle.sessionFile);
 			const resp: CreateSessionResponse = {
 				sessionId: handle.sessionId,
 				sessionFile: handle.sessionFile,

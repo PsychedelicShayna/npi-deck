@@ -17,9 +17,9 @@
  * (dotenv merge, native addon, router registrations), so this runs once per
  * process; probing a candidate belongs in a child process (plan C3).
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, parseDocument } from "yaml";
 
 import { getDataDir } from "../env-store.ts";
 
@@ -96,41 +96,52 @@ export function formatDiagnostic(d: ManifestDiagnostic): string {
 	return `${what}${d.file ? ` (${d.file})` : ""}: ${d.reason}`;
 }
 
-interface BackendConfig {
-	backends?: Array<{ id?: unknown; path?: unknown }>;
-	activeBackend?: unknown;
-}
+export interface BackendEntry { id: string; kind: "source" | "gateway"; path: string }
+interface BackendConfig { backends?: BackendEntry[]; activeBackend?: string | null }
 
-function readBackendConfig(home: string): BackendConfig {
+export function readBackendConfig(home = getDataDir()): BackendConfig {
 	const file = path.join(home, "config.yml");
-	if (!existsSync(file)) {
-		throw new BackendConfigError(`no backend configured: ${file} does not exist. Run \`bun scripts/neopi-setup.ts\`.`);
-	}
-	const parsed = parseYaml(readFileSync(file, "utf8")) as unknown;
-	if (!parsed || typeof parsed !== "object") throw new BackendConfigError(`${file} is not a YAML mapping`);
+	if (!existsSync(file)) return {};
+	let parsed: unknown;
+	try { parsed = parseYaml(readFileSync(file, "utf8")); }
+	catch (err) { throw new BackendConfigError(`invalid ${file}: ${String(err)}`); }
+	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new BackendConfigError(`${file} is not a YAML mapping`);
 	return parsed as BackendConfig;
 }
 
-function lookupBackend(config: BackendConfig, id: string, home: string): string {
-	const entry = (config.backends ?? []).find((b) => b.id === id);
-	if (!entry || typeof entry.path !== "string") {
-		throw new BackendConfigError(`backend "${id}" is not listed under backends in ${path.join(home, "config.yml")}`);
-	}
-	return entry.path;
+export function listBackends(home = getDataDir()): BackendEntry[] {
+	const config = readBackendConfig(home);
+	if (config.backends === undefined) return [];
+	if (!Array.isArray(config.backends)) throw new BackendConfigError("backends must be a list");
+	return config.backends.map((entry) => {
+		if (!entry || typeof entry.id !== "string" || !entry.id || typeof entry.path !== "string" || !["source", "gateway"].includes(entry.kind))
+			throw new BackendConfigError(`invalid backend entry in ${path.join(home, "config.yml")}`);
+		return entry;
+	});
 }
 
-export function resolveBackendSelection(env: NodeJS.ProcessEnv = process.env): BackendSelection {
+export function writeActiveBackend(id: string | null, home = getDataDir()): void {
+	mkdirSync(home, { recursive: true });
+	const file = path.join(home, "config.yml");
+	const doc = parseDocument(existsSync(file) ? readFileSync(file, "utf8") : "{}");
+	if (doc.errors.length) throw new BackendConfigError(`invalid ${file}: ${doc.errors[0]?.message}`);
+	if (id === null) doc.delete("activeBackend");
+	else doc.set("activeBackend", id);
+	const tmp = `${file}.${process.pid}.tmp`;
+	writeFileSync(tmp, doc.toString(), { mode: 0o600 });
+	renameSync(tmp, file);
+}
+
+export function resolveBackendSelection(env: NodeJS.ProcessEnv = process.env): BackendSelection | undefined {
 	const home = getDataDir(env);
 	const pinned = env.NPI_DECK_BACKEND?.trim();
-	if (pinned) {
-		if (path.isAbsolute(pinned)) return { id: null, path: pinned, source: "env" };
-		return { id: pinned, path: lookupBackend(readBackendConfig(home), pinned, home), source: "env" };
-	}
-	const config = readBackendConfig(home);
-	if (typeof config.activeBackend !== "string" || !config.activeBackend) {
-		throw new BackendConfigError(`no activeBackend set in ${path.join(home, "config.yml")}`);
-	}
-	return { id: config.activeBackend, path: lookupBackend(config, config.activeBackend, home), source: "config" };
+	if (pinned && path.isAbsolute(pinned)) return { id: null, path: pinned, source: "env" };
+	const id = pinned || readBackendConfig(home).activeBackend;
+	if (!id) return undefined;
+	const entry = listBackends(home).find((b) => b.id === id);
+	if (!entry) throw new BackendConfigError(`backend "${id}" is not listed under backends in ${path.join(home, "config.yml")}`);
+	if (entry.kind === "gateway") throw new BackendConfigError(`backend "${id}" has reserved kind gateway; only source backends are supported`);
+	return { id, path: path.resolve(entry.path), source: pinned ? "env" : "config" };
 }
 
 type ModuleLoad = { ok: true; file: string; ns: Record<string, unknown> } | { ok: false; file: string | null; reason: string };
@@ -212,7 +223,7 @@ let active: { backend: LoadedBackend; values: Map<FeatureName, Record<string, un
  * anything when a required export is missing. Idempotent for the same tree;
  * a second, different tree is refused because module effects can't be undone.
  */
-export async function loadBackend(selection: BackendSelection = resolveBackendSelection()): Promise<LoadedBackend> {
+export async function loadBackend(selection: BackendSelection = resolveBackendSelection() ?? (() => { throw new BackendConfigError("no backend configured"); })()): Promise<LoadedBackend> {
 	const tree = path.resolve(selection.path);
 	if (active) {
 		if (active.backend.identity.path === tree) return active.backend;

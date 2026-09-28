@@ -61,11 +61,11 @@ export function spawnOwned<
 	const In extends Bun.SpawnOptions.Writable = "ignore",
 	const Out extends Bun.SpawnOptions.Readable = "pipe",
 	const Err extends Bun.SpawnOptions.Readable = "inherit",
->(cmd: string[], options: Omit<Bun.SpawnOptions.SpawnOptions<In, Out, Err>, "cmd" | "detached"> = {}): Bun.Subprocess<In, Out, Err> {
+>(cmd: string[], options: Omit<Bun.SpawnOptions.SpawnOptions<In, Out, Err>, "cmd" | "detached"> = {}, policy: { replaceEnv?: boolean } = {}): Bun.Subprocess<In, Out, Err> {
 	if (!cmd.length) throw new Error("spawnOwned requires a command");
 	const wrapped = process.platform === "linux" && fs.existsSync("/usr/bin/setpriv")
 		? ["/usr/bin/setpriv", "--pdeathsig", "KILL", "--", ...cmd] : cmd;
-	const env = { ...process.env, ...options.env, ...(process.env[GEN_ENV] ? { [GEN_ENV]: process.env[GEN_ENV] } : {}) } as Record<string, string>;
+	const env = { ...(policy.replaceEnv ? {} : process.env), ...options.env, ...(process.env[GEN_ENV] ? { [GEN_ENV]: process.env[GEN_ENV] } : {}) } as Record<string, string>;
 	const onExit = options.onExit;
 	const releaseWork = workRegistry.admit("process", crypto.randomUUID());
 	let proc: Bun.Subprocess<In, Out, Err>;

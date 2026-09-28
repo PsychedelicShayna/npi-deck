@@ -6,6 +6,8 @@ import { broadcastBus } from "./broadcast-bus.ts";
 import { logger } from "./log.ts";
 import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
 import { workRegistry } from "./work-registry.ts";
+import { activeBackend } from "./backend/runtime.ts";
+import type { BackendStatusResponse } from "@npi-deck/protocol";
 const log = logger("ws");
 
 /** Per-connection state. */
@@ -25,7 +27,7 @@ export class WsHub {
 	private readonly connections = new Set<ServerWebSocket<ConnectionData>>();
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-	constructor(private bridge: AgentBridge) {
+	constructor(private bridge: AgentBridge, private readonly generation: string) {
 		broadcastBus.subscribe((frame) => this.broadcast(frame));
 		this.startHeartbeat();
 	}
@@ -67,7 +69,9 @@ export class WsHub {
 
 	onOpen(ws: ServerWebSocket<ConnectionData>): void {
 		this.connections.add(ws);
-		send(ws, { type: "hello", connectionId: ws.data.connectionId });
+		const backend = activeBackend();
+		const running: BackendStatusResponse["running"] = backend ? { id: backend.selection.id, path: backend.identity.path, source: backend.selection.source, version: backend.identity.version, commit: backend.identity.commit } : null;
+		send(ws, { type: "hello", connectionId: ws.data.connectionId, workerGeneration: this.generation, backend: running, capabilities: backend ? Object.entries(backend.features).filter(([, status]) => status.available).map(([name]) => name) : [] });
 		log.debug(`open ${ws.data.connectionId}`);
 	}
 
@@ -192,6 +196,9 @@ export class WsHub {
 		const unsubPlan = this.bridge.subscribePlanModeFrames(sessionId, (frame) => {
 			send(ws, frame);
 		});
+		const unsubSubagents = this.bridge.subscribeSubagents(sessionId, (nodes) => {
+			send(ws, { type: "subagents_snapshot", sessionId, nodes });
+		});
 		const teardown = (): void => {
 			try {
 				unsubSession();
@@ -207,6 +214,11 @@ export class WsHub {
 				unsubPlan();
 			} catch (err) {
 				log.warn(`plan-mode unsubscribe threw`, err);
+			}
+			try {
+				unsubSubagents();
+			} catch (err) {
+				log.warn(`subagent unsubscribe threw`, err);
 			}
 		};
 		ws.data.subscriptions.set(sessionId, teardown);
@@ -409,13 +421,13 @@ export class WsHub {
 		// Like ext_ui_dialog_response: any connection that observed the
 		// plan_proposed (replayed on subscribe) is allowed to answer. We
 		// bump activity to keep the reaper away while the user is mid-
-		// decision and during the renaming/synthetic-prompt phase.
+		// decision and during the proposal response.
 		this.bridge.bumpActivity(frame.sessionId);
-		const { approved, finalPath, editedContent, proposalId, sessionId } = frame;
+		const { approved, feedback, editedContent, proposalId, sessionId } = frame;
 		try {
 			const outcome = await this.bridge.respondToPlanApproval(sessionId, proposalId, {
 				approved,
-				...(finalPath !== undefined ? { finalPath } : {}),
+				...(feedback !== undefined ? { feedback } : {}),
 				...(editedContent !== undefined ? { editedContent } : {}),
 			});
 			if (outcome === "unknown") {

@@ -33,6 +33,7 @@ export interface SessionSummary {
 	createdAt: string;
 	updatedAt: string;
 	messageCount: number;
+	backendLastRan?: { path: string; commit: string | null; version: string | null };
 }
 
 export interface WorkspaceEntry {
@@ -122,6 +123,7 @@ export interface BackendStatusResponse {
 	workerGeneration: string;
 	running: { id: string | null; path: string; source: "env" | "config"; version: string | null; commit: string | null } | null;
 	desired: string | null;
+	validated: { id: string | null; path: string; commit: string | null; version: string | null; pinned: boolean } | null;
 	pinned: boolean;
 	reason?: string;
 	backends: Array<{ id: string; kind: "source" | "gateway"; path: string }>;
@@ -1060,6 +1062,7 @@ export interface SessionTranscriptResponse {
 	cwd: string;
 	title?: string;
 	messages: AgentMessageJson[];
+	backendLastRan?: { path: string; commit: string | null; version: string | null };
 }
 
 /** A child of a live deck session. parentId is another node or the root agent id. */

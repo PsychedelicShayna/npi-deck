@@ -17,6 +17,7 @@ export const workRegistry = {
 		item.kind = to;
 	},
 	closeAdmissions(): void { closed = true; },
+	reopenAdmissions(): void { closed = false; },
 	get busy(): boolean { return items.size > 0; },
 	snapshot(): WorkItem[] { return [...items.values()]; },
 };

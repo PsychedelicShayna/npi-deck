@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { useStore, selectActiveSession } from "@/lib/store";
 import { ChatHeader } from "./chat/ChatHeader";
 import { SessionPicker } from "./chat/SessionPicker";
+import { SubagentTreePanel } from "./chat/SubagentTreePanel";
 import { UserMessage } from "./messages/UserMessage";
 import { AssistantMessage } from "./messages/AssistantMessage";
 import { Notice } from "./messages/Notice";
@@ -44,6 +45,13 @@ export function Chat() {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<ChatHeader />
+			{session.endedByRestart ? (
+				<div className="border-b border-warn/30 bg-warn/10 px-6 py-2 text-xs text-warn">
+					This session ended when the server worker restarted. Its transcript is preserved; sending a new prompt explicitly resumes it.
+					{session.backendLastRan ? ` Last backend: ${session.backendLastRan.commit?.slice(0, 10) ?? session.backendLastRan.path}.` : ""}
+				</div>
+			) : null}
+			{!session.readOnly ? <SubagentTreePanel sessionId={session.sessionId} /> : null}
 			<div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
 				<div className="mx-auto flex max-w-[760px] flex-col gap-7 px-6 py-10">
 					{messages.length === 0 ? (

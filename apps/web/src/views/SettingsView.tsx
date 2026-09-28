@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Play, RotateCcw, Save, Square, X } from "lucide-react";
 import type {
+	BackendStatusResponse,
 	BridgeInfo,
 	BridgeName,
 	EnvEntry,
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils";
 
 const SECTIONS = [
 	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
+	{ id: "backend", label: "Backend", description: "Source trees and worker switching" },
 	{ id: "providers", label: "Providers", description: "OAuth sign-in and API-key state" },
 	{ id: "messaging", label: "Messaging", description: "Telegram and future chat bridges" },
 	{ id: "starters", label: "Starters", description: "Opt-in starter extensions" },
@@ -82,6 +84,8 @@ export function SettingsView() {
 						<section className="min-h-0 overflow-auto p-4">
 							{selected === "env" ? (
 								<EnvSection />
+							) : selected === "backend" ? (
+								<BackendSection />
 							) : selected === "providers" ? (
 								<ProvidersSection />
 							) : selected === "messaging" ? (
@@ -100,6 +104,48 @@ export function SettingsView() {
 				</div>
 			}
 		/>
+	);
+}
+
+function BackendSection() {
+	const [status, setStatus] = useState<BackendStatusResponse | null>(null);
+	const [selected, setSelected] = useState("");
+	const [report, setReport] = useState("");
+	const [busy, setBusy] = useState(false);
+	const generation = useStore(s => s.workerGeneration);
+	useEffect(() => {
+		void settingsApi.backendStatus().then(data => { setStatus(data); setSelected(current => current || data.desired || data.backends[0]?.id || ""); }).catch(err => setReport(String(err)));
+	}, [generation]);
+	async function run(force: boolean) {
+		if (!selected) return;
+		setBusy(true);
+		try {
+			const probe = await settingsApi.probeBackend(selected);
+			if (!probe.ok) { setReport(`Preflight refused: ${probe.reason}`); return; }
+			const result = await settingsApi.switchBackend(selected, force);
+			setReport(result.message);
+		} catch (err) {
+			const message = String(err);
+			setReport(message.includes("work in progress") ? `${message} — use Force to abort work` : message);
+		} finally { setBusy(false); }
+	}
+	return (
+		<div className="mx-auto max-w-3xl space-y-4">
+			<h1 className="text-xl font-semibold">NeoPi backend</h1>
+			<p className="text-sm text-ink-3">Running: {status?.running ? `${status.running.path} (${status.running.commit?.slice(0, 10) ?? "unknown SHA"}, ${status.running.version ?? "unknown version"})` : "none — SDK-backed routes are unavailable"}</p>
+			{status?.reason ? <p role="alert" className="text-sm text-warn">{status.reason}</p> : null}
+			{status?.pinned ? <p role="alert" className="text-sm text-warn">NPI_DECK_BACKEND pins this launch. Remove it and restart to enable switching.</p> : null}
+			<label className="block text-sm">Backend
+				<select className="mt-1 block w-full rounded border border-line bg-paper p-2" value={selected} onChange={e => setSelected(e.target.value)} disabled={status?.pinned || busy}>
+					{status?.backends.map(b => <option key={b.id} value={b.id}>{b.id} — {b.kind}: {b.path}</option>)}
+				</select>
+			</label>
+			<div className="flex gap-2">
+				<Button disabled={!selected || status?.pinned || busy} onClick={() => void run(false)}>Switch</Button>
+				<Button variant="outline" disabled={!selected || status?.pinned || busy} onClick={() => void run(true)}>Force — abort all work</Button>
+			</div>
+			{report ? <p role="status" className="break-words text-sm text-ink-3">{report}</p> : null}
+		</div>
 	);
 }
 

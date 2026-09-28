@@ -16,6 +16,8 @@ export class WsClient {
 	private status: WsStatus = "closed";
 	private url: string;
 	private closed = false;
+	private generation: string | null = null;
+	private ready = false;
 
 	constructor(url?: string) {
 		const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -29,9 +31,8 @@ export class WsClient {
 		this.socket = sock;
 
 		sock.addEventListener("open", () => {
-			this.setStatus("open");
 			this.retryDelay = 500;
-			this.flushQueue();
+			// Outbound frames stay gated until hello identifies this worker.
 		});
 
 		sock.addEventListener("message", (ev) => {
@@ -41,6 +42,11 @@ export class WsClient {
 			} catch {
 				return;
 			}
+			if (frame.type === "hello") {
+				if (this.generation !== null && this.generation !== frame.workerGeneration) this.queue = [];
+				this.generation = frame.workerGeneration;
+				this.ready = true;
+			}
 			for (const l of this.listeners) {
 				try {
 					l(frame);
@@ -48,10 +54,15 @@ export class WsClient {
 					console.warn("ws listener threw", err);
 				}
 			}
+			if (frame.type === "hello") {
+				this.setStatus("open");
+				this.flushQueue();
+			}
 		});
 
 		const onTeardown = (): void => {
 			this.socket = null;
+			this.ready = false;
 			this.setStatus("closed");
 			if (!this.closed) this.scheduleReconnect();
 		};
@@ -67,11 +78,13 @@ export class WsClient {
 		}
 		this.socket?.close();
 		this.socket = null;
+		this.queue = [];
+		this.ready = false;
 		this.setStatus("closed");
 	}
 
 	send(frame: ClientFrame): void {
-		if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+		if (this.ready && this.socket && this.socket.readyState === WebSocket.OPEN) {
 			this.socket.send(JSON.stringify(frame));
 		} else {
 			this.queue.push(frame);
@@ -104,7 +117,7 @@ export class WsClient {
 	}
 
 	private flushQueue(): void {
-		while (this.queue.length > 0 && this.socket?.readyState === WebSocket.OPEN) {
+		while (this.ready && this.queue.length > 0 && this.socket?.readyState === WebSocket.OPEN) {
 			const f = this.queue.shift()!;
 			this.socket.send(JSON.stringify(f));
 		}

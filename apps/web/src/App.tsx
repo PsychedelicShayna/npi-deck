@@ -6,6 +6,8 @@ import { NotificationToast } from "./components/NotificationToast";
 import { NotificationPermissionBanner } from "./components/NotificationPermissionBanner";
 
 export function App() {
+	const backend = useStore((s) => s.backend);
+	const generation = useStore((s) => s.workerGeneration);
 	const bootstrap = useStore((s) => s.bootstrap);
 	useNotificationBridge();
 	useGlobalAbortShortcut();
@@ -17,6 +19,12 @@ export function App() {
 	return (
 		<>
 			<NotificationPermissionBanner />
+			{generation && !backend ? (
+				<div role="alert" className="border-b border-warn/30 bg-warn/10 px-4 py-2 text-sm text-warn">
+					No NeoPi backend is running. Kanban, inbox, routines and settings remain available.{" "}
+					<a className="underline" href="/settings?section=backend">Choose a backend</a>.
+				</div>
+			) : null}
 			<AppRouter />
 			<NotificationToast />
 		</>

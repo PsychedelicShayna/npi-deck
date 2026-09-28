@@ -1,3 +1,4 @@
+import type { BackendStatusResponse, BackendSwitchResponse } from "@npi-deck/protocol";
 import type {
 	ListEnvSettingsResponse,
 	PatchEnvSettingsRequest,
@@ -35,5 +36,14 @@ export const settingsApi = {
 	},
 	restartServer(): Promise<RestartServerResponse> {
 		return req<RestartServerResponse>("/server/restart", { method: "POST" });
+	},
+	backendStatus(): Promise<BackendStatusResponse> {
+		return req<BackendStatusResponse>("/backend");
+	},
+	probeBackend(id: string): Promise<{ ok: boolean; reason?: string; pinned?: boolean; identity?: { version: string | null; commit: string | null } }> {
+		return req("/backend/probe", { method: "POST", body: JSON.stringify({ id }) });
+	},
+	switchBackend(id: string, force = false): Promise<BackendSwitchResponse> {
+		return req("/backend/switch", { method: "POST", body: JSON.stringify({ id, force }) });
 	},
 };

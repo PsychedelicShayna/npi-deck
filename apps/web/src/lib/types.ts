@@ -209,6 +209,9 @@ export interface SessionUi {
 	 * sends. `sessionId` is the file's session id; nothing is subscribed.
 	 */
 	readOnly?: { path: string };
+	/** Previous worker exited; transcript is retained, but its live handle is gone. */
+	endedByRestart?: boolean;
+	backendLastRan?: { path: string; commit: string | null };
 	cwd: string;
 	sessionFile?: string;
 	sessionName?: string;

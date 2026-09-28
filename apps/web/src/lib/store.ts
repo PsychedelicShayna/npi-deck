@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
 import type {
+	BackendStatusResponse,
 	ExtUiDialogResponse,
 	ListSessionsResponse,
 	ListWorkspacesResponse,
@@ -10,6 +11,7 @@ import type {
 	PlanModeContextWire,
 	SessionSummary,
 	ServerFrame,
+	SubagentNode,
 	WorkspaceEntry,
 } from "@npi-deck/protocol";
 
@@ -67,6 +69,8 @@ interface StoreState {
 	ws: WsClient | null;
 	wsStatus: WsStatus;
 	connectionId?: string;
+	workerGeneration?: string;
+	backend: BackendStatusResponse["running"];
 
 	workspaces: WorkspaceEntry[];
 	defaultCwd: string;
@@ -74,6 +78,7 @@ interface StoreState {
 
 	activeId?: string;
 	sessionsById: Record<string, SessionUi>;
+	subagentsBySession: Record<string, SubagentNode[]>;
 
 	// Track subscriptions to avoid duplicate subscribe messages.
 	subscribed: Set<string>;
@@ -204,7 +209,7 @@ interface StoreState {
 		sessionId: string;
 		proposalId: string;
 		approved: boolean;
-		finalPath?: string;
+		feedback?: string;
 		editedContent?: string;
 	}): void;
 	/** Mark a notification as delivered to the OS so the renderer only fires once. */
@@ -217,10 +222,12 @@ export const useStore = create<StoreState>()(
 	subscribeWithSelector((set, get) => ({
 		ws: null,
 		wsStatus: "closed",
+		backend: null,
 		workspaces: [],
 		defaultCwd: "",
 		sessions: [],
 		sessionsById: {},
+		subagentsBySession: {},
 		subscribed: new Set<string>(),
 		toolView: { allCollapsed: false, perCard: {} },
 		tasksChangeCounter: 0,
@@ -255,28 +262,32 @@ export const useStore = create<StoreState>()(
 		},
 
 		async refreshWorkspaces() {
+			const generation = get().workerGeneration;
 			try {
 				const resp: ListWorkspacesResponse = await api.listWorkspaces();
-				set({ workspaces: resp.workspaces, defaultCwd: resp.defaultCwd });
+				if (generation === get().workerGeneration) set({ workspaces: resp.workspaces, defaultCwd: resp.defaultCwd });
 			} catch (err) {
 				console.warn("listWorkspaces failed", err);
 			}
 		},
 
 		async refreshSessions(cwd?: string) {
+			const generation = get().workerGeneration;
 			try {
 				const resp: ListSessionsResponse = await api.listSessions(cwd);
-				set({ sessions: resp.sessions });
+				if (generation === get().workerGeneration) set({ sessions: resp.sessions });
 			} catch (err) {
 				console.warn("listSessions failed", err);
 			}
 		},
 
 		async createSession(opts) {
+			const generation = get().workerGeneration;
 			const created = await api.createSession({
 				cwd: opts.cwd,
 				...(opts.resumeFromPath ? { resumeFromPath: opts.resumeFromPath } : {}),
 			});
+			if (generation !== get().workerGeneration) throw new Error("worker restarted during session creation; retry explicitly");
 			// Subscribe immediately; reducer will hydrate from the `subscribed` snapshot.
 			get().ws?.send({ type: "subscribe", sessionId: created.sessionId });
 			get().subscribed.add(created.sessionId);
@@ -311,6 +322,7 @@ export const useStore = create<StoreState>()(
 				todoPhases: [],
 			});
 			ui.readOnly = { path: t.path };
+			ui.backendLastRan = t.backendLastRan;
 			set((s) => ({ sessionsById: { ...s.sessionsById, [t.sessionId]: ui }, activeId: t.sessionId }));
 		},
 
@@ -472,7 +484,7 @@ export const useStore = create<StoreState>()(
 			get().ws?.send({ type: "set_plan_mode", sessionId: id, enabled });
 		},
 
-		respondToPlanApproval({ sessionId, proposalId, approved, finalPath, editedContent }) {
+		respondToPlanApproval({ sessionId, proposalId, approved, feedback, editedContent }) {
 			// Optimistically clear the local approval card so the UI hides
 			// immediately. Server emits `plan_proposal_resolved`; if the
 			// proposalId is stale (sibling tab won the race), the bridge's
@@ -494,7 +506,7 @@ export const useStore = create<StoreState>()(
 				sessionId,
 				proposalId,
 				approved,
-				...(finalPath !== undefined ? { finalPath } : {}),
+				...(feedback !== undefined ? { feedback } : {}),
 				...(editedContent !== undefined ? { editedContent } : {}),
 			});
 		},
@@ -531,21 +543,46 @@ function handleFrame(
 	get: () => StoreState,
 ): void {
 	switch (frame.type) {
-		case "hello":
-			set({ connectionId: frame.connectionId });
-			// Re-subscribe to any previously-active sessions.
-			for (const id of get().subscribed) {
-				get().ws?.send({ type: "subscribe", sessionId: id });
+		case "hello": {
+			const changed = get().workerGeneration !== undefined && get().workerGeneration !== frame.workerGeneration;
+			if (changed) {
+				set((s) => {
+					const sessionsById: Record<string, SessionUi> = {};
+					for (const [id, session] of Object.entries(s.sessionsById)) {
+						if (!session.sessionFile) continue;
+						sessionsById[id] = {
+							...session, status: "idle", readOnly: { path: session.sessionFile },
+							endedByRestart: true, queuedPrompts: [], pendingPlanApproval: undefined,
+							messages: session.messages.map(m => m.role === "assistant" ? { ...m, isStreaming: false } : m),
+						};
+					}
+					return { connectionId: frame.connectionId, workerGeneration: frame.workerGeneration, backend: frame.backend,
+						sessionsById, activeId: s.activeId && sessionsById[s.activeId] ? s.activeId : undefined,
+						subscribed: new Set<string>(), subagentsBySession: {}, pendingDialogs: {},
+						heartbeat: null, sessions: [], workspaces: [] };
+				});
+				void get().refreshSessions();
+				void get().refreshWorkspaces();
+			} else {
+				set({ connectionId: frame.connectionId, workerGeneration: frame.workerGeneration, backend: frame.backend });
+				for (const id of get().subscribed) get().ws?.send({ type: "subscribe", sessionId: id });
 			}
 			return;
+		}
 
 		case "subscribed":
 			set((s) => ({
 				sessionsById: {
 					...s.sessionsById,
-					[frame.sessionId]: initSession(frame.snapshot),
+					[frame.sessionId]: { ...initSession(frame.snapshot), backendLastRan: s.backend
+						? { path: s.backend.path, commit: s.backend.commit }
+						: s.sessionsById[frame.sessionId]?.backendLastRan },
 				},
 			}));
+			return;
+
+		case "subagents_snapshot":
+			set((s) => ({ subagentsBySession: { ...s.subagentsBySession, [frame.sessionId]: frame.nodes } }));
 			return;
 
 		case "unsubscribed":
@@ -597,9 +634,8 @@ function handleFrame(
 				const planMode: PlanModeContextWire | undefined = frame.enabled
 					? { enabled: true, planFilePath: frame.planFilePath ?? "local://PLAN.md" }
 					: undefined;
-				// On exit, also drop any unresolved approval card — the bridge
-				// has already rejected its standing handler, so leaving the
-				// card visible would let the user click into a 409.
+				// On exit, drop any unresolved approval card; a reply is no
+				// longer possible after the proposal handler is cleared.
 				const pendingPlanApproval = frame.enabled ? prev.pendingPlanApproval : undefined;
 				return {
 					sessionsById: {
@@ -619,7 +655,6 @@ function handleFrame(
 					planFilePath: frame.planFilePath,
 					planContent: frame.planContent,
 					suggestedTitle: frame.suggestedTitle,
-					suggestedFinalPath: frame.suggestedFinalPath,
 				};
 				return {
 					sessionsById: {
@@ -649,10 +684,13 @@ function handleFrame(
 				const nextSessions = { ...s.sessionsById };
 				delete nextSessions[frame.sessionId];
 				const nextDialogs = { ...s.pendingDialogs };
+				const subagentsBySession = { ...s.subagentsBySession };
+				delete subagentsBySession[frame.sessionId];
 				delete nextDialogs[frame.sessionId];
 				return {
 					sessionsById: nextSessions,
 					pendingDialogs: nextDialogs,
+					subagentsBySession,
 					activeId: s.activeId === frame.sessionId ? undefined : s.activeId,
 				};
 			});
