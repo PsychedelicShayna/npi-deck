@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { OAuthFlowModal } from "@/components/settings/OAuthFlowModal";
+import { NpiConfigSection } from "@/components/settings/NpiConfigSection";
 import { bridgesApi } from "@/lib/bridges-api";
 import { settingsApi } from "@/lib/settings-api";
 import { startersApi } from "@/lib/starters-api";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 const SECTIONS = [
 	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
 	{ id: "backend", label: "Backend", description: "Source trees and worker switching" },
+	{ id: "neopi", label: "NeoPi", description: "Every NeoPi setting in config.yml" },
 	{ id: "providers", label: "Providers", description: "OAuth sign-in and API-key state" },
 	{ id: "messaging", label: "Messaging", description: "Telegram and future chat bridges" },
 	{ id: "starters", label: "Starters", description: "Opt-in starter extensions" },
@@ -86,6 +88,8 @@ export function SettingsView() {
 								<EnvSection />
 							) : selected === "backend" ? (
 								<BackendSection />
+							) : selected === "neopi" ? (
+								<NpiConfigSection />
 							) : selected === "providers" ? (
 								<ProvidersSection />
 							) : selected === "messaging" ? (

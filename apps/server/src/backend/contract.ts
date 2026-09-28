@@ -113,6 +113,7 @@ const mixtures = feature("mixtures");
 const mcp = feature("mcp-allowlist");
 const multiRoot = feature("multi-root");
 const build = feature("build-identity");
+const npiConfig = feature("npi-config");
 
 await check("manifest: every feature available", [], () => {
 	const missing = Object.entries(backend.features).flatMap(([, f]) => f.diagnostics);
@@ -152,6 +153,34 @@ await check("identity: BUILD_INFO snapshots the source tree", ["BUILD_INFO"], ()
 	assert(info.gitSha === backend.identity.commit, `BUILD_INFO gitSha ${info.gitSha} != ${backend.identity.commit}`);
 	assert(info.version === core.VERSION && info.dirty === false, `unexpected BUILD_INFO ${JSON.stringify(info)}`);
 	return `${info.version} ${info.gitSha} dirty=${info.dirty}`;
+});
+
+await check("npi-config: registry handles enumerate, parse, persist and report provenance", [
+	"orderedSettings", "allSettings", "SETTING_TABS", "TAB_METADATA", "TAB_GROUPS",
+], async () => {
+	const all = npiConfig.allSettings();
+	const ordered = new Set(npiConfig.orderedSettings());
+	assert(all.length > 0 && all.every(s => ordered.has(s)), `orderedSettings omits ${all.filter(s => !ordered.has(s)).map(s => s.id).join(", ")}`);
+	const tabs = npiConfig.SETTING_TABS as string[];
+	const groups = npiConfig.TAB_GROUPS as Record<string, readonly string[]>;
+	const labels = npiConfig.TAB_METADATA as Record<string, { label: string }>;
+	const misplaced = all.filter(s => s.ui && (!tabs.includes(s.ui.tab) || !labels[s.ui.tab]?.label || (s.ui.group !== undefined && !groups[s.ui.tab]?.includes(s.ui.group))));
+	assert(misplaced.length === 0, `settings outside declared tabs/groups: ${misplaced.map(s => s.id).join(", ")}`);
+	const handle = all.find(s => s.id === "edit.fuzzyThreshold");
+	assert(handle?.type === "number", "edit.fuzzyThreshold number handle missing");
+	let rejected = "";
+	try { handle.parse("not-a-number"); } catch (err) { rejected = (err as Error).message; }
+	assert(rejected.includes("Invalid number"), `parse did not reject: ${rejected}`);
+	const writable = await core.Settings.loadIsolated({ cwd: agentDir, agentDir });
+	handle.set(writable, handle.parse("0.9"));
+	await writable.flush();
+	const read = await core.Settings.loadReadOnly({ cwd: agentDir, agentDir });
+	assert(handle.get(read) === 0.9 && handle.provenance(read) === "global", `persisted ${String(handle.get(read))} via ${handle.provenance(read)}`);
+	handle.unset(writable);
+	await writable.flush();
+	const cleared = await core.Settings.loadReadOnly({ cwd: agentDir, agentDir });
+	assert(handle.provenance(cleared) === "default", `unset left provenance ${handle.provenance(cleared)}`);
+	return `${all.length} settings (${all.filter(s => !s.ui).length} config-file only) across ${tabs.length} tabs; parse rejects "${rejected}"; set/unset round-trips global↔default`;
 });
 
 await check("theme: pi-tui instance initialized for ask", ["getThemeByName", "setThemeInstance"], async () => {

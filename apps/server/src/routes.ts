@@ -36,6 +36,7 @@ import { buildAuthOAuthRouter } from "./routes-auth-oauth.ts";
 import { buildOnboardingRouter } from "./routes-onboarding.ts";
 import { buildSubagentsRouter } from "./routes-subagents.ts";
 import { buildAdvisorsRouter } from "./routes-advisors.ts";
+import { buildNpiConfigRouter } from "./routes-npi-config.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
@@ -277,6 +278,7 @@ export function buildRouter(
 	app.route("/onboarding", buildOnboardingRouter());
 	app.route("/subagents", buildSubagentsRouter(bridge));
 	app.route("/", buildAdvisorsRouter(bridge, config));
+	app.route("/", buildNpiConfigRouter(bridge, config));
 
 	return app;
 }

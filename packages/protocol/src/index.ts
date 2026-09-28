@@ -121,6 +121,101 @@ export interface RestartServerResponse {
 	message: string;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NeoPi configuration registry (`~/.omp/agent/config.yml`)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type NpiConfigValueType = "boolean" | "string" | "number" | "enum" | "array" | "record";
+/** Layer supplying a setting's effective value, highest precedence first. */
+export type NpiConfigProvenance = "env" | "runtime" | "overlay" | "project" | "global" | "default";
+
+export interface NpiConfigOption {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+/** One registered NeoPi setting. Secret values are never sent: `value`, `defaultValue` and `effectiveValue` are null. */
+export interface NpiConfigSetting {
+	id: string;
+	type: NpiConfigValueType;
+	/** Registry `ui.tab`, or `"other"` for settings without panel metadata. */
+	tab: string;
+	/** Registry `ui.group`; settings without panel metadata group by their id's first segment. */
+	group: string;
+	label: string;
+	description: string;
+	/** Risk note from the registry (rate limits, bans). */
+	warning?: string;
+	defaultValue: unknown;
+	/** Value the editor starts from: the global config.yml value, else the default. */
+	value: unknown;
+	/** Value NeoPi resolves for the deck's default workspace, environment included. */
+	effectiveValue: unknown;
+	provenance: NpiConfigProvenance;
+	/** The global config.yml sets this key; reset-to-default removes it. */
+	inGlobalConfig: boolean;
+	/** config.yml holds a value the setting rejects; NeoPi ignores it and uses the default. */
+	invalidGlobalValue: boolean;
+	/** Credential: the value is write-only here. */
+	secret: boolean;
+	/** The environment or any settings layer configures a value. */
+	configured: boolean;
+	enumValues?: string[];
+	/** Registry choices (submenu options, or array membership choices). */
+	options?: NpiConfigOption[];
+	/** NeoPi fills the choices at runtime (themes, shapes); the value is free text. */
+	runtimeOptions?: boolean;
+	/** Closed vocabulary of array entries; writes naming another entry are rejected. */
+	items?: string[];
+	/** Array entry order is meaningful. */
+	ordered?: boolean;
+	/** Entries may be path-scoped objects (`{ path(s), values }`) rather than plain strings. */
+	pathScoped?: boolean;
+	env?: { name: string; fallback: boolean; active: boolean };
+	/** Why this setting cannot be edited here; absent when editable. */
+	lockedReason?: string;
+}
+
+export interface NpiConfigTab {
+	id: string;
+	label: string;
+	/** Group order within the tab, as the registry declares it. */
+	groups: string[];
+}
+
+export interface NpiConfigResponse {
+	/** Workspace whose project layer the provenance reflects. */
+	cwd: string;
+	/** Global config file PATCH writes. */
+	configPath: string;
+	tabs: NpiConfigTab[];
+	settings: NpiConfigSetting[];
+}
+
+/** Set `value`, or remove the key from config.yml with `unset: true`. Strings go through the setting's own text parser. */
+export interface NpiConfigPatchRequest {
+	id: string;
+	value?: unknown;
+	unset?: boolean;
+}
+
+/** What one live chat's settings resolve for the patched key after the reload. */
+export interface NpiConfigLiveApply {
+	sessionId: string;
+	cwd: string;
+	provenance: NpiConfigProvenance;
+	/** Null for secrets. */
+	effectiveValue: unknown;
+	/** The reload failed; the chat keeps its previous settings. */
+	error?: string;
+}
+
+export interface NpiConfigPatchResponse {
+	setting: NpiConfigSetting;
+	live: NpiConfigLiveApply[];
+}
+
 export interface BackendStatusResponse {
 	workerGeneration: string;
 	running: { id: string | null; path: string; source: "env" | "config"; version: string | null; commit: string | null } | null;

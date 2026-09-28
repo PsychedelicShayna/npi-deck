@@ -1,3 +1,4 @@
+import type { Settings } from "@oh-my-pi/pi-coding-agent";
 import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
@@ -44,6 +45,12 @@ export interface AgentBridge {
 	bumpActivity(sessionId: string): void;
 	/** Hot-apply runtime env values that do not require process restart. */
 	applyEnvUpdate?(update: RuntimeEnvUpdate): void;
+	/**
+	 * Re-read the persisted settings layers into every live session's settings
+	 * (and NeoPi's process-wide instance, once a tool has initialized it) after
+	 * a config.yml write, so the change applies without a restart.
+	 */
+	reloadLiveSettings(): Promise<LiveSettingsReload[]>;
 	/** Catalog of models the SDK knows about, plus a marker on the current one when sessionId is given. */
 	listModels(opts?: { sessionId?: string }): Promise<ModelInfo[]>;
 	/**
@@ -90,6 +97,15 @@ export interface AgentBridge {
 
 export interface RuntimeEnvUpdate {
 	idleTimeoutMs?: number;
+}
+
+/** One live session's settings after {@link AgentBridge.reloadLiveSettings}. */
+export interface LiveSettingsReload {
+	sessionId: string;
+	cwd: string;
+	settings: Settings;
+	/** The reload failed; the session keeps its previous layers. */
+	error?: string;
 }
 
 /** Invalid per-session MCP selection; callers can return a client error. */

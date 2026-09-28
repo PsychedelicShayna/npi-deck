@@ -28,6 +28,8 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/capability": typeof import("@oh-my-pi/pi-coding-agent/capability");
 	"@oh-my-pi/pi-coding-agent/capability/skill": typeof import("@oh-my-pi/pi-coding-agent/capability/skill");
 	"@oh-my-pi/pi-coding-agent/config/model-settings": typeof import("@oh-my-pi/pi-coding-agent/config/model-settings");
+	"@oh-my-pi/pi-coding-agent/config/all-settings": typeof import("@oh-my-pi/pi-coding-agent/config/all-settings");
+	"@oh-my-pi/pi-coding-agent/config/registry": typeof import("@oh-my-pi/pi-coding-agent/config/registry");
 	"@oh-my-pi/pi-coding-agent/session/settings": typeof import("@oh-my-pi/pi-coding-agent/session/settings");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler");
@@ -42,6 +44,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins": typeof import("@oh-my-pi/pi-coding-agent/slash-commands/acp-builtins");
 	"@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry": typeof import("@oh-my-pi/pi-coding-agent/slash-commands/builtin-registry");
 	"@oh-my-pi/pi-coding-agent/tools/resolve": typeof import("@oh-my-pi/pi-coding-agent/tools/resolve");
+	"@oh-my-pi/pi-tui/overlays/settings-defs": typeof import("@oh-my-pi/pi-tui/overlays/settings-defs");
 	"@oh-my-pi/pi-tui/theme/theme": typeof import("@oh-my-pi/pi-tui/theme/theme");
 	"@oh-my-pi/pi-tui/tools/tool-errors": typeof import("@oh-my-pi/pi-tui/tools/tool-errors");
 };
@@ -178,6 +181,18 @@ export const MANIFEST = {
 		consumers: ["bridge/in-process.ts"],
 		exports: {
 			retainMixtureCatalog: op("@oh-my-pi/pi-coding-agent/moa/registration", "retainMixtureCatalog"),
+		},
+	},
+	/** #86: enumerate, validate and write every registered NeoPi setting from the Settings view. */
+	"npi-config": {
+		tier: "optional-feature",
+		consumers: ["routes-npi-config.ts"],
+		exports: {
+			orderedSettings: op("@oh-my-pi/pi-coding-agent/config/all-settings", "orderedSettings"),
+			allSettings: op("@oh-my-pi/pi-coding-agent/config/registry", "all"),
+			SETTING_TABS: op("@oh-my-pi/pi-tui/overlays/settings-defs", "SETTING_TABS"),
+			TAB_METADATA: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_METADATA"),
+			TAB_GROUPS: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_GROUPS"),
 		},
 	},
 	/** neopi#122: runtime-snapshotted source identity; git remains the fallback for older trees. */

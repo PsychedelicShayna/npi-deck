@@ -26,9 +26,13 @@ const fake = {
 	advisorStatus: () => ({ overview: { configured: enabled, advisors: roster.map(a => ({ name: a.name, status: enabled && a.enabled !== false ? "running" : "paused", yielded: true })) }, stats: { cost: 0, advisors: [] }, notes: [], events: [] }),
 	setAdvisorEnabled: (next: boolean) => { enabled = next; },
 	applyAdvisorConfigs: (discovered: { advisors: typeof roster }) => { roster = discovered.advisors; },
-	reloadAdvisorSettings: async () => { model = (await readFile(path.join(agentDir, "config.yml"), "utf8")).match(/advisor: (\S+)/)?.[1] ?? ""; },
 };
-const bridge = { listSessions: async () => [], advisorSession: (id: string) => id === "live" ? fake : undefined, liveAdvisorSessions: () => [fake] } as unknown as AgentBridge;
+const bridge = {
+	listSessions: async () => [],
+	advisorSession: (id: string) => id === "live" ? fake : undefined,
+	liveAdvisorSessions: () => [fake],
+	reloadLiveSettings: async () => { model = (await readFile(path.join(agentDir, "config.yml"), "utf8")).match(/advisor: (\S+)/)?.[1] ?? ""; return []; },
+} as unknown as AgentBridge;
 const app = buildAdvisorsRouter(bridge, config);
 const request = (url: string, init?: RequestInit) => app.request(`http://127.0.0.1${url}`, init);
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

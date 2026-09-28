@@ -43,6 +43,7 @@ import type {
 	AgentBridge,
 	CreateSessionOpts,
 	EventListener,
+	LiveSettingsReload,
 	PlanApprovalResponse,
 	ResumeSessionOpts,
 	RuntimeEnvUpdate,
@@ -271,7 +272,6 @@ export class InProcessAgentBridge implements AgentBridge {
 			setAdvisorEnabled: (enabled: boolean) => entry.session.setAdvisorEnabled(enabled),
 			applyAdvisorConfigs: (config: Awaited<ReturnType<ReturnType<typeof feature<"advisors">>["discoverAdvisorConfigs"]>>) =>
 				entry.session.applyAdvisorConfigs(config.advisors, config.sharedInstructions, config.sharedMaxNotesPerUpdate),
-			reloadAdvisorSettings: () => entry.session.settings.reloadFromDisk(),
 		};
 	}
 
@@ -280,6 +280,28 @@ export class InProcessAgentBridge implements AgentBridge {
 			const session = this.advisorSession(id);
 			return session ? [session] : [];
 		});
+	}
+
+	async reloadLiveSettings(): Promise<LiveSettingsReload[]> {
+		// Tools such as eval and bash initialize NeoPi's process-wide instance,
+		// which drives process effects (theme, credential redaction).
+		const processSettings = sdk().Settings.current;
+		if (processSettings) {
+			try { await (await processSettings).reloadFromDisk(); }
+			catch (err) { log.warn("reload process-wide NeoPi settings failed", err); }
+		}
+		// Each live session owns an isolated instance; reloading it fires NeoPi's
+		// effective-change hooks (model roles, advisors) without a second write.
+		return Promise.all([...this.active].map(async ([sessionId, entry]): Promise<LiveSettingsReload> => {
+			const settings = entry.session.settings;
+			try {
+				await settings.reloadFromDisk();
+				return { sessionId, cwd: entry.handle.cwd, settings };
+			} catch (err) {
+				log.warn(`reload settings for session ${sessionId} failed`, err);
+				return { sessionId, cwd: entry.handle.cwd, settings, error: err instanceof Error ? err.message : String(err) };
+			}
+		}));
 	}
 
 	async listSessions(opts: { cwd?: string }): Promise<SessionSummary[]> {

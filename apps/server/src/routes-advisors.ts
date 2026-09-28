@@ -14,7 +14,6 @@ type AdvisorSession = {
 	advisorStatus(): unknown;
 	setAdvisorEnabled(enabled: boolean): unknown;
 	applyAdvisorConfigs(config: Awaited<ReturnType<AdvisorSdk["discoverAdvisorConfigs"]>>): void;
-	reloadAdvisorSettings(): Promise<void>;
 };
 type AdvisorBridge = AgentBridge & { advisorSession(id: string): AdvisorSession | undefined; liveAdvisorSessions(): AdvisorSession[] };
 const digest = (value: string | null) => createHash("sha256").update(value === null ? "missing\0" : `present\0${value}`).digest("hex");
@@ -142,7 +141,7 @@ export function buildAdvisorsRouter(bridge: AgentBridge, config: import("./confi
 			// Reload the persisted layer on each independent live settings instance.
 			// NeoPi fires its effective modelRoles change hook on reload, retargeting
 			// the live role without queuing a second write to config.yml.
-			for (const session of sessions.liveAdvisorSessions()) await session.reloadAdvisorSettings();
+			await bridge.reloadLiveSettings();
 			await applyToSessions(sessions, feature("advisors"));
 			return c.json({ ok: true });
 		} catch (err) { log.warn("save advisor settings failed", err); return c.json({ error: errorText(err) }, 409); }
