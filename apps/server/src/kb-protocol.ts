@@ -31,6 +31,7 @@ import type {
 	InternalResource,
 	InternalUrl,
 	ProtocolHandler,
+	SchemeSpec,
 } from "@oh-my-pi/pi-coding-agent/internal-urls";
 
 import { resolveKbRoot } from "./kb-service.ts";
@@ -149,14 +150,18 @@ async function buildDirectoryListing(
 /**
  * Resolves `kb://<path>` against the configured KB root.
  *
- * Read-only: the handler is intentionally `immutable: true` to suppress the
+ * Read-only: the spec is intentionally `immutable: true` to suppress the
  * hashline edit affordance. Edits go through `PUT /api/kb/file` (which
  * triggers the `kb_changed` watcher broadcast); allowing arbitrary in-band
  * edits via the read tool would bypass that contract.
  */
 export class KbProtocolHandler implements ProtocolHandler {
 	readonly scheme = "kb";
-	readonly immutable = true;
+	readonly spec: SchemeSpec = {
+		backing: "file",
+		selectors: "lines",
+		immutable: true,
+	};
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const kbRoot = path.resolve(resolveKbRoot());
