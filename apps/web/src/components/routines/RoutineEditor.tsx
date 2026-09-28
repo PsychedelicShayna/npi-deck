@@ -17,7 +17,7 @@ interface Props {
 
 const KINDS: ReadonlyArray<{ value: RoutineActionKind; label: string; placeholder: string }> = [
 	{ value: "bash", label: "bash", placeholder: "echo hello" },
-	{ value: "script", label: "script", placeholder: "C:/path/to/script.ps1 --flag" },
+	{ value: "script", label: "script", placeholder: "/path/to/script.sh --flag" },
 	{ value: "prompt", label: "prompt", placeholder: "Summarize my inbox" },
 ];
 
