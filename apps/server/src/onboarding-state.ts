@@ -142,7 +142,7 @@ async function persistedSessionCount(): Promise<number> {
 async function readProviders(): Promise<OnboardingStateProvider[]> {
 	try {
 		const auth = await getDeckAuthStorage();
-		const all = auth.getAll() as Record<string, unknown>;
+		const all = auth.credentials.all() as Record<string, unknown>;
 		const providers: OnboardingStateProvider[] = [];
 		for (const [id, entry] of Object.entries(all)) {
 			if (!entry) continue;

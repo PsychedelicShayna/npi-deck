@@ -20,7 +20,6 @@
  */
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { getOAuthProviders } from "@oh-my-pi/pi-ai";
 import type { OAuthProviderInfo } from "@oh-my-pi/pi-ai";
 import type {
 	ListProvidersResponse,
@@ -33,6 +32,7 @@ import type {
 
 import { broadcastBus } from "./broadcast-bus.ts";
 import { getDeckAuthStorage, getDeckModelRegistry } from "./auth-singleton.ts";
+import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
 
 /**
@@ -161,8 +161,8 @@ export function buildAuthOAuthRouter(): Hono {
 
 	app.get("/providers", async (c) => {
 		const auth = await getDeckAuthStorage();
-		const sdkProviders: OAuthProviderInfo[] = getOAuthProviders();
-		const data = auth.getAll() as Record<string, unknown>;
+		const sdkProviders: OAuthProviderInfo[] = sdk().getOAuthProviders();
+		const data = auth.credentials.all() as Record<string, unknown>;
 		const providers: ProviderInfo[] = sdkProviders
 			.filter((p) => p.available)
 			.map((p) => ({
@@ -238,8 +238,8 @@ export function buildAuthOAuthRouter(): Hono {
 		flows.set(provider, flow);
 		flowsById.set(flowId, flow);
 
-		const loginPromise = auth
-			.login(provider as Parameters<typeof auth.login>[0], {
+		const loginPromise = auth.oauth
+			.login(provider as Parameters<typeof auth.oauth.login>[0], {
 				onAuth: (info) => {
 					flow.consent = info;
 					flow.status = "consent-ready";
@@ -367,7 +367,7 @@ export function buildAuthOAuthRouter(): Hono {
 		const provider = c.req.param("provider");
 		const auth = await getDeckAuthStorage();
 		try {
-			await auth.remove(provider);
+			await auth.credentials.remove(provider);
 			broadcastBus.broadcast({ type: "models_changed" });
 			return c.json({ ok: true });
 		} catch (err) {
