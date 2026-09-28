@@ -210,21 +210,22 @@ export class InProcessAgentBridge implements AgentBridge {
 	 * MIXTURES.toml) on the model registry only while some owner holds its
 	 * mixture catalog; sessions hold it for their lifetime. The deck holds it
 	 * too, so the picker lists mixtures before any chat is open. Discovery
-	 * reads config files only and spawns nothing.
+	 * reads config files only and spawns nothing. The global `settings` is
+	 * only initialized once a session exists, so this loads its own isolated
+	 * Settings, which it only reads (writes through it would persist).
+	 * A failure is retried on the next listing.
 	 */
 	private ensureMixtures(registry: ModelRegistry): Promise<void> {
 		if (!hasFeature("mixtures")) return Promise.resolve();
-		this.mixturesRetained ??= feature("mixtures")
-			.retainMixtureCatalog("npi-deck:model-picker", {
-				cwd: process.cwd(),
-				agentDir: sdk().getAgentDir(),
-				registry,
-				settings: sdk().settings,
-			})
-			.then(
-				() => {},
-				(err) => log.warn("mixture discovery failed; picker lists no mixtures", err),
-			);
+		this.mixturesRetained ??= (async () => {
+			const cwd = process.cwd();
+			const agentDir = sdk().getAgentDir();
+			const settings = await sdk().Settings.loadIsolated({ cwd, agentDir });
+			await feature("mixtures").retainMixtureCatalog("npi-deck:model-picker", { cwd, agentDir, registry, settings });
+		})().catch((err) => {
+			this.mixturesRetained = undefined;
+			log.warn("mixture discovery failed; picker lists no mixtures", err);
+		});
 		return this.mixturesRetained;
 	}
 
