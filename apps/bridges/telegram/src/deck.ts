@@ -101,7 +101,10 @@ export class DeckClient {
 					}
 					return;
 				}
-				if (event.type === "turn_end" || event.type === "agent_end") finish();
+				// `turn_end` fires after every tool turn, and NeoPi may emit a
+				// non-terminal `agent_end` (`isTerminal: false`) as a scheduling
+				// pause. Only a terminal `agent_end` means the answer is complete.
+				if (event.type === "agent_end" && event.isTerminal !== false) finish();
 			};
 		});
 	}
