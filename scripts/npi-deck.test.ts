@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { acquireLock, releaseLock } from "./npi-deck.ts";
+import { acquireLock, releaseLock, signalWorkerGroup } from "./npi-deck.ts";
+import { processStartTime } from "../apps/server/src/owned/launcher.ts";
 
 function lockPath(): string {
 	return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "npi-deck-lock-")), "launcher.lock");
@@ -37,4 +38,21 @@ describe.skipIf(process.platform !== "linux")("launcher lock", () => {
 		releaseLock(file);
 		expect(fs.existsSync(file)).toBe(false);
 	});
+});
+
+test.skipIf(process.platform !== "linux")("direct launcher spares a reused worker process group", async () => {
+	const worker = Bun.spawn(["sleep", "30"], { detached: true, stdout: "ignore", stderr: "ignore" });
+	try {
+		const startTime = processStartTime(worker.pid);
+		expect(startTime).toBeDefined();
+		signalWorkerGroup(worker.pid, "stale-starttime", "SIGTERM");
+		await Bun.sleep(50);
+		expect(worker.exitCode).toBeNull();
+		signalWorkerGroup(worker.pid, startTime, "SIGTERM");
+		await worker.exited;
+		expect(worker.signalCode).not.toBeNull();
+	} finally {
+		if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");
+		await worker.exited;
+	}
 });

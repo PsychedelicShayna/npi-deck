@@ -303,6 +303,16 @@ async function runSystemd(opts: RunOpts): Promise<number> {
 	return finish(await done);
 }
 
+/** Signal only the worker's original process group; PID/PGID reuse must not kill a stranger. */
+export function signalWorkerGroup(pid: number, startTime: string | undefined, signal: NodeJS.Signals): void {
+	if (!startTime) return;
+	let stat: string;
+	try { stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8"); } catch { return; }
+	const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+	if (fields[19] !== startTime || Number(fields[2]) !== pid) return;
+	try { process.kill(-pid, signal); } catch { /* group already exited */ }
+}
+
 // ─── direct child (--no-systemd) ────────────────────────────────────────────
 
 async function runDirect(opts: RunOpts): Promise<number> {
@@ -311,14 +321,10 @@ async function runDirect(opts: RunOpts): Promise<number> {
 	if (!opts.setpriv) say("setpriv not found: the worker will not die with a SIGKILLed launcher");
 
 	let child: Subprocess | undefined;
+	let childStartTime: string | undefined;
 	let stopRequested = false;
 	const killGroup = (sig: NodeJS.Signals) => {
-		if (!child) return;
-		try {
-			process.kill(-child.pid, sig);
-		} catch {
-			// group already empty
-		}
+		if (child) signalWorkerGroup(child.pid, childStartTime, sig);
 	};
 	const onSignal = (sig: NodeJS.Signals) => {
 		if (stopRequested) return;
@@ -340,6 +346,7 @@ async function runDirect(opts: RunOpts): Promise<number> {
 			stderr: "inherit",
 			detached: true, // own session and process group
 		});
+		childStartTime = processStartTime(child.pid);
 		const running = child;
 		void waitHealthy(base, () => running.exitCode === null && running.signalCode === null).then((ok) => {
 			if (ok) say(`ready at ${base}`);
