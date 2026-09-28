@@ -33,9 +33,12 @@ class StubSession {
 
 	#steering: QueueEntry[] = [];
 	#followUp: QueueEntry[] = [];
+	/** NeoPi's hidden next-turn messages (e.g. after a failed `todo` call): counted, never popped. */
+	hiddenNextTurn: string[] = [];
+	#emptyPops = 0;
 
 	get queuedMessageCount(): number {
-		return this.#steering.length + this.#followUp.length;
+		return this.#steering.length + this.#followUp.length + this.hiddenNextTurn.length;
 	}
 
 	/** Mirrors NeoPi: a queued prompt was forwarded to the agent, so `true`. */
@@ -58,6 +61,9 @@ class StubSession {
 	popLastQueuedMessage(): string | undefined {
 		if (this.#steering.length > 0) return this.#steering.pop()?.text;
 		if (this.#followUp.length > 0) return this.#followUp.pop()?.text;
+		// A caller that keeps popping past the visible queue would spin
+		// forever on the real SDK; fail loudly instead of hanging the test.
+		if (++this.#emptyPops > 100) throw new Error("pop loop did not terminate");
 		return undefined;
 	}
 
@@ -139,6 +145,20 @@ describe("InProcessSessionHandle queue shadow", () => {
 		expect(session.getQueuedMessages().followUp).toEqual(["a", "c"]);
 		// Exactly one queue_state echo broadcast.
 		expect(emitted.map((e) => (e as { type?: string }).type)).toEqual(["queue_state"]);
+	});
+
+	test("cancel with a hidden next-turn message queued drains only the visible queue", async () => {
+		const { handle, session } = makeHandle();
+		await handle.prompt("a");
+		await handle.prompt("b");
+		session.hiddenNextTurn.push("todo failure reminder");
+		const [first] = handle.getQueueSnapshot();
+
+		expect(await handle.cancelQueuedById(first!.id)).toBe(true);
+
+		expect(handle.getQueueSnapshot().map((q) => q.text)).toEqual(["b"]);
+		expect(session.getQueuedMessages().followUp).toEqual(["b"]);
+		expect(session.hiddenNextTurn).toEqual(["todo failure reminder"]);
 	});
 
 	test("cancelQueuedById returns false for an unknown id and emits nothing", async () => {

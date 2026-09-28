@@ -928,7 +928,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		replace: { text: string; images?: import("@npi-deck/protocol").ImageAttachment[] } | undefined,
 	): Promise<void> {
 		const queueApi = this.session as unknown as {
-			popLastQueuedMessage?: () => string | undefined;
+			popLastQueuedMessage?: () => unknown;
 			isStreaming?: boolean;
 		};
 		if (typeof queueApi.popLastQueuedMessage !== "function") {
@@ -953,10 +953,12 @@ export class InProcessSessionHandle implements SessionHandle {
 				survivors.push(entry);
 			}
 		}
-		// Synchronously drain the SDK queue. popLastQueuedMessage is sync;
-		// no microtask boundary inside this loop.
-		while (this.queuedMessageCount() > 0) {
-			queueApi.popLastQueuedMessage();
+		// Synchronously drain the visible SDK queue. popLastQueuedMessage is
+		// sync, so no microtask runs inside this loop. Stop when it pops
+		// nothing: queuedMessageCount also counts NeoPi's hidden next-turn
+		// messages, which pop never removes and which must survive (#1).
+		while (queueApi.popLastQueuedMessage() !== undefined) {
+			// keep popping
 		}
 		// Kick off re-enqueues synchronously so each `session.prompt` sync
 		// prelude sees `isStreaming = true`. Collect promises; await later.
