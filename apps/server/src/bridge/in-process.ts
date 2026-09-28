@@ -863,8 +863,13 @@ export class InProcessSessionHandle implements SessionHandle {
 		const promptOpts: Record<string, unknown> = {};
 		if (opts?.streamingBehavior) promptOpts.streamingBehavior = opts.streamingBehavior;
 		if (opts?.images && opts.images.length > 0) promptOpts.images = opts.images;
-		await this.session.prompt(text, Object.keys(promptOpts).length > 0 ? (promptOpts as any) : undefined);
-		if (wasStreaming) {
+		// `false` means NeoPi handled the input locally (e.g. an extension
+		// command): nothing was queued and no `agent_end` follows.
+		const dispatched = await this.session.prompt(
+			text,
+			Object.keys(promptOpts).length > 0 ? (promptOpts as any) : undefined,
+		);
+		if (wasStreaming && dispatched) {
 			const queuedId = crypto.randomUUID();
 			// Align shadow text with whatever the SDK actually stored (post-
 			// slash/template expansion) so head-drain matching survives expansion.
@@ -991,7 +996,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		}
 		// Kick off re-enqueues synchronously so each `session.prompt` sync
 		// prelude sees `isStreaming = true`. Collect promises; await later.
-		const promises: Promise<void>[] = [];
+		const promises: Promise<boolean>[] = [];
 		for (const entry of survivors) {
 			const opts: Record<string, unknown> = { streamingBehavior: entry.behavior };
 			if (entry.images && entry.images.length > 0) opts.images = entry.images;

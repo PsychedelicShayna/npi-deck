@@ -20,8 +20,11 @@
  *   - `@oh-my-pi/pi-coding-agent/src/modes/acp/acp-agent.ts` (ACP bridge)
  */
 import type {
+	AutocompleteProviderFactory,
+	ExtensionCustomOptions,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
+	ExtensionUISelectItem,
 	ExtensionUiComponentFactory,
 	ExtensionWidgetContent,
 	ExtensionWidgetOptions,
@@ -113,9 +116,13 @@ export class ExtensionUIBridge implements ExtensionUIContext {
 
 	select(
 		prompt: string,
-		options: string[],
+		items: ExtensionUISelectItem[],
 		dialogOptions?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
+		// NeoPi passes `{label, description}` objects when an option has a
+		// description; the caller expects the chosen label back. The wire
+		// carries labels only until W3 adds descriptions to the protocol.
+		const options = items.map((item) => (typeof item === "string" ? item : item.label));
 		const fields: Pick<DialogOpenFrame, "options"> = { options };
 		return this.openDialog<string | undefined>(
 			{ kind: "select", prompt, ...fields },
@@ -211,7 +218,7 @@ export class ExtensionUIBridge implements ExtensionUIContext {
 
 	setTitle(_title: string): void {}
 
-	async custom<T>(): Promise<T> {
+	async custom<T>(_factory: unknown, _options?: ExtensionCustomOptions): Promise<T> {
 		// Custom TUI components aren't representable in the deck UI.
 		return undefined as T;
 	}
@@ -225,6 +232,8 @@ export class ExtensionUIBridge implements ExtensionUIContext {
 	}
 
 	setEditorComponent(_factory: unknown): void {}
+
+	addAutocompleteProvider(_factory: AutocompleteProviderFactory): void {}
 
 	get theme(): never {
 		// Extensions that read `ctx.ui.theme` in the deck context need to be
