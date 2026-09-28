@@ -172,8 +172,6 @@ export async function getOnboardingState(): Promise<OnboardingState> {
 			providers: await readProviders(),
 			kbRoot: resolveKbRoot(),
 			kbExists: existsSync(resolveKbRoot()),
-			// Placeholder until the protocol drops `startCommandExists` (#50).
-			startCommandExists: false,
 		};
 	}
 
@@ -200,8 +198,6 @@ export async function getOnboardingState(): Promise<OnboardingState> {
 			providers: await readProviders(),
 			kbRoot: resolveKbRoot(),
 			kbExists: existsSync(resolveKbRoot()),
-			// Placeholder until the protocol drops `startCommandExists` (#50).
-			startCommandExists: false,
 		};
 	}
 
@@ -214,8 +210,6 @@ export async function getOnboardingState(): Promise<OnboardingState> {
 		providers: await readProviders(),
 		kbRoot: resolveKbRoot(),
 		kbExists: existsSync(resolveKbRoot()),
-		// Placeholder until the protocol drops `startCommandExists` (#50).
-		startCommandExists: false,
 	};
 }
 
