@@ -17,11 +17,21 @@ export interface AdvisorConfiguration {
 	merged: { advisors: AdvisorConfig[]; warnings: string[] };
 	settings: { enabled: boolean; syncBacklog: string; maxNotesPerUpdate: number; evictStaleResults: boolean; model: string };
 }
+export type AdvisorRuntimeStatus = "running" | "paused" | "quota_exhausted" | "error" | "no_model";
+export interface AdvisorNote { advisor: string; severity: "nit" | "concern" | "blocker"; note: string; timestamp: number }
 export interface LiveAdvisorStatus {
-	overview: { configured: boolean; advisors: Array<{ name: string; status: string; yielded: boolean }> };
-	stats: { cost: number; advisors: Array<{ name: string; status: string; cost: number; tokens: { total: number }; model?: { provider: string; id: string } }> };
-	notes: Array<{ advisor: string; severity: "nit" | "concern" | "blocker"; note: string; timestamp: number }>;
+	/** `configured`: advisors are switched on for this session. */
+	overview: { configured: boolean; advisors: Array<{ name: string; status: AdvisorRuntimeStatus; yielded: boolean }> };
+	stats: { active: boolean; cost: number; advisors: Array<{ name: string; status: AdvisorRuntimeStatus; cost: number; tokens: { total: number }; model?: { provider: string; id: string } }> };
+	/** Advisors chosen for this session in the deck; `null` when the chat never chose. */
+	selection: string[] | null;
+	notes: AdvisorNote[];
 	events: Array<{ type: "advisor_cost_changed" | "advisor_yielded"; timestamp: number }>;
+}
+export interface SessionAdvisorRoster {
+	/** `enabled` is the entry's own WATCHDOG key; absent means NeoPi treats it as enabled. */
+	advisors: Array<{ name: string; model?: string; enabled?: boolean; source: string | null }>;
+	warnings: string[];
 }
 async function request<T>(route: string, method = "GET", body?: unknown): Promise<T> {
 	const response = await fetch(`/api${route}`, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
@@ -36,6 +46,11 @@ export const advisorsApi = {
 	saveWatchdog: (cwd: string, scope: "user" | "project", hash: string, doc: WatchdogDoc) =>
 		request<{ saved: ScopeDocument; merged: AdvisorConfiguration["merged"] }>("/advisors/watchdog", "PUT", { cwd, scope, hash, doc }),
 	saveSettings: (cwd: string, settings: Partial<AdvisorConfiguration["settings"]>) => request<{ ok: true }>("/advisors/settings", "PATCH", { cwd, ...settings }),
+	/** Write `enabled:` for one advisor into the WATCHDOG file its effective entry comes from. */
+	setRosterEnabled: (cwd: string, name: string, enabled: boolean) =>
+		request<{ file: string; merged: AdvisorConfiguration["merged"] }>("/advisors/watchdog/enabled", "PATCH", { cwd, name, enabled }),
 	status: (id: string) => request<LiveAdvisorStatus>(`/sessions/${encodeURIComponent(id)}/advisors`),
-	toggle: (id: string, enabled: boolean) => request<LiveAdvisorStatus>(`/sessions/${encodeURIComponent(id)}/advisors`, "PATCH", { enabled }),
+	roster: (id: string) => request<SessionAdvisorRoster>(`/sessions/${encodeURIComponent(id)}/advisors/roster`),
+	/** Run exactly these roster advisors in the session; an empty list stops them. */
+	select: (id: string, advisors: string[]) => request<LiveAdvisorStatus>(`/sessions/${encodeURIComponent(id)}/advisors`, "PUT", { advisors }),
 };

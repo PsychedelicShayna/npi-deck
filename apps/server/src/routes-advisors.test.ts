@@ -18,13 +18,10 @@ const backend = resolveBackendSelection();
 if (!backend) throw new Error("advisor tests require a configured NeoPi backend");
 await loadBackend(backend);
 const config: Config = { defaultCwd: project, extraWorkspaces: [], host: "127.0.0.1", port: 0, devMode: true, idleTimeoutMs: 0, dbPath: path.join(root, "db"), uploadsRoot: path.join(root, "uploads") };
-let enabled = false;
 let roster: Array<{ name: string; enabled?: boolean }> = [];
 let model = "";
 const fake = {
 	cwd: project,
-	advisorStatus: () => ({ overview: { configured: enabled, advisors: roster.map(a => ({ name: a.name, status: enabled && a.enabled !== false ? "running" : "paused", yielded: true })) }, stats: { cost: 0, advisors: [] }, notes: [], events: [] }),
-	setAdvisorEnabled: (next: boolean) => { enabled = next; },
 	applyAdvisorConfigs: (discovered: { advisors: typeof roster }) => { roster = discovered.advisors; },
 };
 const bridge = {
@@ -44,10 +41,10 @@ type SavedAdvisors = {
 	saved: { file: string };
 	merged: { advisors: Array<{ name: string; source: string | null; instructions?: string }> };
 };
-type AdvisorStatus = { overview: { advisors: Array<{ name: string; status: string; yielded: boolean }> } };
+type ToggledAdvisors = { file: string; merged: { advisors: Array<{ name: string; enabled?: boolean; source: string | null }> } };
 afterAll(async () => { await rm(root, { recursive: true, force: true }); });
 
-test("project save hot-applies; user overrides and independent master toggle survive", async () => {
+test("project save hot-applies; user overrides survive", async () => {
 	await writeFile(path.join(agentDir, "WATCHDOG.yml"), "advisors:\n  - name: Shared\n    instructions: User version\n");
 	const initial = await (await request(`/advisors?cwd=${encodeURIComponent(project)}`)).json() as AdvisorSnapshot;
 	const userHash = initial.user.hash;
@@ -58,14 +55,10 @@ test("project save hot-applies; user overrides and independent master toggle sur
 	expect(saved.merged.advisors.find(a => a.name === "Shared")?.source).toBe(saved.saved.file);
 	expect(saved.merged.advisors.find(a => a.name === "Shared")?.instructions).toBe("Project version");
 	expect((await readFile(path.join(agentDir, "WATCHDOG.yml"), "utf8"))).toContain("User version");
-	expect(enabled).toBe(false);
-	const toggled = await request("/sessions/live/advisors", json("PATCH", { enabled: true }));
-	expect(((await toggled.json()) as AdvisorStatus).overview.advisors).toEqual([{ name: "Shared", status: "running", yielded: true }, { name: "Other", status: "paused", yielded: true }]);
-	expect((await request("/sessions/live/advisors", json("PATCH", { enabled: false }))).status).toBe(200);
 	const userEdit = await request("/advisors/watchdog", json("PUT", { cwd: project, scope: "user", hash: userHash, doc: { advisors: [{ name: "Shared", instructions: "User updated" }] } }));
 	expect(userEdit.status).toBe(200);
 	expect(((await userEdit.json()) as SavedAdvisors).merged.advisors[0]?.instructions).toBe("Project version");
-	expect(enabled).toBe(false);
+	expect(roster.find(a => a.name === "Shared")).toMatchObject({ instructions: "Project version" });
 });
 
 test("two stale editors and an external edit cannot overwrite a WATCHDOG file", async () => {
@@ -78,6 +71,32 @@ test("two stale editors and an external edit cannot overwrite a WATCHDOG file", 
 	const fresh = await (await request(`/advisors?cwd=${encodeURIComponent(project)}`)).json() as AdvisorSnapshot;
 	const [winner, loser] = await Promise.all([request("/advisors/watchdog", json("PUT", { cwd: project, scope: "project", hash: fresh.project.hash, doc: { advisors: [{ name: "First" }] } })), request("/advisors/watchdog", json("PUT", { cwd: project, scope: "project", hash: fresh.project.hash, doc: { advisors: [{ name: "Second" }] } }))]);
 	expect([winner.status, loser.status].sort()).toEqual([200, 409]);
+});
+
+test("enabled toggle writes the advisor's winning WATCHDOG scope only", async () => {
+	const userFile = path.join(agentDir, "WATCHDOG.yml");
+	const projectFile = path.join(project, "WATCHDOG.yml");
+	await writeFile(userFile, "# user roster\nadvisors:\n  - name: Velvet\n    instructions: Keep it tidy\n  - name: Rook\n    enabled: false\n");
+	await writeFile(projectFile, "# project roster\nadvisors:\n  - name: Rook\n    model: openrouter/openai/gpt-4o-mini\n");
+	const toggle = (name: string, enabled: boolean) => request("/advisors/watchdog/enabled", json("PATCH", { cwd: project, name, enabled }));
+
+	const velvet = await toggle("Velvet", false);
+	expect(velvet.status).toBe(200);
+	const velvetBody = await velvet.json() as ToggledAdvisors;
+	expect(velvetBody.file).toBe(userFile);
+	expect(velvetBody.merged.advisors.find(a => a.name === "Velvet")?.enabled).toBe(false);
+	expect(await readFile(userFile, "utf8")).toContain("advisors:\n  - name: Velvet\n    instructions: Keep it tidy\n    enabled: false\n  - name: Rook\n    enabled: false\n");
+	expect(await readFile(projectFile, "utf8")).toBe("# project roster\nadvisors:\n  - name: Rook\n    model: openrouter/openai/gpt-4o-mini\n");
+
+	// Rook's effective entry is the project one; the user file's copy is shadowed.
+	const rook = await toggle("Rook", true);
+	expect(rook.status).toBe(200);
+	expect((await rook.json() as ToggledAdvisors).file).toBe(projectFile);
+	expect(await readFile(projectFile, "utf8")).toContain("  - name: Rook\n    model: openrouter/openai/gpt-4o-mini\n    enabled: true\n");
+	expect(await readFile(userFile, "utf8")).toContain("  - name: Rook\n    enabled: false\n");
+	expect(roster.map(a => [a.name, a.enabled])).toEqual([["Velvet", false], ["Rook", true]]);
+
+	expect((await toggle("Nobody", true)).status).toBe(404);
 });
 
 test("model role saves via locked settings without dropping unrelated keys", async () => {

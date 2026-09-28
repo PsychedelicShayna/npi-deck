@@ -57,6 +57,21 @@ export function AdvisorsView() {
 		} catch (e) { setError(String(e)); }
 		finally { setBusy(false); }
 	}
+	const draftDirty = !!config && JSON.stringify(doc) !== JSON.stringify(config[scope].doc);
+	async function toggleEnabled(name: string, enabled: boolean) {
+		if (!config) return;
+		setBusy(true); setError(""); setNotice("");
+		try {
+			const { file } = await advisorsApi.setRosterEnabled(config.cwd, name, enabled);
+			await reload(config.cwd);
+			setNotice(`${name}: wrote enabled: ${enabled} to ${file} and applied it to live sessions.`);
+		} catch (e) { setError(String(e)); }
+		finally { setBusy(false); }
+	}
+	function sourceScope(source: string | null | undefined): string {
+		if (!config || !source) return "unknown file";
+		return source === config.user.file ? "user" : source === config.project.file ? "project" : "ancestor directory";
+	}
 	return <Layout sidebar={<div className="p-4 text-sm text-ink-3">Advisor configuration</div>} inspector={null} main={
 		<div className="h-full overflow-y-auto p-6"><div className="mx-auto max-w-3xl space-y-7">
 			<header><div className="meta">Configuration</div><h1 className="text-2xl font-semibold">Advisors</h1><p className="text-sm text-ink-3">Edit persistent settings and WATCHDOG rosters separately. Runtime switches live in each chat.</p></header>
@@ -80,16 +95,37 @@ export function AdvisorsView() {
 				<label className="block text-sm">Shared max notes <input type="number" min={1} className="field ml-2 w-20 px-2 py-1" value={doc.maxNotesPerUpdate ?? ""} onChange={e => setDoc({ ...doc, maxNotesPerUpdate: e.target.value ? Number(e.target.value) : undefined })} /></label>
 				{doc.advisors.map((advisor, index) => <div key={index} className="space-y-2 border-t border-line pt-4">
 					<div className="flex items-center gap-3"><input aria-label="Advisor name" className="field flex-1 px-2 py-1" placeholder="Advisor name" value={advisor.name} onChange={e => updateAdvisor(index, { name: e.target.value })} /><button type="button" className="btn-ghost" onClick={() => setDoc({ ...doc, advisors: doc.advisors.filter((_, i) => i !== index) })}>Remove</button></div>
-					<label className="flex gap-2 text-sm"><input type="checkbox" checked={advisor.enabled !== false} onChange={e => updateAdvisor(index, { enabled: e.target.checked })} /> Enabled in roster (independent of session master switch)</label>
+					<label className="block text-sm">Enabled <select aria-label={`${advisor.name || "New advisor"} enabled`} className="field ml-2 px-2 py-1" value={advisor.enabled === undefined ? "unset" : String(advisor.enabled)}
+						onChange={e => updateAdvisor(index, { enabled: e.target.value === "unset" ? undefined : e.target.value === "true" })}>
+						<option value="false">Disabled — enabled: false</option>
+						<option value="true">Enabled — enabled: true</option>
+						<option value="unset">Enabled by default — no enabled key</option>
+					</select></label>
 					<label className="block text-sm">Model <input className="field ml-2 w-72 px-2 py-1" placeholder="Inherited advisor role" value={advisor.model ?? ""} onChange={e => updateAdvisor(index, { model: e.target.value || undefined })} /></label>
 					<label className="block text-sm">Tools (comma separated) <input className="field ml-2 w-72 px-2 py-1" value={advisor.tools?.join(", ") ?? ""} onChange={e => updateAdvisor(index, { tools: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })} /></label>
 					<label className="block text-sm">Max notes <input type="number" min={1} className="field ml-2 w-20 px-2 py-1" value={advisor.maxNotesPerUpdate ?? ""} onChange={e => updateAdvisor(index, { maxNotesPerUpdate: e.target.value ? Number(e.target.value) : undefined })} /></label>
 					<label className="block text-sm">Instructions<textarea className="field mt-1 min-h-24 w-full p-2" value={advisor.instructions ?? ""} onChange={e => updateAdvisor(index, { instructions: e.target.value || undefined })} /></label>
 					<label className="block text-sm">System prompt override<textarea className="field mt-1 min-h-20 w-full p-2" value={advisor.systemPrompt ?? ""} onChange={e => updateAdvisor(index, { systemPrompt: e.target.value || undefined })} /></label>
 				</div>)}
-				<button type="button" className="btn-ghost px-3 py-1" onClick={() => setDoc({ ...doc, advisors: [...doc.advisors, { name: "" }] })}>Add advisor</button>
+				<button type="button" className="btn-ghost px-3 py-1" onClick={() => setDoc({ ...doc, advisors: [...doc.advisors, { name: "", enabled: false }] })}>Add advisor</button>
 				<button type="button" className="btn-primary ml-2 px-3 py-1" disabled={busy || !!doc.warnings?.length} onClick={() => void saveRoster()}>Save WATCHDOG</button>
-				<div className="border-t border-line pt-3"><h3 className="text-sm font-semibold">Effective roster · discovered precedence</h3>{config.merged.advisors.map((a, i) => <p key={i} className="py-1 text-sm">{a.name} · {a.enabled === false ? "disabled" : "enabled"}<span className="block break-all font-mono text-xs text-ink-3">{a.source ?? "Source unavailable"}</span></p>)}{config.merged.warnings.map((w, i) => <p key={i} className="text-sm text-red-600">{w}</p>)}</div>
+				<div className="space-y-1 border-t border-line pt-3">
+					<h3 className="text-sm font-semibold">Effective roster · discovered precedence</h3>
+					<p className="text-xs text-ink-3">Roster enabled state is the default when a chat runs its whole roster. Chats that choose advisors run only their choice. Each switch writes <code>enabled:</code> to the file the advisor comes from.</p>
+					{draftDirty && <p className="text-xs text-warn">Save or discard the {scope} roster draft before switching advisors here.</p>}
+					{config.merged.advisors.map((a, i) => {
+						const on = a.enabled !== false;
+						const state = a.enabled === undefined ? "Enabled by default (no enabled key)" : on ? "Enabled (enabled: true)" : "Disabled (enabled: false)";
+						return <div key={i} className="flex items-start gap-3 py-1 text-sm">
+							<label className="flex min-w-0 flex-1 cursor-pointer items-start gap-2">
+								<input type="checkbox" className="mt-1" checked={on} disabled={busy || draftDirty || !a.source} aria-label={`${a.name} enabled in roster`} onChange={e => void toggleEnabled(a.name, e.target.checked)} />
+								<span className="min-w-0"><span className="font-medium">{a.name}</span> · <span className={on ? "text-ink-2" : "text-ink-3"}>{state}</span>
+									<span className="block break-all font-mono text-xs text-ink-3">{sourceScope(a.source)} · {a.source ?? "Source unavailable"}</span></span>
+							</label>
+						</div>;
+					})}
+					{config.merged.warnings.map((w, i) => <p key={i} className="text-sm text-red-600">{w}</p>)}
+				</div>
 			</section>}
 		</div></div>} />;
 }

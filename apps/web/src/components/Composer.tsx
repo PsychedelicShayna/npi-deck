@@ -19,6 +19,7 @@ import type { ImageAttachment } from "@npi-deck/protocol";
 import { selectActiveSession, useStore } from "@/lib/store";
 import { useComposerHistory } from "@/lib/use-composer-history";
 import { cn } from "@/lib/utils";
+import { useAdvisorPicker } from "@/lib/advisor-ui";
 
 interface PendingImage extends ImageAttachment {
 	id: string;
@@ -46,6 +47,8 @@ export function Composer() {
 	const pendingDraft = useStore((s) => s.pendingDraft);
 	const setPendingDraft = useStore((s) => s.setPendingDraft);
 	const queuedCount = session?.queuedPrompts.length ?? 0;
+	const openAdvisorPicker = useAdvisorPicker((s) => s.open);
+	const liveSessionId = session && !session.readOnly ? session.sessionId : undefined;
 	const [draft, setDraft] = useState("");
 	const [images, setImages] = useState<PendingImage[]>([]);
 	const [dragOver, setDragOver] = useState(false);
@@ -124,8 +127,11 @@ export function Composer() {
 					: "Enter plan mode — agent reads + proposes only (or Shift+Tab)",
 				argumentHint: "[on|off]",
 			},
+			...(liveSessionId
+				? [{ name: "advisors", scope: "deck", description: "Choose which roster advisors run in this chat" } as SlashCommand]
+				: []),
 		],
-		[planModeEnabled],
+		[planModeEnabled, liveSessionId],
 	);
 
 	const allSlashCommands = useMemo(
@@ -273,9 +279,13 @@ export function Composer() {
 				else setPlanMode(!planModeEnabled);
 				return true;
 			}
+			if (name === "advisors") {
+				if (liveSessionId) openAdvisorPicker(liveSessionId);
+				return true;
+			}
 			return false;
 		},
-		[session, planModeEnabled, setPlanMode],
+		[session, planModeEnabled, setPlanMode, liveSessionId, openAdvisorPicker],
 	);
 
 	const pickSlashCommand = useCallback(
@@ -712,6 +722,16 @@ export function Composer() {
 							title="Drop every queued prompt for this session"
 						>
 							{queuedCount} queued · cancel
+						</button>
+					) : null}
+					{liveSessionId ? (
+						<button
+							type="button"
+							onClick={() => openAdvisorPicker(liveSessionId)}
+							className="rounded border border-line bg-paper px-1.5 py-0.5 uppercase tracking-meta text-ink-3 hover:text-ink-2"
+							title="Choose which roster advisors run in this chat (/advisors)"
+						>
+							advisors
 						</button>
 					) : null}
 					<span>

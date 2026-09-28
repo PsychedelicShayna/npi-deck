@@ -128,7 +128,8 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 		case "message_end": {
 			const msg = (event as any).message;
 			if (!msg) return state;
-			return finalizeMessage(state, msg);
+			const next = finalizeMessage(state, msg);
+			return msg.role === "custom" && msg.customType === "advisor" ? bumpAdvisorActivity(next) : next;
 		}
 
 		// ─── Tool execution ────────────────────────────────────────────────
@@ -308,11 +309,14 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 				...state,
 				goal: { goal: (event as any).goal, state: (event as any).state },
 			};
+		// A delivered advisor note or a finished advisor review: the advisor
+		// panel refetches live state once, even while it is hidden and idle.
+		case "advisor_yielded":
+			return bumpAdvisorActivity(state);
 		// These are payload-free SDK notifications; the bridge sends a fresh
-		// snapshot for config warnings, and the advisor panel fetches live state.
+		// snapshot for config warnings. Advisor cost is read by the visible panel.
 		case "config_warnings_changed":
 		case "advisor_cost_changed":
-		case "advisor_yielded":
 		case "mixture_hop_end":
 		case "mixture_checkpoint":
 		case "mixture_limit":
@@ -397,6 +401,10 @@ function appendMixtureTrace(state: SessionUi, details: unknown): SessionUi {
 	const content = `${String(d.mixture ?? "Mixture")} · ${d.kind}${typeof d.memberId === "string" ? ` · ${d.memberId}` : ""}`;
 	const message: MixtureTraceMsg = { id, role: "mixtureTrace", content, details: d, timestamp: typeof d.at === "number" ? d.at : Date.now() };
 	return { ...state, messages: [...state.messages, message] };
+}
+
+function bumpAdvisorActivity(state: SessionUi): SessionUi {
+	return { ...state, advisorActivity: (state.advisorActivity ?? 0) + 1 };
 }
 
 function pushNotice(state: SessionUi, p: Omit<NoticeMsg, "id" | "role" | "timestamp">): SessionUi {

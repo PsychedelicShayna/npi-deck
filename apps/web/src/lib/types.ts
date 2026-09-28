@@ -265,6 +265,12 @@ export interface SessionUi {
 	 * after every turn-end / compaction.
 	 */
 	contextUsage?: import("@npi-deck/protocol").ContextUsage;
+	/**
+	 * Bumped when an advisor note reaches this chat or an advisor finishes a
+	 * review. The advisor panel refetches on change instead of polling while
+	 * it is hidden.
+	 */
+	advisorActivity?: number;
 
 	/** Latest provider error displayed in chrome (cleared on next turn_start). */
 	lastError?: string;

@@ -9,13 +9,17 @@ import { spawnOwnedSync } from "./owned-process.ts";
 const log = logger("routes:advisors");
 type AdvisorSdk = ReturnType<typeof feature<"advisors">>;
 type Doc = Awaited<ReturnType<AdvisorSdk["loadWatchdogConfigFile"]>>;
+type Discovered = Awaited<ReturnType<AdvisorSdk["discoverAdvisorConfigs"]>>;
 type AdvisorSession = {
 	cwd: string;
 	advisorStatus(): unknown;
-	setAdvisorEnabled(enabled: boolean): unknown;
-	applyAdvisorConfigs(config: Awaited<ReturnType<AdvisorSdk["discoverAdvisorConfigs"]>>): void;
+	/** Run exactly `names` for this live session; the roster files are untouched. */
+	selectAdvisors(names: readonly string[], config: Discovered): void;
+	/** Apply a rediscovered roster, keeping the session's selection. */
+	applyAdvisorConfigs(config: Discovered): void;
 };
 type AdvisorBridge = AgentBridge & { advisorSession(id: string): AdvisorSession | undefined; liveAdvisorSessions(): AdvisorSession[] };
+const WATCHDOG_NAMES = ["WATCHDOG.yml", "WATCHDOG.yaml"];
 const digest = (value: string | null) => createHash("sha256").update(value === null ? "missing\0" : `present\0${value}`).digest("hex");
 const errorText = (err: unknown) => err instanceof Error ? err.message : String(err);
 
@@ -45,7 +49,7 @@ async function discovery(api: AdvisorSdk, cwd: string) {
 	const sources = new Map<string, string>();
 	// Follow the same ordered user→project ancestor→leaf candidate walk as NeoPi;
 	// never infer provenance from the merged advisor, which has none.
-	const candidates = await api.collectConfigCandidates(cwd, agentDir, ["WATCHDOG.yml", "WATCHDOG.yaml"]);
+	const candidates = await api.collectConfigCandidates(cwd, agentDir, WATCHDOG_NAMES);
 	for (const candidate of candidates) {
 		const document = await api.loadWatchdogConfigFile(candidate.path);
 		for (const advisor of document.advisors) sources.set(api.slugifyAdvisorName(advisor.name), candidate.path);
@@ -53,10 +57,12 @@ async function discovery(api: AdvisorSdk, cwd: string) {
 	return { ...merged, advisors: merged.advisors.map((advisor) => ({ ...advisor, source: sources.get(api.slugifyAdvisorName(advisor.name)) ?? null })) };
 }
 
-// Serialize WATCHDOG compare-and-save across browser editors in this process.
-// The final re-read also catches external edits; NeoPi owns YAML serialization.
+// Serialize WATCHDOG compare-and-save, enabled toggles and session roster
+// selection across browser editors in this process, so each applies against
+// the roster the previous one wrote. The final re-read also catches external
+// edits; NeoPi owns YAML serialization.
 let saveQueue: Promise<void> = Promise.resolve();
-function serializeSave<T>(run: () => Promise<T>): Promise<T> {
+function serialize<T>(run: () => Promise<T>): Promise<T> {
 	const result = saveQueue.then(run);
 	saveQueue = result.then(() => {}, () => {});
 	return result;
@@ -109,7 +115,7 @@ export function buildAdvisorsRouter(bridge: AgentBridge, config: import("./confi
 			const cwd = await cwdFor(body.cwd);
 			if (!cwd || !["user", "project"].includes(body.scope ?? "") || typeof body.hash !== "string" || !validDoc(body.doc))
 				return c.json({ error: "known workspace, scope, hash and WATCHDOG document required" }, 400);
-			return await serializeSave(async () => {
+			return await serialize(async () => {
 				const api = feature("advisors");
 				const current = await scopeDoc(api, body.scope as "user" | "project", cwd);
 				if (current.hash !== body.hash) return c.json({ error: "WATCHDOG file changed; reload before saving", current }, 409);
@@ -119,6 +125,37 @@ export function buildAdvisorsRouter(bridge: AgentBridge, config: import("./confi
 				return c.json({ saved: await scopeDoc(api, body.scope as "user" | "project", cwd), merged: await discovery(api, cwd) });
 			});
 		} catch (err) { log.warn("save watchdog failed", err); return c.json({ error: errorText(err) }, 500); }
+	});
+
+	// Flip one advisor's `enabled:` in the WATCHDOG file its effective entry
+	// comes from (discovery is last-wins by slug), editing the loaded document
+	// so NeoPi's patch-save keeps comments and every other field.
+	app.patch("/advisors/watchdog/enabled", async c => {
+		try {
+			const body = await c.req.json() as { cwd?: string; name?: unknown; enabled?: unknown };
+			const cwd = await cwdFor(body.cwd);
+			if (!cwd || typeof body.name !== "string" || !body.name.trim() || typeof body.enabled !== "boolean")
+				return c.json({ error: "known workspace, advisor name and boolean enabled required" }, 400);
+			const name = body.name;
+			const enabled = body.enabled;
+			return await serialize(async () => {
+				const api = feature("advisors");
+				const slug = api.slugifyAdvisorName(name);
+				let source: { file: string; doc: Doc; index: number } | undefined;
+				for (const candidate of await api.collectConfigCandidates(cwd, sdk().getAgentDir(), WATCHDOG_NAMES)) {
+					const doc = await api.loadWatchdogConfigFile(candidate.path);
+					const index = doc.advisors.findLastIndex(advisor => api.slugifyAdvisorName(advisor.name) === slug);
+					if (index >= 0) source = { file: candidate.path, doc, index };
+				}
+				if (!source) return c.json({ error: `advisor ${JSON.stringify(name)} is not in this workspace's roster` }, 404);
+				if (source.doc.warnings?.length) return c.json({ error: `${source.file} contains malformed entries; repair the file before editing` }, 409);
+				source.doc.advisors[source.index] = { ...source.doc.advisors[source.index]!, enabled };
+				await api.saveWatchdogConfigFile(source.file, source.doc);
+				// A user or ancestor file can feed sessions outside this project.
+				await applyToSessions(sessions, api);
+				return c.json({ file: source.file, merged: await discovery(api, cwd) });
+			});
+		} catch (err) { log.warn("toggle watchdog advisor failed", err); return c.json({ error: errorText(err) }, 500); }
 	});
 
 	app.patch("/advisors/settings", async c => {
@@ -151,13 +188,36 @@ export function buildAdvisorsRouter(bridge: AgentBridge, config: import("./confi
 		const session = sessions.advisorSession(c.req.param("id"));
 		return session ? c.json(session.advisorStatus()) : c.json({ error: "live session not found" }, 404);
 	});
-	app.patch("/sessions/:id/advisors", async c => {
+	// The roster a chat can choose from: this session's discovered WATCHDOG
+	// advisors, with each entry's own `enabled` key as written.
+	app.get("/sessions/:id/advisors/roster", async c => {
 		const session = sessions.advisorSession(c.req.param("id"));
 		if (!session) return c.json({ error: "live session not found" }, 404);
-		const body = await c.req.json() as { enabled?: unknown };
-		if (typeof body.enabled !== "boolean") return c.json({ error: "enabled must be boolean" }, 400);
-		session.setAdvisorEnabled(body.enabled);
-		return c.json(session.advisorStatus());
+		try {
+			const merged = await discovery(feature("advisors"), session.cwd);
+			return c.json({
+				advisors: merged.advisors.map(({ name, model, enabled, source }) => ({ name, model, enabled, source })),
+				warnings: merged.warnings,
+			});
+		} catch (err) { log.warn("read session advisor roster failed", err); return c.json({ error: errorText(err) }, 500); }
+	});
+	app.put("/sessions/:id/advisors", async c => {
+		const session = sessions.advisorSession(c.req.param("id"));
+		if (!session) return c.json({ error: "live session not found" }, 404);
+		const body = await c.req.json().catch(() => ({})) as { advisors?: unknown };
+		const names = body.advisors;
+		if (!Array.isArray(names) || !names.every((name): name is string => typeof name === "string"))
+			return c.json({ error: "advisors must be an array of roster advisor names" }, 400);
+		try {
+			return await serialize(async () => {
+				const discovered = await feature("advisors").discoverAdvisorConfigs(session.cwd, sdk().getAgentDir());
+				const known = new Set(discovered.advisors.map(advisor => advisor.name));
+				const unknown = names.filter(name => !known.has(name));
+				if (unknown.length) return c.json({ error: `not in this session's roster: ${unknown.join(", ")}` }, 400);
+				session.selectAdvisors(names, discovered);
+				return c.json(session.advisorStatus());
+			});
+		} catch (err) { log.warn("select session advisors failed", err); return c.json({ error: errorText(err) }, 500); }
 	});
 	return app;
 }

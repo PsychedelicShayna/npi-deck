@@ -71,7 +71,7 @@ function firstAuthenticatedModel(registry: ModelRegistry, candidates: readonly M
 	return undefined;
 }
 
-
+type DiscoveredAdvisors = Awaited<ReturnType<ReturnType<typeof feature<"advisors">>["discoverAdvisorConfigs"]>>;
 
 interface Active {
 	handle: InProcessSessionHandle;
@@ -97,6 +97,13 @@ interface Active {
 	subagents?: SubagentTree;
 	advisorNotes: Array<{ advisor: string; severity: "nit" | "concern" | "blocker"; note: string; timestamp: number }>;
 	advisorEvents: Array<{ type: "advisor_cost_changed" | "advisor_yielded"; timestamp: number }>;
+	/**
+	 * Advisor names chosen for this live session in the deck. When set, it
+	 * overrides every roster entry's `enabled` so only these advisors run, and
+	 * each WATCHDOG re-apply keeps it. `undefined` leaves NeoPi's roster and
+	 * `advisor.enabled` defaults in charge. Never written to WATCHDOG.
+	 */
+	advisorSelection?: string[];
 }
 
 export class InProcessAgentBridge implements AgentBridge {
@@ -261,17 +268,38 @@ export class InProcessAgentBridge implements AgentBridge {
 	advisorSession(id: string) {
 		const entry = this.active.get(id);
 		if (!entry) return undefined;
+		const applyRoster = (config: DiscoveredAdvisors) => {
+			const selection = entry.advisorSelection;
+			const advisors = selection ? config.advisors.map(advisor => ({ ...advisor, enabled: selection.includes(advisor.name) })) : config.advisors;
+			// An enabled session with an empty or all-disabled roster falls back
+			// to NeoPi's legacy "default" advisor, so a selection with nothing
+			// left to run stops the session's advisors instead.
+			const run = selection ? advisors.some(advisor => advisor.enabled) : undefined;
+			if (run === false) entry.session.setAdvisorEnabled(false);
+			entry.session.applyAdvisorConfigs(advisors, config.sharedInstructions, config.sharedMaxNotesPerUpdate);
+			if (run === true && !entry.session.isAdvisorEnabled()) entry.session.setAdvisorEnabled(true);
+		};
 		return {
 			cwd: entry.handle.cwd,
-			advisorStatus: () => ({
-				overview: entry.session.getAdvisorStatusOverview(),
-				stats: entry.session.getAdvisorStats(),
-				notes: entry.advisorNotes,
-				events: entry.advisorEvents,
-			}),
-			setAdvisorEnabled: (enabled: boolean) => entry.session.setAdvisorEnabled(enabled),
-			applyAdvisorConfigs: (config: Awaited<ReturnType<ReturnType<typeof feature<"advisors">>["discoverAdvisorConfigs"]>>) =>
-				entry.session.applyAdvisorConfigs(config.advisors, config.sharedInstructions, config.sharedMaxNotesPerUpdate),
+			advisorStatus: () => {
+				const overview = entry.session.getAdvisorStatusOverview();
+				const stats = entry.session.getAdvisorStats();
+				// NeoPi keeps the last build's status map after the runtimes stop;
+				// a stopped session has nothing running.
+				const stopped = <T extends { status: string }>(advisor: T): T => overview.configured || advisor.status !== "running" ? advisor : { ...advisor, status: "paused" };
+				return {
+					overview: { ...overview, advisors: overview.advisors.map(stopped) },
+					stats: { ...stats, advisors: stats.advisors.map(stopped) },
+					selection: entry.advisorSelection ?? null,
+					notes: entry.advisorNotes,
+					events: entry.advisorEvents,
+				};
+			},
+			selectAdvisors: (names: readonly string[], config: DiscoveredAdvisors) => {
+				entry.advisorSelection = [...new Set(names)];
+				applyRoster(config);
+			},
+			applyAdvisorConfigs: applyRoster,
 		};
 	}
 
