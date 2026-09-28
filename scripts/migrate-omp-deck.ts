@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /** One-time, non-destructive migration of omp-deck's local state. Dry-run by default. */
 import { Database } from "bun:sqlite";
-import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { readManagedEnvFile, writeManagedEnvUpdates } from "../apps/server/src/env-store.ts";
@@ -163,25 +163,35 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 	const otherFiles = dataFiles.filter((file) => !file.endsWith(".db"));
 	const marker = path.join(target, MARKER);
 	const already = existsSync(marker);
+	const stage = `${target}.omp-deck-staging`;
+	const stageMarker = path.join(stage, ".migration-staging");
+	const partial = existsSync(stageMarker);
+	const transfer = [
+		...dbJobs.map(([, filename]) => filename),
+		...otherFiles.map((file) => path.relative(source.data, file)),
+		...uploadFiles.map((file) => path.join("uploads", path.relative(externalUploads!, file))),
+		...configFiles.map((file) => path.relative(source.config, file)),
+		".env",
+	];
+	const stageIdentity = JSON.stringify({ source: source.home, target, transfer });
+	if (partial && readFileSync(stageMarker, "utf8") !== stageIdentity) throw new Error(`Staging directory belongs to another migration: ${stage}`);
+	const statePaths = ["deck.db", "deck.db-wal", "deck.db-shm", "telegram-bridge.db", "telegram-bridge.db-wal", "telegram-bridge.db-shm", "uploads", "routine-runs", ".env", "onboarding.json"];
+	const conflicts = [...new Set([...transfer, ...statePaths].filter((file) => existsSync(path.join(target, file))))];
 	console.log(`${apply ? "Apply" : "Dry run"}: ${source.data} + ${source.config} -> ${target}`);
 	console.log(`SQLite backups: ${dbJobs.map(([file, dest]) => `${file} -> ${dest}`).join(", ") || "none"} (WAL included by backup API)`);
 	console.log(`Data files: ${otherFiles.length + uploadFiles.length}; config files: ${configFiles.length}; env keys: ${Object.keys(settings).length}; dropped legacy keys: ${dropped.join(", ") || "none"}`);
 	console.log(`Rewrites: absolute references under ${source.data}, ${source.config}${externalUploads ? `, ${externalUploads}` : ""}; external paths (including KB root) remain external.`);
 	if (already) { console.log(`Already migrated (${marker}); no changes.`); return; }
 	if (!dbJobs.length && !otherFiles.length && !uploadFiles.length && !configFiles.length && !existsSync(envFile)) throw new Error("No legacy state found");
-	if (existsSync(target) && readdirSync(target).length) {
-		// --force is for retrying a migration we own, never overwriting another installation.
-		throw new Error(`Destination already populated: ${target}; refusing to overwrite existing state${force ? " (not a marked migration)" : ""}`);
-	}
+	if (conflicts.length) console.log(`Existing deck state: ${conflicts.join(", ")}${partial ? " (partial migration can resume)" : " (apply refused)"}`);
 	if (!apply) { console.log("No files changed (pass --apply to migrate)."); return; }
-	const stage = `${target}.omp-deck-staging`;
+	if (conflicts.length && !partial) throw new Error(`Destination contains existing deck state: ${conflicts.join(", ")}; refusing to overwrite${force ? " even with --force" : ""}`);
 	if (existsSync(stage)) {
-		const stageMarker = path.join(stage, ".migration-staging");
-		if (!existsSync(stageMarker)) throw new Error(`Unrecognized staging directory: ${stage}`);
+		if (!partial) throw new Error(`Unrecognized staging directory: ${stage}`);
 		rmSync(stage, { recursive: true, force: true });
 	}
 	mkdirSync(stage, { recursive: true });
-	writeFileSync(path.join(stage, ".migration-staging"), "npi-deck migration staging\n");
+	writeFileSync(stageMarker, stageIdentity);
 	try {
 		let rewritten = 0;
 		for (const [file, filename] of dbJobs) {
@@ -208,13 +218,18 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 			cpSync(file, dest);
 		}
 		await writeManagedEnvUpdates(settings, path.join(stage, ".env"));
-		writeFileSync(path.join(stage, MARKER), `${JSON.stringify({ from: source.home, at: new Date().toISOString(), rewrittenFields: rewritten }, null, 2)}\n`);
-		if (existsSync(target)) {
-			if (readdirSync(target).length) throw new Error(`Destination populated during migration: ${target}`);
-			rmSync(target, { recursive: false });
+		// Install only migration-owned state, preserving config.yml, neopi/, run/
+		// and any other backend/launcher files already present in the deck home.
+		mkdirSync(target, { recursive: true });
+		for (const relative of transfer) {
+			const staged = path.join(stage, relative);
+			const destination = path.join(target, relative);
+			if (existsSync(destination) && !partial) throw new Error(`Destination became populated during migration: ${destination}`);
+			mkdirSync(path.dirname(destination), { recursive: true });
+			renameSync(staged, destination);
 		}
-		renameSync(stage, target);
-		rmSync(path.join(target, ".migration-staging"));
+		writeFileSync(marker, `${JSON.stringify({ from: source.home, at: new Date().toISOString(), rewrittenFields: rewritten }, null, 2)}\n`);
+		rmSync(stage, { recursive: true, force: true });
 		console.log(`Migrated ${dbJobs.length} database(s), ${otherFiles.length + uploadFiles.length + configFiles.length} files; rewrote ${rewritten} database fields.`);
 	} catch (error) { throw error; }
 }

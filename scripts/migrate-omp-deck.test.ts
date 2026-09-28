@@ -77,6 +77,18 @@ test("honors effective external database and upload paths without overwriting an
 	db.close();
 	writeFileSync(path.join(config, ".env"), `OMP_DECK_DB_PATH=${dbFile}\nOMP_DECK_UPLOADS_ROOT=${external}/images\n`);
 	writeFileSync(path.join(target + ".unrelated"), "leave alone");
+	mkdirSync(path.join(target, "neopi", "backend"), { recursive: true });
+	mkdirSync(path.join(target, "run"), { recursive: true });
+	writeFileSync(path.join(target, "config.yml"), "activeBackend: fixture\n");
+	writeFileSync(path.join(target, "neopi", "backend", "native.node"), "backend");
+	writeFileSync(path.join(target, "run", "launcher.lock"), "launcher");
+	let dryRun = "";
+	const oldLog = console.log;
+	console.log = (...parts: unknown[]) => { dryRun += `${parts.join(" ")}\n`; };
+	try { await migrate(["--from", home], { NPI_DECK_HOME: target }); }
+	finally { console.log = oldLog; }
+	expect(dryRun).toContain("No files changed");
+	expect(dryRun).not.toContain("Existing deck state");
 	await migrate(["--from", home, "--apply"], { NPI_DECK_HOME: target });
 	const migrated = new Database(path.join(target, "deck.db"), { readonly: true });
 	try {
@@ -85,9 +97,19 @@ test("honors effective external database and upload paths without overwriting an
 	expect(readFileSync(path.join(target, "uploads", "photo.png"), "utf8")).toBe("external asset");
 	expect(readManagedEnvFile(path.join(target, ".env")).values.get("NPI_DECK_UPLOADS_ROOT")).toBe(`${target}/uploads`);
 	expect(readFileSync(path.join(target + ".unrelated"), "utf8")).toBe("leave alone");
+	expect(readFileSync(path.join(target, "config.yml"), "utf8")).toBe("activeBackend: fixture\n");
+	expect(readFileSync(path.join(target, "neopi", "backend", "native.node"), "utf8")).toBe("backend");
+	expect(readFileSync(path.join(target, "run", "launcher.lock"), "utf8")).toBe("launcher");
 	const secondTarget = path.join(base, "populated");
 	mkdirSync(secondTarget);
-	writeFileSync(path.join(secondTarget, "existing"), "keep");
-	expect(migrate(["--from", home, "--apply", "--force"], { NPI_DECK_HOME: secondTarget })).rejects.toThrow("refusing to overwrite");
-	expect(readFileSync(path.join(secondTarget, "existing"), "utf8")).toBe("keep");
+	writeFileSync(path.join(secondTarget, "deck.db"), "preexisting database");
+	let conflictPlan = "";
+	const originalLog = console.log;
+	console.log = (...parts: unknown[]) => { conflictPlan += `${parts.join(" ")}\n`; };
+	try { await migrate(["--from", home], { NPI_DECK_HOME: secondTarget }); }
+	finally { console.log = originalLog; }
+	expect(conflictPlan).toContain("Existing deck state: deck.db");
+	expect(conflictPlan).toContain("No files changed");
+	await expect(migrate(["--from", home, "--apply", "--force"], { NPI_DECK_HOME: secondTarget })).rejects.toThrow("refusing to overwrite");
+	expect(readFileSync(path.join(secondTarget, "deck.db"), "utf8")).toBe("preexisting database");
 });
