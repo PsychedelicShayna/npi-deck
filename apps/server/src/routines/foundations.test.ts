@@ -259,3 +259,35 @@ if (attempt <= Number(readFileSync(${JSON.stringify(failUntil)}, "utf8"))) proce
 	expect(stopped.totalLlmCostMicros).toBe(2000);
 	expect(stopped.totalLlmTokens).toBe(30);
 }, 20_000);
+
+test("a routine pins its agent backend before the first agent step", async () => {
+	let selections = 0;
+	const command = () => [process.execPath, path.join(home, ++selections === 1 ? "backend-a" : "backend-b", "cli.ts")];
+	setup(command);
+	const marker = path.join(home, "agents");
+	for (const name of ["backend-a", "backend-b"]) {
+		const cli = path.join(home, name, "cli.ts");
+		fs.mkdirSync(path.dirname(cli), { recursive: true });
+		fs.writeFileSync(cli, `
+import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(marker)}, ${JSON.stringify(name + "\n")});
+const message = { role: "assistant", timestamp: 1, model: "test",
+  content: [{type: "text", text: "answer"}],
+  usage: {input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cost: {total: 0.001}} };
+process.stdout.write(JSON.stringify({type: "agent_end", messages: [message]}) + "\\n");
+`);
+	}
+	const r = routine(spec([
+		{ id: "first", type: "agent", prompt: "one" },
+		{ id: "second", type: "agent", prompt: "two" },
+	]));
+	await runner!.fire(r.id);
+	const run = listRuns(r.id)[0]!;
+	expect(listStepRuns(run.id).map((step) => step.status)).toEqual(["success", "success"]);
+	expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toEqual(["backend-a", "backend-a"]);
+	expect(selections).toBe(1);
+	expect(run.backend).toEqual({ path: path.join(home, "backend-a", "cli.ts"), commit: null, version: null });
+	const deckOnly = routine(spec([{ id: "local", type: "run", command: "true" }]));
+	await runner!.fire(deckOnly.id);
+	expect(listRuns(deckOnly.id)[0]?.backend).toBeUndefined();
+});

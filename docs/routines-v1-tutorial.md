@@ -143,6 +143,10 @@ Agent-step token totals include cached and orchestration tokens when reported;
 USD cost comes from NeoPi's provider-reported usage, not a static model-price
 estimate. Your LLM vendor's bill remains authoritative.
 
+The run history records the NeoPi backend tree path, commit, and version
+selected by its first agent step. Later steps and retries use that same
+command; deck-only and historical runs have no backend field.
+
 ## Cross-run state
 
 Persistent key-value store scoped per routine:

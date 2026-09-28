@@ -1313,11 +1313,13 @@ export interface RoutineRun {
 	 */
 	trigger: "cron" | "manual" | "webhook" | "event";
 	// V1 additions — populated by the V1 runner; 0/undefined for V0 rows.
+	/** NeoPi tree selected by this run's first agent step; absent for deck-only or historical runs. */
+	backend?: { path: string; commit: string | null; version: string | null };
 	/** JSON-serialized trigger payload (webhook body, manual params, event payload). */
 	triggerPayload?: string;
 	/** Sum of input+output LLM tokens across all agent steps in this run. */
 	totalLlmTokens: number;
-	/** Estimated cost in USD micro-cents (token counts × model price table). */
+	/** Provider-reported cost summed across all attempts, in millionths of USD. */
 	totalLlmCostMicros: number;
 	/** When the runner aborted, distinct from endedAt (which is the last-step finish). */
 	abortedAt?: string;

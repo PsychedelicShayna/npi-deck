@@ -29,6 +29,7 @@ describe("NeoPi JSON agent stream", () => {
 		const last = message(2, "x".repeat(9000), 23, 9, 0.0034);
 		const adapter = events(
 			{ type: "message_end", message: first }, { type: "turn_end", message: first },
+			{ type: "advisor_progress", message: "reading: " + "x".repeat(9000) },
 			{ type: "message_end", message: last }, { type: "agent_end", messages: [first, last] },
 		);
 		expect(adapter.result()).toEqual({ answer: "x".repeat(9000), error: undefined, tokensIn: 54, tokensOut: 14, costMicros: 5400 });
@@ -37,6 +38,23 @@ describe("NeoPi JSON agent stream", () => {
 	test("reports an incomplete terminal stream while preserving incurred usage", () => {
 		const adapter = events({ type: "message_end", message: message(3, "partial", 20, 4, 0.001) });
 		expect(adapter.result()).toMatchObject({ error: "NeoPi JSON stream ended without agent_end", tokensIn: 30, tokensOut: 4, costMicros: 1000 });
+	});
+
+	test("an advisor pause is not a terminal answer, even if both messages share a millisecond", () => {
+		const interim = message(5, "advisor is still working", 11, 2, 0.001);
+		const answer = message(5, "the final answer", 13, 4, 0.002);
+		const adapter = events(
+			{ type: "message_end", message: interim },
+			{ type: "agent_end", isTerminal: false, messages: [interim] },
+			{ type: "advisor_progress", message: "waiting for advisor" },
+			{ type: "message_end", message: answer },
+			{ type: "agent_end", isTerminal: true, messages: [interim, answer] },
+		);
+		expect(adapter.result()).toEqual({
+			answer: "the final answer", error: undefined, tokensIn: 44, tokensOut: 6, costMicros: 3000,
+		});
+		const incomplete = events({ type: "agent_end", isTerminal: false, messages: [interim] });
+		expect(incomplete.result()).toMatchObject({ error: "NeoPi JSON stream ended without agent_end", tokensIn: 21 });
 	});
 
 	test("rejects MCP restrictions on an unverified backend before spawning", async () => {
@@ -93,6 +111,41 @@ if (process.argv.some(arg => arg.startsWith("warn"))) process.stderr.write("Unre
 		const warned = await executeAgentStep({ ...step, prompt: "warn", structured_output: { schema: { type: "object" } } }, context, new AbortController().signal, dir, [process.execPath, script]);
 		expect(warned.status).toBe("failed");
 		expect(warned.error).toContain("agent rejected CLI flag");
+	} finally {
+		if (previousHome === undefined) delete process.env.NPI_DECK_HOME;
+		else process.env.NPI_DECK_HOME = previousHome;
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("aborting a streaming agent retains usage emitted before the terminal event", async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "npi-agent-abort-"));
+	const previousHome = process.env.NPI_DECK_HOME;
+	process.env.NPI_DECK_HOME = dir;
+	const script = path.join(dir, "cli.ts");
+	const ready = path.join(dir, "ready");
+	writeFileSync(script, `
+import { writeFileSync } from "node:fs";
+const message = { role: "assistant", timestamp: 1, model: "test",
+  content: [{ type: "text", text: "partial" }],
+  usage: { input: 5, output: 4, cacheRead: 2, cacheWrite: 1, cost: { total: 0.002 } } };
+process.stdout.write(JSON.stringify({ type: "message_end", message }) + "\\n");
+writeFileSync(${JSON.stringify(ready)}, "ready");
+setInterval(() => {}, 1000);
+`);
+	try {
+		const abort = new AbortController();
+		const pending = executeAgentStep(
+			{ id: "agent", type: "agent", prompt: "reply" } as Extract<RoutineStep, { type: "agent" }>,
+			context, abort.signal, dir, [process.execPath, script],
+		);
+		for (let i = 0; i < 100 && !existsSync(ready); i++) await Bun.sleep(10);
+		abort.abort();
+		expect(existsSync(ready)).toBe(true);
+		const result = await pending;
+		expect(result).toMatchObject({
+			status: "aborted", llmTokensIn: 8, llmTokensOut: 4, llmCostMicros: 2000,
+		});
 	} finally {
 		if (previousHome === undefined) delete process.env.NPI_DECK_HOME;
 		else process.env.NPI_DECK_HOME = previousHome;

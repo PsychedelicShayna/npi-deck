@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { validateStructuredOutput, type RoutineStep } from "@npi-deck/protocol";
 import { spawnOwned, terminateOwned } from "../../owned-process.ts";
 import { isLiteralAllowlistName } from "../../literal-allowlist-name.ts";
@@ -12,9 +13,9 @@ const UNKNOWN_FLAG = /(?:unrecognized|unknown|unsupported|invalid)\s+(?:command.
 
 type AgentStep = Extract<RoutineStep, { type: "agent" }>;
 
-/** Each assistant message is counted once, not once per message_end/turn_end/agent_end. */
+/** Count each assistant message once across message_end and agent_end. */
 export class AgentJsonStream {
-	private readonly seen = new Set<string>();
+	private readonly seen = new Map<string, Record<string, unknown>[]>();
 	private buffer = "";
 	private readonly decoder = new TextDecoder();
 	private lastAnswer: string | undefined;
@@ -57,25 +58,32 @@ export class AgentJsonStream {
 		}
 		if (event.type === "message_end") this.count(event.message);
 		if (event.type === "agent_end") {
-			this.terminal = true;
+			if (event.isTerminal !== false) this.terminal = true;
 			if (Array.isArray(event.messages)) {
 				for (const message of event.messages) this.count(message);
-				// agent_end is authoritative for the terminal answer; never return a
-				// tool-call preamble from an earlier assistant message.
-				const finalAssistant = event.messages.findLast(isAssistant);
-				if (finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted") {
-					this.streamError ??= `NeoPi assistant stopped with ${finalAssistant.stopReason}: ${String(finalAssistant.errorMessage ?? "")}`;
+				// An advisor pause may include a provisional assistant message.
+				// Only the terminal agent_end can provide the final answer.
+				if (event.isTerminal !== false) {
+					const finalAssistant = event.messages.findLast(isAssistant);
+					if (finalAssistant?.stopReason === "error" || finalAssistant?.stopReason === "aborted") {
+						this.streamError ??= `NeoPi assistant stopped with ${finalAssistant.stopReason}: ${String(finalAssistant.errorMessage ?? "")}`;
+					}
+					this.lastAnswer = finalAssistant ? textOf(finalAssistant) : undefined;
 				}
-				this.lastAnswer = finalAssistant ? textOf(finalAssistant) : undefined;
 			}
 		}
 	}
 
 	private count(message: unknown): void {
 		if (!isAssistant(message)) return;
+		// NeoPi assistant messages have no guaranteed id: responseId is optional
+		// and two messages can start in the same millisecond. Compare full records
+		// only inside a timestamp/responseId/model bucket to keep collisions distinct.
 		const key = `${message.timestamp}:${message.responseId ?? ""}:${message.model}`;
-		if (this.seen.has(key)) return;
-		this.seen.add(key);
+		const bucket = this.seen.get(key);
+		if (bucket?.some((prior) => isDeepStrictEqual(prior, message))) return;
+		if (bucket) bucket.push(message);
+		else this.seen.set(key, [message]);
 		const usage = message.usage;
 		if (!usage || typeof usage !== "object") {
 			this.streamError ??= "NeoPi assistant message omitted usage";

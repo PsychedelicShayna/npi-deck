@@ -32,8 +32,10 @@ import type {
 } from "@npi-deck/protocol";
 
 import { broadcastBus } from "../broadcast-bus.ts";
+import { activeBackend } from "../backend/runtime.ts";
 import { notificationService } from "../notifications/index.ts";
 import { finalizeRun, finishStepRun, insertSkippedStepRun, startStepRun } from "../db/routine-step-runs.ts";
+import { setRunBackend } from "../db/routines.ts";
 import { logger } from "../log.ts";
 import { workRegistry } from "../work-registry.ts";
 import { routineAgentCommand } from "./agent-command.ts";
@@ -124,7 +126,19 @@ export async function runV1Pipeline(input: {
 
 	const stepCwd = (routine.actionCwd && routine.actionCwd.trim()) || defaultCwd;
 	let pinnedAgentCommand: string[] | undefined;
-	const agentCommandForRun = (): string[] => pinnedAgentCommand ??= input.agentCommand?.() ?? routineAgentCommand([]);
+	const agentCommandForRun = (): string[] => {
+		if (pinnedAgentCommand) return pinnedAgentCommand;
+		const command = input.agentCommand?.() ?? routineAgentCommand([]);
+		const cliPath = command[1] ?? command[0] ?? "";
+		const suffix = path.join("packages", "coding-agent", "src", "cli.ts");
+		const backendPath = cliPath.endsWith(path.sep + suffix) ? cliPath.slice(0, -suffix.length - 1) : cliPath;
+		const active = activeBackend()?.identity;
+		setRunBackend(runId, active?.path === backendPath
+			? active
+			: { path: backendPath, commit: null, version: null });
+		pinnedAgentCommand = command;
+		return command;
+	};
 
 	// Lazy mkdir for the per-run agent sandbox. Created the first time an
 	// `agent` step runs; left in place after the run finishes so the user can

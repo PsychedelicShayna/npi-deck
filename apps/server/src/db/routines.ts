@@ -56,6 +56,9 @@ interface RunRow {
 	abort_reason: string | null;
 	step_count_total: number;
 	step_count_failed: number;
+	backend_path: string | null;
+	backend_commit: string | null;
+	backend_version: string | null;
 }
 
 function rowToRoutine(r: RoutineRow): Routine {
@@ -110,6 +113,7 @@ function rowToRun(r: RunRow): RoutineRun {
 	if (r.trigger_payload !== null) out.triggerPayload = r.trigger_payload;
 	if (r.aborted_at !== null) out.abortedAt = r.aborted_at;
 	if (r.abort_reason !== null) out.abortReason = r.abort_reason;
+	if (r.backend_path !== null) out.backend = { path: r.backend_path, commit: r.backend_commit, version: r.backend_version };
 	return out;
 }
 
@@ -389,6 +393,13 @@ export function startRun(routineId: string, trigger: RoutineRun["trigger"], trig
 	return out;
 }
 
+/** Persist the tree selected for this run before executing its first agent step. */
+export function setRunBackend(runId: string, backend: { path: string; commit: string | null; version: string | null }): void {
+	getDb().prepare<unknown, [string, string | null, string | null, string]>(
+		"UPDATE routine_runs SET backend_path = ?, backend_commit = ?, backend_version = ? WHERE id = ?",
+	).run(backend.path, backend.commit, backend.version, runId);
+}
+
 export function finishRun(
 	runId: string,
 	patch: { exitCode?: number; stdoutExcerpt?: string; stderrExcerpt?: string; error?: string },
@@ -414,7 +425,7 @@ export function listRuns(routineId: string, limit = 20): RoutineRun[] {
 		.query<RunRow, [string, number]>(
 			`SELECT id, routine_id, started_at, ended_at, exit_code, stdout_excerpt, stderr_excerpt, error, trigger,
 			        trigger_payload, total_llm_tokens, total_llm_cost_micros, aborted_at, abort_reason,
-			        step_count_total, step_count_failed
+			        step_count_total, step_count_failed, backend_path, backend_commit, backend_version
 			 FROM routine_runs
 			 WHERE routine_id = ?
 			 ORDER BY started_at DESC
@@ -429,7 +440,7 @@ export function getRun(runId: string): RoutineRun | undefined {
 		.query<RunRow, [string]>(
 			`SELECT id, routine_id, started_at, ended_at, exit_code, stdout_excerpt, stderr_excerpt, error, trigger,
 			        trigger_payload, total_llm_tokens, total_llm_cost_micros, aborted_at, abort_reason,
-			        step_count_total, step_count_failed
+			        step_count_total, step_count_failed, backend_path, backend_commit, backend_version
 			 FROM routine_runs WHERE id = ?`,
 		)
 		.get(runId) as RunRow | null;

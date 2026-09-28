@@ -124,7 +124,7 @@ Tables:
 - `tasks` — backlog/active/blocked/done items. `display_id` for human IDs (`T-1`, ...).
 - `inbox_items` — quick captures + promote-to-task records.
 - `routines` — cron / webhook / manual / event routine definitions (V0 single-action + V1 multi-step pipelines via `spec_yaml`).
-- `routine_runs` — per-run history with status, duration, total cost.
+- `routine_runs` — per-run history with status, duration, total cost, and the pinned NeoPi backend identity for runs with agent steps.
 - `routine_step_runs` — per-step records inside a V1 run (stdout / stderr excerpts, JSON output, model, tokens, cost, retry attempt).
 - `routine_state` — cross-run persistent state per routine, addressable from the templating engine.
 - `bridge_state` — supervised bridge process records (currently Telegram).
