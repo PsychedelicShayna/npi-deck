@@ -25,6 +25,8 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 ### Fixed
 
 - **OAuth prompt lost before the flow id arrived** (R08, #8). The sign-in modal subscribes before starting the flow and replays the flow's early frames, so a provider that asks a question right away (Ollama) shows it. Closing the modal before the flow id arrives now cancels the flow.
+- Backendless startup now serves the backend picker without trying to install starters through an unloaded SDK (#36). A committed backend switch remains latched until worker exit (#78).
+- Session browsing uses a read-only global scan for project filters instead of repairing NeoPi session backups (#76); model-picker discovery uses read-only settings and cannot migrate user config (#77).
 
 ### Removed
 

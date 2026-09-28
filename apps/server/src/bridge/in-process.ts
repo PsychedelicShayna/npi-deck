@@ -225,10 +225,11 @@ export class InProcessAgentBridge implements AgentBridge {
 	}
 
 	async listSessions(opts: { cwd?: string }): Promise<SessionSummary[]> {
-		const raw = opts.cwd
-			? await sdk().SessionManager.list(opts.cwd)
-			: await sdk().SessionManager.listAll();
-		return raw.map((r: any) => summarize(r));
+		// NeoPi's project-scoped list repairs orphaned backups as a side effect.
+		// Browsing sessions must not rename files in the user's agent store.
+		const raw = await sdk().SessionManager.listAll();
+		const cwd = opts.cwd ? path.resolve(opts.cwd) : undefined;
+		return raw.filter(r => !cwd || path.resolve(r.cwd) === cwd).map(r => summarize(r));
 	}
 
 	async readTranscript(sessionPath: string): Promise<SessionTranscriptResponse | undefined> {
@@ -294,17 +295,16 @@ export class InProcessAgentBridge implements AgentBridge {
 	 * MIXTURES.toml) on the model registry only while some owner holds its
 	 * mixture catalog; sessions hold it for their lifetime. The deck holds it
 	 * too, so the picker lists mixtures before any chat is open. Discovery
-	 * reads config files only and spawns nothing. The global `settings` is
-	 * only initialized once a session exists, so this loads its own isolated
-	 * Settings, which it only reads (writes through it would persist).
-	 * A failure is retried on the next listing.
+	 * reads config files only and spawns nothing. The global settings instance
+	 * is only initialized once a session exists; use the read-only loader here
+	 * so opening the picker cannot migrate or write the user's config.
 	 */
 	private ensureMixtures(registry: ModelRegistry): Promise<void> {
 		if (!hasFeature("mixtures")) return Promise.resolve();
 		this.mixturesRetained ??= (async () => {
 			const cwd = process.cwd();
 			const agentDir = sdk().getAgentDir();
-			const settings = await sdk().Settings.loadIsolated({ cwd, agentDir });
+			const settings = await sdk().Settings.loadReadOnly({ cwd, agentDir });
 			await feature("mixtures").retainMixtureCatalog("npi-deck:model-picker", { cwd, agentDir, registry, settings });
 		})().catch((err) => {
 			this.mixturesRetained = undefined;

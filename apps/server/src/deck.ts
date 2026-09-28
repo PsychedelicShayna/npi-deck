@@ -188,11 +188,12 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 			log.warn(`SDK theme init failed; ask tool labels may not render`, err);
 		}
 	}
-	// Sync bundled starter skills into ~/.omp/agent/skills/ before the watcher
-	// spins up. Idempotent — never overwrites a user-edited target — so this
-	// is safe on every boot. Disable with NPI_DECK_INSTALL_STARTER_SKILLS=0.
-	await installStarterSkills();
-	await installStarterExtensions();
+	// Only a loaded SDK has an agent directory. Backendless boot must still
+	// serve the picker; starter installation is deferred until the next boot.
+	if (activeBackend()) {
+		await installStarterSkills();
+		await installStarterExtensions();
+	}
 
 	// Register the default browser notification channel. It broadcasts a
 	// `notification` ServerFrame to every connected web client. Future channels
@@ -252,6 +253,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 		if (candidate.kind !== "source") return { code: 400, body: { ok: false, message: "gateway backends are reserved and unsupported" } };
 		if (activeBackend()?.selection.id === id && !backendReason) return { code: 200, body: { ok: true, message: "backend already running" } };
 		switching = true;
+		let committed = false;
 		try {
 			const probe = await preflight(candidate.path);
 			if (!probe.ok) return { code: 422, body: { ok: false, message: probe.reason ?? "backend preflight failed" } };
@@ -268,6 +270,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 				mkdirSync(path.dirname(transactionFile), { recursive: true });
 				writeFileSync(transactionFile, JSON.stringify({ previous: readBackendConfig().activeBackend ?? null, target: id }), { mode: 0o600 });
 				writeActiveBackend(id);
+				committed = true;
 			} catch (err) {
 				rmSync(transactionFile, { force: true });
 				workRegistry.reopenAdmissions();
@@ -276,7 +279,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 			}
 			setTimeout(() => { void stop("backend switch").then(() => process.exit(RESTART_EXIT_CODE)); }, 50);
 			return { code: 202, body: { ok: true, message: `switching to ${id}${force ? "; aborting active work" : ""}` } };
-		} finally { switching = false; }
+		} finally { if (!committed) switching = false; }
 	}
 
 	server = Bun.serve<ConnectionData>({
