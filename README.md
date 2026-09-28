@@ -8,7 +8,7 @@ pi is known for its flexibility and omp applies some opinions on how to leverage
 
 > **Status:** v0.5.0 — cross-platform CI matrix, Linux container builds and boots, Mac/Linux launcher. See [CHANGELOG.md](./CHANGELOG.md).
 
-![omp-deck chat surface — live tool calls + orientation summary](./docs/screenshots/00-hero-chat-paper.png)
+![npi-deck chat surface with live tool calls](./docs/screenshots/00-hero-chat-paper.png)
 
 <details>
 <summary>More screenshots</summary>
@@ -122,7 +122,6 @@ The short version: **Claude Code** is the polished vendor experience for Claude.
 - [Skills](./docs/skills.md) — `/skills` view, plugin → skill hierarchy, scope semantics, REST surface.
 - [Telegram bridge](./docs/telegram.md) — DM-driven agent from your phone.
 - [Themes](./docs/themes.md) — Paper / Slate / Horizon / adding more.
-- [Start command template](./docs/start-command-template.md) — define `/start` for auto-orientation.
 - [Architecture](./docs/architecture.md) — workspace layout, frame model, synthetic events, theming.
 - [TUI parity](./docs/tui-parity.md) — feature matrix vs the omp TUI.
 - [Contributing](./CONTRIBUTING.md) — dev loop, code quality, style.

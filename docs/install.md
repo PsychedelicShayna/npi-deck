@@ -155,8 +155,8 @@ bun run dev
 
 Open <http://127.0.0.1:5173>.
 
-You'll see a single "Welcome to npi-deck" task in the kanban. Read it; it
-covers the next 10 minutes of orientation.
+You'll see a single "Welcome to npi-deck" task in the kanban. Read it for a
+quick tour of the deck.
 
 ---
 

@@ -17,6 +17,7 @@ All notable changes to omp-deck. The format is loosely based on
 
 ### Removed
 
+- **Session orientation** (#50). A new deck session is a plain empty thread. The server no longer prepends a prelude to the system prompt or fires `NPI_DECK_AUTO_START` (`/start`) on subscribe. The prelude and `/start` editors in Settings, the `/api/orientation/*` routes, the onboarding "Session greeting" step that wrote `~/.omp/agent/commands/start.md`, the four `kb://system/*.md` stubs onboarding wrote (deck-orientation, working-voice, projects-hub, org-system-hub), and `docs/start-command-template.md` are gone. Files a previous version wrote are left on disk. The maintenance-gate card moved to **Settings → Starters**, served at `/api/starters/maintenance-gate`.
 - **npm distribution.** `bin/omp-deck.mjs`, the `prepack` / `postpack` scripts, and the `bin` / `files` / `bundledDependencies` fields are gone; the root package is `private`. npi-deck runs from a checkout (`bun scripts/neopi-setup.ts`, then `bun run dev`); an `npi-deck` launcher is planned.
 - **In-app update check.** The daily `registry.npmjs.org/omp-deck` poll, `GET /api/version`, the `VersionInfo` protocol type, the StatusBar update pill, and `OMP_DECK_DISABLE_UPDATE_CHECK`. It could only advertise upstream omp-deck releases. A stale `<dataDir>/update-check.json` is harmless and can be deleted.
 - **Docker.** `Dockerfile`, `docker-compose.yml`, and the CI container smoke job.
