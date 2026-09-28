@@ -257,3 +257,20 @@ describe("assistant content blocks", () => {
 		expect(msg.blocks[1]?.blockType).toBe("anthropicServerTool");
 	});
 });
+
+describe("tool results from a snapshot", () => {
+	test("a persisted toolResult becomes the card's result, so errors show after reload", () => {
+		const s = initSession({
+			sessionId: "s2",
+			cwd: "/tmp/x",
+			isStreaming: false,
+			todoPhases: [],
+			messages: [
+				{ role: "assistant", content: [{ type: "toolCall", id: "t1", name: "bash", arguments: { command: "x" } }] },
+				{ role: "toolResult", toolCallId: "t1", toolName: "bash", isError: true, content: [{ type: "text", text: "Async job manager unavailable for this session." }] },
+			],
+		});
+		expect(s.toolCalls.t1?.result).toEqual({ content: [{ type: "text", text: "Async job manager unavailable for this session." }] });
+		expect(s.toolCalls.t1?.isError).toBe(true);
+	});
+});

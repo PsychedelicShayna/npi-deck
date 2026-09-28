@@ -470,9 +470,14 @@ function ingestMessage(state: SessionUi, msg: any): void {
 						.filter(Boolean) as Array<TextBlock | ImageBlock>)
 				: [];
 			const prev = state.toolCalls[id];
+			// Cards render `result`; a snapshot or read-only transcript has no
+			// tool_execution_end, so the persisted toolResult content is the
+			// result (including verbatim refusals such as NeoPi's "Async job
+			// manager unavailable for this session.").
 			state.toolCalls[id] = prev
 				? {
 						...prev,
+						result: prev.result ?? { content },
 						resultContent: content,
 						isError: Boolean(msg.isError ?? prev.isError),
 						status: msg.isError ? "error" : prev.status === "running" ? "complete" : prev.status,
@@ -482,6 +487,7 @@ function ingestMessage(state: SessionUi, msg: any): void {
 						id,
 						name: String(msg.toolName ?? "?"),
 						args: undefined,
+						result: { content },
 						resultContent: content,
 						status: msg.isError ? "error" : "complete",
 						isError: Boolean(msg.isError),
