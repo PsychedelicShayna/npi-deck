@@ -17,19 +17,22 @@ only after you remove the shell override and restart).
 
 See [.env.example](../.env.example) for a copy-paste template with comments.
 
-## Where the managed `.env` lives
+## The data dir
 
-| OS | Path | Override |
-|---|---|---|
-| Windows | `%LOCALAPPDATA%\npi-deck\.env` | `NPI_DECK_DATA_DIR=…` |
-| Linux | `$XDG_CONFIG_HOME/npi-deck/.env` (defaults to `~/.config/npi-deck/.env`) | `NPI_DECK_DATA_DIR=…` |
-| macOS | `~/.config/npi-deck/.env` | `NPI_DECK_DATA_DIR=…` |
+Everything the deck keeps lives in one directory: `~/.npi-deck`, or
+`NPI_DECK_HOME` if set. `NPI_DECK_HOME` must come from the launching
+environment; the managed `.env` lives inside the data dir, so it cannot move
+it. The old `~/.omp-deck`, `~/.config/omp-deck` and `NPI_DECK_DATA_DIR`
+locations are not read.
 
-The same directory holds:
+The managed `.env` is `<data dir>/.env`. The same directory holds:
 
 - `env-audit.log` — append-only `timestamp | key | action (set/unset/reveal)`.
   Values are never logged.
 - `telegram-bridge.db` — chat→session map (only when the bridge runs).
+- `deck.db` and `uploads/` — kanban, routines, inbox, pasted images.
+- `config.yml` and `neopi/<sha>/` — backend trees and the active backend.
+- `run/` — launcher lock, generation and owned-process journals.
 
 ## Variable reference
 
@@ -38,7 +41,7 @@ The same directory holds:
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
 | `NPI_DECK_HOST` | `127.0.0.1` | yes | Bind host. Loopback by default — never `0.0.0.0` without an auth layer. |
-| `NPI_DECK_PORT` | `8787` | yes | HTTP + WebSocket port. |
+| `NPI_DECK_PORT` | `1701` | yes | HTTP + WebSocket port. |
 | `NPI_DECK_WEB_PORT` | `5173` | yes | Vite dev server port (dev only). Proxies `/api` and `/ws` to `NPI_DECK_PORT`. |
 | `NPI_DECK_API_BASE` | derived | no | Loopback URL standalone bridge processes use. Derived from host+port when unset. |
 
@@ -66,9 +69,20 @@ The same directory holds:
 
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
-| `NPI_DECK_DB_PATH` | `apps/server/data/deck.db` | yes | SQLite database path. Use absolute path in production. |
-| `NPI_DECK_DATA_DIR` | `%LOCALAPPDATA%/npi-deck` (Win) / `$XDG_CONFIG_HOME/npi-deck` (Unix) | yes | Directory for managed `.env`, audit log, bridge state. |
-| `NPI_DECK_WEB_DIST` | auto-detected | yes | Static web bundle dir for production serving. |
+| `NPI_DECK_HOME` | `~/.npi-deck` | yes | The data dir. Launching environment only. |
+| `NPI_DECK_DB_PATH` | `<data dir>/deck.db` | yes | SQLite database path. |
+| `NPI_DECK_UPLOADS_ROOT` | `uploads/` next to the db | yes | Pasted-image store. |
+| `NPI_DECK_WEB_DIST` | `apps/web/dist` once built | yes | Static web bundle dir. The launcher sets it. |
+
+### Set by the launcher and the server
+
+Not settings; listed so they are recognizable in `/proc/<pid>/environ`.
+
+| Var | Set by | Notes |
+|---|---|---|
+| `NPI_DECK_LAUNCHER_PID`, `NPI_DECK_LAUNCHER_STARTTIME` | `npi-deck` launcher | The server shuts down when this process is gone. Without them, the restart button reports that no supervisor is present. |
+| `NPI_DECK_GEN` | server, at boot | Generation marker inherited by every descendant. The next boot (and the launcher, once its server is gone) kills processes of dead generations. |
+| `NPI_DECK_TELEGRAM_BRIDGE_ENTRY` | you, rarely | Override the Telegram bridge entry script. |
 
 ### Logging
 
@@ -85,7 +99,7 @@ the deck. None of these vars are required for the deck itself.
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | _(unset)_ | bridge | From @BotFather. Sensitive. |
 | `TELEGRAM_ALLOWED_USERS` | _(unset)_ | bridge | Comma-separated numeric Telegram user IDs. Required. |
-| `TELEGRAM_BRIDGE_DB_PATH` | `<dataDir>/telegram-bridge.db` | bridge | SQLite chat→session map. |
+| `TELEGRAM_BRIDGE_DB_PATH` | `<data dir>/telegram-bridge.db` | bridge | SQLite chat→session map. |
 
 See [docs/telegram.md](./telegram.md) for the full bridge setup.
 

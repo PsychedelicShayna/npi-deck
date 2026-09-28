@@ -78,10 +78,10 @@ session.
 
 ## Persistent chat→session map
 
-The mapping lives at `<dataDir>/telegram-bridge.db` (SQLite). It survives
+The mapping lives at `~/.npi-deck/telegram-bridge.db` (SQLite). It survives
 deck restarts so your conversation with the bot picks up across sessions.
 
-To reset: `rm <dataDir>/telegram-bridge.db` while the bridge is stopped, then
+To reset: `rm ~/.npi-deck/telegram-bridge.db` while the bridge is stopped, then
 restart it.
 
 ## Operations
@@ -116,9 +116,8 @@ The deck supervises the child process — when the deck server shuts down
 
 **Bridge crashes immediately with "TELEGRAM_BOT_TOKEN is required".**
 The credentials saved in Settings aren't reaching the bridge process. The
-deck's managed `.env` writes to `<dataDir>/.env` and the bridge reads from
-the same file. Confirm via `cat <dataDir>/.env` (Linux/macOS) or
-`type %LOCALAPPDATA%\npi-deck\.env` (Windows).
+deck's managed `.env` writes to `~/.npi-deck/.env` and the bridge reads from
+the same file. Confirm via `cat ~/.npi-deck/.env` (or `$NPI_DECK_HOME/.env`).
 
 **Bridge crashes with "TELEGRAM_ALLOWED_USERS must contain at least one numeric Telegram user id".**
 You set a username instead of the numeric ID. Get the numeric ID via

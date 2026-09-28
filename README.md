@@ -1,10 +1,10 @@
-# omp-deck
+# NPI deck
 
 **A calmer place to drive your coding agent.**
 
 The [`omp`](https://github.com/can1357/oh-my-pi) terminal agent is excellent at the actual coding. But terminals weren't built for everything that comes with running an agent for hours a day: keeping track of what it's working on, glancing at it from another room, picking up where it left off tomorrow, deciding whether to let it execute the thing it just proposed.
 
-pi is known for its flexibility and omp applies some opinions on how to leverage it more effectively. omp-deck is best understood as a web interface for omp with a small set of additional opinions applied on top of omp. 
+pi is known for its flexibility and omp applies some opinions on how to leverage it more effectively. NPI deck is best understood as a web interface for omp with a small set of additional opinions applied on top of omp. 
 
 > **Status:** v0.5.0 — cross-platform CI matrix, Linux container builds and boots, Mac/Linux launcher. See [CHANGELOG.md](./CHANGELOG.md).
 
@@ -34,7 +34,7 @@ You're already running an agent. You've felt the friction of trying to:
 - **Capture an idea or a bug** without breaking your current focus.
 - **Have it remember things** across sessions without you stuffing context windows by hand.
 
-omp-deck is the cockpit that holds all of that. The chat surface stays at parity with the terminal,  but everything *around* the chat is built for the rest of the work.
+NPI deck is the cockpit that holds all of that. The chat surface stays at parity with the terminal,  but everything *around* the chat is built for the rest of the work.
 
 ## What you get
 
@@ -60,7 +60,7 @@ omp-deck is the cockpit that holds all of that. The chat surface stays at parity
 
 ## Quickstart
 
-npi-deck runs from a git checkout. There is no npm package, Docker image, or Windows launcher; an `npi-deck` launcher is planned but not available yet.
+NPI deck runs from a git checkout. There is no npm package, Docker image, or Windows launcher.
 
 **Prerequisites:** [Bun](https://bun.sh) ≥ 1.3.14 and Git on your `PATH`, plus a NeoPi checkout for `scripts/neopi-setup.ts` to build from (see [docs/install.md](./docs/install.md#neopi-backend-tree)).
 
@@ -69,12 +69,13 @@ git clone https://github.com/PsychedelicShayna/npi-deck.git
 cd npi-deck
 bun install --frozen-lockfile --ignore-scripts
 bun scripts/neopi-setup.ts
-bun run dev
+ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck   # once
+npi-deck
 ```
 
-`bun run dev` starts the server on <http://127.0.0.1:8787> and the Vite app with hot reload on <http://127.0.0.1:5173> — open the latter. To serve the built app from the server alone, run `bun run build && bun run start` and open `:8787`. `bash Start-OMP-Deck.sh start` runs the dev pair in the background with logs under `.logs/` (`stop` / `status` subcommands too).
+`npi-deck` builds the web bundle if needed and serves the deck on <http://127.0.0.1:1701> as the systemd user service `npi-deck` in `neopi-deck.slice`; Ctrl-C stops it, and anything the deck spawned dies with it. See [the launcher](./docs/install.md#the-npi-deck-launcher). For development, `bun run dev` starts the server on :1701 and the Vite app with hot reload on <http://127.0.0.1:5173>; open the latter.
 
-On first run, the deck creates `~/.omp/agent/` from scratch and installs starter skills + extensions; its own state lives in `~/.omp-deck/` (override with `OMP_DECK_DATA_DIR`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
+On first run, the deck creates `~/.omp/agent/` from scratch; its own state lives in `~/.npi-deck/` (override with `NPI_DECK_HOME`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
 
 **Authenticate (one-time, in the deck UI):**
 
@@ -83,15 +84,15 @@ On first run, the deck creates `~/.omp/agent/` from scratch and installs starter
 
 That's it — pick a model in the chat surface and send a prompt.
 
-Other env knobs: `OMP_DECK_PORT`, `OMP_DECK_HOST`, `OMP_DECK_DB_PATH`, `OMP_DECK_UPLOADS_ROOT` — see [docs/configuration.md](./docs/configuration.md). For the full step-by-step (Bun install, optional `omp` CLI, auth alternatives), see [docs/install.md](./docs/install.md).
+Other env knobs: `NPI_DECK_PORT`, `NPI_DECK_HOST`, `NPI_DECK_DB_PATH`, `NPI_DECK_UPLOADS_ROOT` — see [docs/configuration.md](./docs/configuration.md). For the full step-by-step (Bun install, optional `omp` CLI, auth alternatives), see [docs/install.md](./docs/install.md).
 
 ## How it compares
 
-omp + omp-deck is one slice of a busy space. The neighbors:
+omp + NPI deck is one slice of a busy space. The neighbors:
 
-|                                | **omp + omp-deck**                                                                | **[Claude Code](https://github.com/anthropics/claude-code)** | **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** | **[OpenClaw](https://github.com/openclaw/openclaw)**                       |
+|                                | **omp + NPI deck**                                                                | **[Claude Code](https://github.com/anthropics/claude-code)** | **[Hermes Agent](https://github.com/NousResearch/hermes-agent)** | **[OpenClaw](https://github.com/openclaw/openclaw)**                       |
 |--------------------------------|-----------------------------------------------------------------------------------|--------------------------------------------------------------|------------------------------------------------------------------|----------------------------------------------------------------------------|
-| Form factor                    | Terminal TUI (omp) + web cockpit (omp-deck)                                       | Terminal CLI / IDE plugin                                    | Terminal TUI + multi-channel gateway                             | Daemon + multi-channel gateway                                             |
+| Form factor                    | Terminal TUI (omp) + web cockpit (NPI deck)                                       | Terminal CLI / IDE plugin                                    | Terminal TUI + multi-channel gateway                             | Daemon + multi-channel gateway                                             |
 | Model support                  | Anthropic, OpenAI, Google AI / Vertex, OpenRouter, Ollama, llama.cpp, LM Studio, any OpenAI-compatible | Anthropic Claude only                                        | Model-agnostic (Nous Portal, OpenRouter, NIM, …)                 | Model-agnostic (profiles in `openclaw.json`, w/ fallback chain)            |
 | Hosting                        | Self-hosted Bun process, loopback-only by default                                 | Anthropic-hosted CLI                                         | Local / Docker / SSH / Modal / Daytona / Vercel Sandbox          | Self-hosted on owned host (Mac mini, VPS)                                  |
 | Kanban / task board            | Built-in, WS-synced, `T-N` display IDs                                            | —                                                            | —                                                                | —                                                                          |
@@ -102,7 +103,7 @@ omp + omp-deck is one slice of a busy space. The neighbors:
 | Messenger bridges              | Telegram (Slack / Discord / Matrix on the roadmap)                                | —                                                            | Telegram, Discord, Slack, WhatsApp, Signal                       | 20+ (WhatsApp, Telegram, Slack, Discord, iMessage, Matrix, Teams, …)       |
 | License                        | MIT                                                                               | Proprietary                                                  | Open source                                                      | Open source                                                                |
 
-The short version: **Claude Code** is the polished vendor experience for Claude. **Hermes** is the self-improving agent with serverless backends. **OpenClaw** lives wherever you message from. **omp + omp-deck** is the cockpit shape — a model-agnostic coding agent with a web surface for the work *around* the chat (kanban, routines, KB, inbox, plan-mode approval, messaging bridge).
+The short version: **Claude Code** is the polished vendor experience for Claude. **Hermes** is the self-improving agent with serverless backends. **OpenClaw** lives wherever you message from. **omp + NPI deck** is the cockpit shape — a model-agnostic coding agent with a web surface for the work *around* the chat (kanban, routines, KB, inbox, plan-mode approval, messaging bridge).
 
 ## A few notes on running it
 
@@ -128,4 +129,4 @@ The short version: **Claude Code** is the polished vendor experience for Claude.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE). NPI deck is a fork of [bjb2/omp-deck](https://github.com/bjb2/omp-deck) by Bryan Bartley.

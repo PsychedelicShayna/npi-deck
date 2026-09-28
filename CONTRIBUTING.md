@@ -22,7 +22,7 @@ Workspaces are wired through Bun's `workspaces` field in the root `package.json`
 
 ```sh
 bun install
-bun run dev          # spawns server (8787) + vite (5173) in parallel
+bun run dev          # spawns server (1701) + vite (5173) in parallel
 ```
 
 If you want them in separate terminals:
@@ -52,24 +52,25 @@ bun install
 cat > .env <<'EOF'
 NPI_DECK_PORT=8889
 NPI_DECK_WEB_PORT=5273
-NPI_DECK_DB_PATH=$PWD/apps/server/data/deck.dev.db
-NPI_DECK_DATA_DIR=$PWD/.deck-data
+NPI_DECK_HOME=$PWD/.deck-data
+NPI_DECK_BACKEND=$HOME/.npi-deck/neopi/<sha>
 EOF
 bun run dev      # dev deck lives at http://127.0.0.1:5273
 ```
 
-The two instances now share **history only**. Five env vars give you full
-state separation:
+The two instances now share **history only**. These env vars give you full
+state separation (`NPI_DECK_HOME` moves the db, managed `.env`, uploads and
+run state together; `NPI_DECK_BACKEND` points at a prepared backend tree
+because the new home has no `config.yml`):
 
 | Concern                  | prod tree            | dev worktree                     |
 | ------------------------ | -------------------- | -------------------------------- |
-| Server port              | `NPI_DECK_PORT=8787` | `NPI_DECK_PORT=8889`             |
+| Server port              | `NPI_DECK_PORT=1701` | `NPI_DECK_PORT=8889`             |
 | Web (Vite) port          | `5173`               | `NPI_DECK_WEB_PORT=5273`         |
-| Kanban / inbox / routines| `deck.db`            | `deck.dev.db`                    |
-| Managed `.env`, audit log| default `DATA_DIR`   | `NPI_DECK_DATA_DIR=.deck-data`   |
-| OAuth credentials + sessions | `~/.omp/agent/`  | same by default; set `OMP_AGENT_DIR` to isolate when testing the OAuth flow itself |
+| Deck data dir            | `~/.npi-deck`        | `NPI_DECK_HOME=.deck-data`       |
+| OAuth credentials + sessions | `~/.omp/agent/`  | same by default; set `PI_CODING_AGENT_DIR` to isolate when testing the OAuth flow itself |
 
-Leave `OMP_AGENT_DIR` unset for routine dev so you don't re-login to Claude /
+Leave `PI_CODING_AGENT_DIR` unset for routine dev so you don't re-login to Claude /
 Codex on every dev iteration. Set it to a fresh dir only when the change
 under test touches `auth.db` and you need to repeatedly clear the
 no-credentials state.

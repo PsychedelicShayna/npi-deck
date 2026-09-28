@@ -4,22 +4,24 @@ npi-deck is the cockpit UI for [`oh-my-pi`](https://github.com/can1357/oh-my-pi)
 (`omp`).
 
 The deck runs from a git checkout. There is no npm package, Docker image, or
-Windows launcher; an `npi-deck` launcher is planned but not available yet.
+Windows launcher.
 
 ```sh
 git clone https://github.com/PsychedelicShayna/npi-deck.git
 cd npi-deck
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts   # prepare the pinned NeoPi tree (see below)
-bun run dev                  # server on :8787, Vite app on :5173
+bun scripts/neopi-setup.ts                        # prepare the pinned NeoPi tree (see below)
+ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck   # once
+npi-deck                                          # http://127.0.0.1:1701
 ```
 
-`bun run start` serves the built web app from the server on :8787 instead;
-run `bun run build` first. Two flavors depending on whether you already use
-omp on this machine:
+For development, `bun run dev` runs the server on :1701 and the Vite app with
+hot reload on :5173 (open the latter). Two flavors depending on whether you
+already use omp on this machine:
 
 - [Path A — You already have omp installed and authenticated](#path-a--existing-omp-user)
 - [Path B — Fresh install (no omp yet)](#path-b--fresh-install)
+- [The npi-deck launcher](#the-npi-deck-launcher)
 - [Verifying the install](#verifying-the-install)
 - [Where state lives](#where-state-lives)
 - [Uninstall / clean slate](#uninstall--clean-slate)
@@ -96,9 +98,12 @@ That's it.
 
 ### Optional: custom data dir
 
-The deck writes its own SQLite database, env file, and bridge state under
-`%LOCALAPPDATA%/npi-deck` (Windows) or `$XDG_CONFIG_HOME/npi-deck` (Linux /
-macOS). To override, set `NPI_DECK_DATA_DIR` before `bun run dev`.
+The deck keeps its SQLite database, managed env file, uploads, bridge state,
+backend trees and run state in one directory, `~/.npi-deck`. To use another
+one, set `NPI_DECK_HOME` in the environment that starts the deck. It is not
+read from the managed `.env`, which lives inside it.
+
+Nothing is read from the old `~/.omp-deck` or `~/.config/omp-deck` dirs.
 
 ---
 
@@ -160,11 +165,54 @@ quick tour of the deck.
 
 ---
 
+## The npi-deck launcher
+
+`bin/npi-deck` is the everyday way to run the deck. Link it into your `PATH`
+once; the link resolves back to the checkout, so it works from any cwd:
+
+```sh
+ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck
+npi-deck [--port N] [--host H] [--unit NAME] [--rebuild] [--no-systemd]
+```
+
+What it does:
+
+- Builds the web bundle (`apps/web/dist`) when it is missing or older than
+  its sources (`--rebuild` forces it), and serves it from the server.
+- Refuses to start a second instance. The lock is `~/.npi-deck/run/launcher.lock`
+  (a lock left by a dead launcher is taken over), and a unit that is already
+  active is refused too.
+- Runs the server as the transient systemd user service `npi-deck.service` in
+  `neopi-deck.slice` (under `neopi.slice`), with `KillMode=control-group`.
+  When the server exits for any reason, `kill -9` and OOM included, systemd
+  kills everything left in the unit's cgroup: MCP servers, shells, routine
+  steps, setsid'd daemons. The launcher follows the unit's journal in the
+  foreground.
+- Ctrl-C (or SIGTERM/SIGHUP) on the launcher stops the unit. If the launcher
+  itself is killed, the server notices within a second (it watches
+  `NPI_DECK_LAUNCHER_PID`) and shuts down, which empties the cgroup.
+- Settings → Restart makes the server exit with the reserved status 75;
+  systemd restarts it on exactly that status (`RestartForceExitStatus`) and
+  clears the cgroup between generations. It gives up after 5 starts in 60 s.
+  A server started with `bun run dev` or `bun run start` has no supervisor,
+  so its restart button reports that instead.
+
+Without a systemd user manager the launcher refuses to start unless given
+`--no-systemd`. Then the server is a direct child, run under
+`setpriv --pdeathsig KILL` in its own process group, so it dies with the
+launcher. When the server exits, the launcher kills its process group and
+every process that still carries its generation marker (`NPI_DECK_GEN`).
+Descendants of a server whose launcher was also killed are cleaned up at the
+next start.
+
+Status and logs: `systemctl --user status npi-deck`,
+`journalctl --user -u npi-deck`, `systemd-cgls --user-unit npi-deck.service`.
+
 ## Verifying the install
 
 A quick smoke list after either path:
 
-1. **Health endpoint**: `curl http://127.0.0.1:8787/api/health` returns `{"ok":true,...}`.
+1. **Health endpoint**: `curl http://127.0.0.1:1701/api/health` returns `{"ok":true,...}`.
 2. **Web bundle**: opening <http://127.0.0.1:5173> shows the chat view (or
    the kanban — there's no auth, so any route works).
 3. **First session**: click "+ new session" in the sidebar, send any prompt.
@@ -178,14 +226,20 @@ If any of those fail, see [troubleshooting](#troubleshooting) below.
 
 ## Where state lives
 
+Deck state lives in `~/.npi-deck` (`NPI_DECK_HOME` overrides):
+
+- **Kanban, routines, inbox**: `deck.db` (`NPI_DECK_DB_PATH` overrides), with
+  pasted images under `uploads/`.
+- **Managed env file and audit log**: `.env` and `env-audit.log`.
+- **Telegram bridge mapping DB**: `telegram-bridge.db` (only created when the
+  bridge runs).
+- **Backend trees and selection**: `neopi/<sha>/` and `config.yml`.
+- **Run state**: `run/` (launcher lock, generation and owned-process
+  journals).
+
+Elsewhere:
+
 - **omp session/auth data**: `~/.omp/agent/` (NeoPi's `getAgentDir()`; `PI_CODING_AGENT_DIR` overrides).
-- **Deck kanban + routines + inbox**: `apps/server/data/deck.db` by default;
-  override via `NPI_DECK_DB_PATH`.
-- **Deck-managed env file + audit log**: `<dataDir>/.env` and
-  `<dataDir>/env-audit.log` — see [configuration.md](./configuration.md)
-  for `dataDir` resolution rules.
-- **Telegram bridge mapping DB**: `<dataDir>/telegram-bridge.db` (only created
-  when the bridge runs).
 - **Marketplace state**: `~/.omp/plugins/installed_plugins.json` and
   `~/.omp/plugins/marketplaces.json` (managed by the SDK).
 
@@ -196,10 +250,8 @@ If any of those fail, see [troubleshooting](#troubleshooting) below.
 To wipe deck state while preserving omp's own data:
 
 ```sh
-# Stop the deck (Ctrl+C in its terminal)
-rm -rf apps/server/data/                    # kanban + routines + inbox
-rm -rf ~/.config/npi-deck/                  # Linux/macOS dataDir
-rmdir /S /Q %LOCALAPPDATA%\npi-deck         # Windows dataDir
+# Stop the deck first (Ctrl+C in the launcher's terminal)
+rm -rf ~/.npi-deck/                         # all deck state, including backend trees
 ```
 
 To also drop omp:
@@ -218,8 +270,8 @@ rm -rf ~/.omp/                              # sessions + auth
 retry usually succeeds. If you're behind a corporate proxy, set
 `BUN_INSTALL_CACHE_DIR` and `HTTPS_PROXY`.
 
-**Port 8787 is already in use.** Set `NPI_DECK_PORT=8788` (or any free port)
-before `bun run dev`. The vite proxy auto-follows.
+**Port 1701 is already in use.** Pass `npi-deck --port 1702` (or any free
+port), or set `NPI_DECK_PORT` before `bun run dev`; the Vite proxy follows it.
 
 **No models appear in the model picker.** Open Settings → Env and confirm
 at least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. is set. If you

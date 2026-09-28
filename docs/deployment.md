@@ -18,10 +18,10 @@ HTTPS with mTLS-style identity.
 
 ```sh
 # Run the deck loopback-only — the default
-NPI_DECK_HOST=127.0.0.1 NPI_DECK_PORT=8787 bun run start
+npi-deck                       # 127.0.0.1:1701; see install.md#the-npi-deck-launcher
 
 # Then on the same host:
-tailscale serve --bg --https=443 http://127.0.0.1:8787
+tailscale serve --bg --https=443 http://127.0.0.1:1701
 
 # Open from any tailnet device — including your phone:
 open https://<hostname>.<tailnet>.ts.net
@@ -33,7 +33,7 @@ tailnet can reach the deck.
 **Sharing externally** — use Tailscale Funnel:
 
 ```sh
-tailscale funnel --bg --https=443 http://127.0.0.1:8787
+tailscale funnel --bg --https=443 http://127.0.0.1:1701
 ```
 
 Funnel exposes the URL to the public internet. Anyone with the link can
@@ -46,11 +46,11 @@ If you don't run Tailscale on the host:
 
 ```sh
 # On the deck host:
-bun run start                                        # bound to 127.0.0.1:8787
+npi-deck                                             # bound to 127.0.0.1:1701
 
 # On your local box:
-ssh -L 8787:127.0.0.1:8787 user@deck-host
-# Then open http://localhost:8787 in your laptop browser
+ssh -L 1701:127.0.0.1:1701 user@deck-host
+# Then open http://localhost:1701 in your laptop browser
 ```
 
 Stick it in `~/.ssh/config` for a persistent tunnel:
@@ -59,14 +59,13 @@ Stick it in `~/.ssh/config` for a persistent tunnel:
 Host deck-host
   HostName <ip-or-hostname>
   User <user>
-  LocalForward 8787 127.0.0.1:8787
+  LocalForward 1701 127.0.0.1:1701
 ```
 
 ## Production knobs worth setting
 
 ```sh
-NPI_DECK_DB_PATH=/var/lib/npi-deck/deck.db    # outside the checkout
-NPI_DECK_DATA_DIR=/var/lib/npi-deck           # managed .env + audit + bridge db
+NPI_DECK_HOME=/var/lib/npi-deck               # data dir: db, managed .env, audit, bridge db, backends
 PI_CODING_AGENT_DIR=/var/lib/omp/agent        # NeoPi agent dir: sessions + auth
 NPI_DECK_DEFAULT_CWD=/workspace               # mount your code here
 LOG_LEVEL=warn                                # quieter in steady state
@@ -81,8 +80,8 @@ Before exposing the deck on a network anyone else can reach:
       enforces auth. Never bind `0.0.0.0` without one.
 - [ ] Provider API keys live in env vars (via shell profile or the deck's
       managed `.env`) — never committed in the repo or shipped in an image.
-- [ ] The data dir (`NPI_DECK_DATA_DIR`) is user-only readable. `chmod 700` on
-      Unix; Windows `%LOCALAPPDATA%` is per-user by default.
+- [ ] The data dir (`NPI_DECK_HOME`, default `~/.npi-deck`) is user-only
+      readable: `chmod 700`.
 - [ ] The audit log (`env-audit.log`) is rotated or archived if the deck runs
       for a long time. Today it grows unbounded.
 - [ ] If Telegram bridge is in use, `TELEGRAM_ALLOWED_USERS` is set. The

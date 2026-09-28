@@ -1,14 +1,22 @@
 # Changelog
 
-All notable changes to omp-deck. The format is loosely based on
+All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the fork use its name). The format is loosely based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`npi-deck` launcher** (#68, #72). `bin/npi-deck`, symlinked into `~/.local/bin`, starts the deck from any cwd. It builds the web bundle when stale and refuses a second instance. It runs the server as the systemd user service `npi-deck` in `neopi-deck.slice` with `KillMode=control-group`, so everything the server spawned dies with it, `kill -9` included. Ctrl-C on the launcher stops the unit, and the server stops if the launcher dies. Settings → Restart exits with status 75, which systemd restarts on. `--no-systemd` runs the server as a direct child under `setpriv --pdeathsig KILL`. Each server boot marks its descendants with `NPI_DECK_GEN`, and processes of dead generations are killed at the next boot and when the launcher's server is gone. See docs/install.md#the-npi-deck-launcher.
+
 ### Changed
 
+- **Renamed to npi-deck** (#49). Packages are `@npi-deck/*`. Every `OMP_DECK_*` variable is now `NPI_DECK_*`, with no fallback to the old names. `OMP_BRIDGE_TELEGRAM_ENTRY` is now `NPI_DECK_TELEGRAM_BRIDGE_ENTRY`.
+- **One data dir, `~/.npi-deck`** (`NPI_DECK_HOME` overrides). The managed `.env`, `deck.db`, uploads, the Telegram bridge db, backend trees and run state all live there. `NPI_DECK_DATA_DIR`, the `NPI_DECK_DB` alias and the `~/.config/omp-deck`/`%LOCALAPPDATA%` and `<cwd>/data/deck.db` defaults are gone. Old `~/.omp-deck` data is not read; migrating it is separate work.
+- **Default port 1701.**
+- **Shipped files resolve through `apps/server/src/assets.ts`**, not the process cwd. The server is `startDeck()` in `apps/server/src/deck.ts`; `index.ts` is only the process entry.
 - **The server loads NeoPi at runtime.** `apps/server/src/backend/manifest.ts` lists every SDK export the deck uses (module, export, tier). At boot the server imports them by absolute path from the tree named by `NPI_DECK_BACKEND` or `activeBackend` in `~/.npi-deck/config.yml`, and exits with a diagnostic naming each missing module/export when a required one is absent. `@oh-my-pi` is never in the deck's `node_modules`; `scripts/check-sdk-imports.ts` fails on value imports from it outside `apps/server/src/backend/`.
-- **Server typecheck uses the tree's `tsgo`.** `bun run --filter '@omp-deck/server' typecheck` runs the import check, then the pinned tree's `tsgo` (`scripts/tsgo.ts`).
+- **Server typecheck uses the tree's `tsgo`.** `bun run --filter '@npi-deck/server' typecheck` runs the import check, then the pinned tree's `tsgo` (`scripts/tsgo.ts`).
 - **Plan mode is unavailable** until it is ported to NeoPi's `xd://propose` flow (#45). Toggling it reports that instead of half-entering.
 
 ### Fixed
@@ -18,10 +26,10 @@ All notable changes to omp-deck. The format is loosely based on
 ### Removed
 
 - **Session orientation** (#50). A new deck session is a plain empty thread. The server no longer prepends a prelude to the system prompt or fires `NPI_DECK_AUTO_START` (`/start`) on subscribe. The prelude and `/start` editors in Settings, the `/api/orientation/*` routes, the onboarding "Session greeting" step that wrote `~/.omp/agent/commands/start.md`, the four `kb://system/*.md` stubs onboarding wrote (deck-orientation, working-voice, projects-hub, org-system-hub), and `docs/start-command-template.md` are gone. Files a previous version wrote are left on disk. The maintenance-gate card moved to **Settings → Starters**, served at `/api/starters/maintenance-gate`.
-- **npm distribution.** `bin/omp-deck.mjs`, the `prepack` / `postpack` scripts, and the `bin` / `files` / `bundledDependencies` fields are gone; the root package is `private`. npi-deck runs from a checkout (`bun scripts/neopi-setup.ts`, then `bun run dev`); an `npi-deck` launcher is planned.
+- **npm distribution.** `bin/omp-deck.mjs`, the `prepack` / `postpack` scripts, and the `bin` / `files` / `bundledDependencies` fields are gone; the root package is `private`. npi-deck runs from a checkout (`bun scripts/neopi-setup.ts`, then the `npi-deck` launcher).
 - **In-app update check.** The daily `registry.npmjs.org/omp-deck` poll, `GET /api/version`, the `VersionInfo` protocol type, the StatusBar update pill, and `OMP_DECK_DISABLE_UPDATE_CHECK`. It could only advertise upstream omp-deck releases. A stale `<dataDir>/update-check.json` is harmless and can be deleted.
 - **Docker.** `Dockerfile`, `docker-compose.yml`, and the CI container smoke job.
-- **Windows launchers.** `Start-OMP-Deck.cmd` and every `scripts/*.ps1` helper, plus the task-seed JSON files only `create-v1-tasks.ps1` read. `Start-OMP-Deck.sh` stays as the POSIX dev launcher.
+- **Windows launchers.** `Start-OMP-Deck.cmd` and every `scripts/*.ps1` helper, plus the task-seed JSON files only `create-v1-tasks.ps1` read. `Start-OMP-Deck.sh` was replaced by `bin/npi-deck`.
 
 ## [0.6.1] — 2026-05-29 — In-app update notification
 

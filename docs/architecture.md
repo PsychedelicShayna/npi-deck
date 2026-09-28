@@ -3,7 +3,7 @@
 ## High level
 
 ```
-Browser tabs (Vite dev :5173 · Bun prod :8787)
+Browser tabs (Vite dev :5173 · Bun prod :1701)
    │  WS frames (subscribe / prompt / abort) + REST control plane
    ▼
 Bun server  (apps/server)

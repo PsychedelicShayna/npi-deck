@@ -12,10 +12,10 @@ The fastest way to see a V1 routine in action:
 
 ```bash
 # List shipped templates
-curl http://127.0.0.1:8787/api/routine-templates
+curl http://127.0.0.1:1701/api/routine-templates
 
 # Install one
-curl -X POST http://127.0.0.1:8787/api/routine-templates/daily-briefing
+curl -X POST http://127.0.0.1:1701/api/routine-templates/daily-briefing
 ```
 
 That creates a routine in **disabled** state. Open the deck at
@@ -26,7 +26,7 @@ with the budget caps, and the **Spec (YAML)** tab with the raw spec.
 To run it once on demand:
 
 ```bash
-curl -X POST http://127.0.0.1:8787/api/routines/<id>/run
+curl -X POST http://127.0.0.1:1701/api/routines/<id>/run
 ```
 
 Or just click **Run now** in the editor. Once it's finished, the routine creates
@@ -195,7 +195,7 @@ steps:
     command: 'echo "hello from {{ run.id }}"'
 YAML
 
-curl -X POST http://127.0.0.1:8787/api/routines \
+curl -X POST http://127.0.0.1:1701/api/routines \
   -H "content-type: application/json" \
   -d "$(jq -Rs '{ name: "hello-world", cron: "", actionKind: "bash", actionBody: "", specYaml: . }' < /tmp/my-routine.yaml)"
 ```

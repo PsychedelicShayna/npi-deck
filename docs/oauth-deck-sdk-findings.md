@@ -88,7 +88,7 @@ Notes from the source:
 | anthropic    | 54545  | `/callback`      | yes (via constructor) | OAuthCallbackFlow falls back to a random port if 54545 is busy, but Anthropic's authorize endpoint requires exact redirect_uri match against what's registered. In practice 54545 must be free. |
 | openai-codex | 1455   | `/auth/callback` | yes         | Same fallback semantics; OpenAI's app registration likewise pins the URI. |
 
-The deck server runs on 8787/8788; **no port conflict** with the SDK's
+The deck server runs on 1701/1702; **no port conflict** with the SDK's
 short-lived listeners. Concrete implications:
 
 1. **Serialize per-provider flows on the deck server.** Two concurrent
