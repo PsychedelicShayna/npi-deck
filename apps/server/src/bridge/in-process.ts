@@ -1061,10 +1061,11 @@ export class InProcessSessionHandle implements SessionHandle {
 
 	async setModel(ref: ModelRef): Promise<void> {
 		const registry = await this.modelRegistryRef();
-		const lease = ref.provider === "mixture" ? await this.mixtureLease(registry, this.mixtureCwd()) : undefined;
+		const workspace = this.mixtureCwd();
+		const lease = ref.provider === "mixture" ? await this.mixtureLease(registry, workspace) : undefined;
 		try {
 			if (ref.provider === "mixture" && !lease?.find(ref.id)) {
-				throw new Error(`mixture/${ref.id} is not defined in ${this.cwd}`);
+				throw new Error(`mixture/${ref.id} is not defined in ${workspace}`);
 			}
 			await this.applyModel(registry, ref);
 		} finally {
