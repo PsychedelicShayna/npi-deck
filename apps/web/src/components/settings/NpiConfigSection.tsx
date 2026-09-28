@@ -7,8 +7,12 @@ import { Button } from "@/components/ui/Button";
 import { npiConfigApi } from "@/lib/npi-config-api";
 import { cn } from "@/lib/utils";
 
-/** An editor's pending change: nothing, a value to send, or input it cannot send yet. */
-type Draft = { dirty: false } | { dirty: true; value: unknown } | { dirty: true; error: string };
+/** An editor's pending change: nothing, a value (or record entries) to send, or input it cannot send yet. */
+type Draft =
+	| { dirty: false }
+	| { dirty: true; value: unknown }
+	| { dirty: true; entries: Record<string, unknown> }
+	| { dirty: true; error: string };
 type EditorProps = { setting: NpiConfigSetting; disabled: boolean; onChange: (draft: Draft) => void };
 
 const CLEAN: Draft = { dirty: false };
@@ -80,6 +84,9 @@ export function NpiConfigSection() {
 						<div>workspace: {data.cwd}</div>
 						<div>{data.settings.length} settings</div>
 					</div>
+					{data.readOnlyReason ? (
+						<div role="alert" className="rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">{data.readOnlyReason}</div>
+					) : null}
 					<label className="flex items-center gap-2 rounded-md border border-line bg-paper px-2">
 						<Search className="h-3.5 w-3.5 text-ink-4" />
 						<input
@@ -121,7 +128,7 @@ export function NpiConfigSection() {
 							</div>
 							<div className="divide-y divide-line">
 								{section.settings.map(setting => (
-									<SettingRow key={setting.id} setting={setting} cwd={data.cwd} onSaved={replace} />
+									<SettingRow key={setting.id} setting={setting} cwd={data.cwd} readOnly={data.readOnlyReason !== undefined} onSaved={replace} />
 								))}
 							</div>
 						</div>
@@ -132,13 +139,13 @@ export function NpiConfigSection() {
 	);
 }
 
-function SettingRow({ setting, cwd, onSaved }: { setting: NpiConfigSetting; cwd: string; onSaved: (setting: NpiConfigSetting) => void }) {
+function SettingRow({ setting, cwd, readOnly, onSaved }: { setting: NpiConfigSetting; cwd: string; readOnly: boolean; onSaved: (setting: NpiConfigSetting) => void }) {
 	const [draft, setDraft] = useState<Draft>(CLEAN);
 	const [generation, setGeneration] = useState(0);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | undefined>();
 	const [status, setStatus] = useState<{ text: string; complete: boolean } | undefined>();
-	const locked = setting.lockedReason !== undefined;
+	const locked = setting.lockedReason !== undefined || readOnly;
 
 	const discard = () => { setDraft(CLEAN); setGeneration(g => g + 1); };
 	// A saved or reloaded setting remounts its editor from the new value.
@@ -190,7 +197,10 @@ function SettingRow({ setting, cwd, onSaved }: { setting: NpiConfigSetting; cwd:
 						variant="primary"
 						size="sm"
 						disabled={locked || busy || !draft.dirty || invalid !== undefined}
-						onClick={() => { if (draft.dirty && "value" in draft) void run(() => npiConfigApi.set(setting.id, draft.value)); }}
+						onClick={() => {
+							if (!draft.dirty || "error" in draft) return;
+							void run(() => "entries" in draft ? npiConfigApi.setEntries(setting.id, draft.entries) : npiConfigApi.set(setting.id, draft.value));
+						}}
 					>
 						<Save className="h-3.5 w-3.5" />
 						Save
@@ -220,7 +230,8 @@ function notes(setting: NpiConfigSetting, cwd: string): string[] {
 		out.push(`A ${setting.provenance} layer overrides the global value in ${cwd}.`);
 	if (setting.env?.active && setting.env.fallback)
 		out.push(setting.provenance === "env" ? `Using $${setting.env.name} until a config value is saved.` : `Config overrides $${setting.env.name}.`);
-	if (setting.secret) out.push(setting.configured ? "A value is configured; it is never shown. Saving replaces it." : "No value is configured.");
+	if (setting.secret && setting.type === "record") out.push("Entry values are never shown. Saving changes only the entries you add, replace or remove.");
+	else if (setting.secret) out.push(setting.configured ? "A value is configured; it is never shown. Saving replaces it." : "No value is configured.");
 	else if (setting.provenance !== "global" && setting.provenance !== "default") out.push(`Effective: ${preview(setting.effectiveValue)}`);
 	return out;
 }
@@ -229,16 +240,16 @@ function notes(setting: NpiConfigSetting, cwd: string): string[] {
 function liveSummary(result: NpiConfigPatchResponse): { text: string; complete: boolean } {
 	const saved = `Saved; resolves from ${result.setting.provenance}.`;
 	if (result.live.length === 0) return { text: `${saved} No live chats to reload.`, complete: true };
-	const failed = result.live.filter(l => l.error);
+	const failed = result.live.filter(l => l.reloadFailed);
 	const shadowed = new Map<string, number>();
 	for (const l of result.live) {
-		if (!l.error && l.provenance !== "global" && l.provenance !== "default") shadowed.set(l.provenance, (shadowed.get(l.provenance) ?? 0) + 1);
+		if (!l.reloadFailed && l.provenance !== "global" && l.provenance !== "default") shadowed.set(l.provenance, (shadowed.get(l.provenance) ?? 0) + 1);
 	}
 	const held = [...shadowed.values()].reduce((sum, n) => sum + n, 0);
 	const chats = (n: number) => `${n} live chat${n === 1 ? "" : "s"}`;
 	const parts = [`${saved} ${result.live.length - failed.length - held} of ${chats(result.live.length)} now use it.`];
 	for (const [provenance, n] of shadowed) parts.push(`${chats(n)} keep a ${provenance} value.`);
-	for (const l of failed) parts.push(`Chat ${l.sessionId} failed to reload: ${l.error}`);
+	if (failed.length) parts.push(`${chats(failed.length)} failed to reload and keep their previous settings; the server log has details.`);
 	return { text: parts.join(" "), complete: failed.length === 0 && held === 0 };
 }
 
@@ -269,7 +280,7 @@ function editorFor(setting: NpiConfigSetting): ComponentType<EditorProps> {
 			if (setting.options || setting.items) return ChoiceListEditor;
 			return isStringList(setting.value) && isStringList(setting.defaultValue) ? StringListEditor : JsonEditor;
 		case "record":
-			return setting.secret ? JsonEditor : RecordEditor;
+			return setting.secret ? SecretRecordEditor : RecordEditor;
 	}
 }
 
@@ -399,7 +410,9 @@ function ChoiceListEditor({ setting, disabled, onChange }: EditorProps) {
 		onChange(same(next, initial) ? CLEAN : { dirty: true, value: next });
 	};
 	const label = (value: string) => choices.find(c => c.value === value)?.label ?? `${value} (unknown)`;
-	if (setting.ordered) {
+	// Closed-vocabulary arrays carry no order hint, and some (status line segments)
+	// render in order, so they get the reorderable picker too.
+	if (setting.ordered || setting.items) {
 		const remaining = choices.filter(c => !selected.includes(c.value));
 		const move = (index: number, by: number) => {
 			const next = selected.slice();
@@ -443,9 +456,8 @@ function ChoiceListEditor({ setting, disabled, onChange }: EditorProps) {
 						disabled={disabled}
 						checked={selected.includes(choice.value)}
 						onChange={e => {
-							const on = new Set(e.target.checked ? [...selected, choice.value] : selected.filter(v => v !== choice.value));
-							// Keep the registry's choice order; unknown entries stay last.
-							update([...choices.map(c => c.value), ...unknown].filter(v => on.has(v)));
+							// Membership changes never reorder: new entries go last.
+							update(e.target.checked ? [...selected, choice.value] : selected.filter(v => v !== choice.value));
 						}}
 					/>
 					<span className="truncate font-mono">{choice.label}</span>
@@ -501,6 +513,72 @@ function parseJsonShape(text: string, shape: "array" | "object"): { value: unkno
 	try { value = JSON.parse(text); } catch (err) { return { error: `Invalid JSON: ${err instanceof Error ? err.message : String(err)}` }; }
 	const ok = shape === "array" ? Array.isArray(value) : typeof value === "object" && value !== null && !Array.isArray(value);
 	return ok ? { value } : { error: shape === "array" ? "Expected a JSON array." : "Expected a JSON object." };
+}
+
+/**
+ * Write-only credential record, edited per entry: remove configured entries by
+ * name, or add/replace one entry with a JSON value. Other entries are kept by
+ * the server's merge, since their values are never sent to the browser.
+ */
+function SecretRecordEditor({ setting, disabled, onChange }: EditorProps) {
+	const configured = setting.secretEntryKeys ?? [];
+	const [removed, setRemoved] = useState<string[]>([]);
+	const [key, setKey] = useState("");
+	const [text, setText] = useState("");
+	const report = (nextRemoved: string[], nextKey: string, nextText: string) => {
+		const entries: Record<string, unknown> = Object.fromEntries(nextRemoved.map(k => [k, null]));
+		const name = nextKey.trim();
+		if (name || nextText.trim()) {
+			if (!name) return onChange({ dirty: true, error: "Name the entry to add or replace." });
+			let value: unknown;
+			try { value = JSON.parse(nextText); } catch { return onChange({ dirty: true, error: `Invalid JSON for ${name}.` }); }
+			entries[name] = value;
+		}
+		onChange(Object.keys(entries).length ? { dirty: true, entries } : CLEAN);
+	};
+	return (
+		<div className="space-y-1.5">
+			{configured.length === 0 ? <div className="font-mono text-2xs text-ink-4">no entries configured</div> : null}
+			{configured.map(name => {
+				const gone = removed.includes(name);
+				return (
+					<div key={name} className="flex items-center gap-2 rounded bg-paper-2 px-1.5 py-0.5 text-2xs">
+						<span className={cn("flex-1 truncate font-mono", gone && "text-ink-4 line-through")}>{name}</span>
+						<span className="text-ink-4">value hidden</span>
+						<button
+							type="button"
+							disabled={disabled}
+							onClick={() => {
+								const next = gone ? removed.filter(k => k !== name) : [...removed, name];
+								setRemoved(next);
+								report(next, key, text);
+							}}
+							className="font-mono text-ink-3 underline-offset-2 hover:text-danger hover:underline"
+						>
+							{gone ? "keep" : "remove"}
+						</button>
+					</div>
+				);
+			})}
+			<div className="grid grid-cols-[minmax(0,0.6fr)_minmax(0,1.4fr)] gap-1">
+				<input
+					value={key}
+					disabled={disabled}
+					placeholder="entry to add or replace"
+					onChange={e => { setKey(e.target.value); report(removed, e.target.value, text); }}
+					className="field h-7 w-full px-1.5 font-mono text-2xs"
+				/>
+				<textarea
+					value={text}
+					disabled={disabled}
+					rows={2}
+					placeholder='JSON value, e.g. {"token": "…"}'
+					onChange={e => { setText(e.target.value); report(removed, key, e.target.value); }}
+					className="field w-full resize-y px-1.5 py-1 font-mono text-2xs"
+				/>
+			</div>
+		</div>
+	);
 }
 
 type EntryKind = "text" | "list" | "json";

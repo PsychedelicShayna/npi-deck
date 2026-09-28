@@ -173,6 +173,8 @@ export interface NpiConfigSetting {
 	/** Entries may be path-scoped objects (`{ path(s), values }`) rather than plain strings. */
 	pathScoped?: boolean;
 	env?: { name: string; fallback: boolean; active: boolean };
+	/** Credential records: names of the entries config.yml holds (never their values). Edit them with `entries`. */
+	secretEntryKeys?: string[];
 	/** Why this setting cannot be edited here; absent when editable. */
 	lockedReason?: string;
 }
@@ -187,17 +189,24 @@ export interface NpiConfigTab {
 export interface NpiConfigResponse {
 	/** Workspace whose project layer the provenance reflects. */
 	cwd: string;
-	/** Global config file PATCH writes. */
+	/** Global config file NeoPi reads (the first existing of config.yml, config.yaml). */
 	configPath: string;
+	/** Why saving is refused: NeoPi saves to config.yml, which would shadow a config.yaml it reads. */
+	readOnlyReason?: string;
 	tabs: NpiConfigTab[];
 	settings: NpiConfigSetting[];
 }
 
-/** Set `value`, or remove the key from config.yml with `unset: true`. Strings go through the setting's own text parser. */
+/**
+ * Exactly one of: `value` to set (strings go through the setting's own text parser),
+ * `unset: true` to remove the key from config.yml, or `entries` to set single keys of
+ * a record (null deletes one) while keeping the others.
+ */
 export interface NpiConfigPatchRequest {
 	id: string;
 	value?: unknown;
 	unset?: boolean;
+	entries?: Record<string, unknown>;
 }
 
 /** What one live chat's settings resolve for the patched key after the reload. */
@@ -207,8 +216,8 @@ export interface NpiConfigLiveApply {
 	provenance: NpiConfigProvenance;
 	/** Null for secrets. */
 	effectiveValue: unknown;
-	/** The reload failed; the chat keeps its previous settings. */
-	error?: string;
+	/** The reload failed (details are in the server log); the chat keeps its previous settings. */
+	reloadFailed?: true;
 }
 
 export interface NpiConfigPatchResponse {

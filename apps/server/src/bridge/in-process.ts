@@ -299,7 +299,7 @@ export class InProcessAgentBridge implements AgentBridge {
 				return { sessionId, cwd: entry.handle.cwd, settings };
 			} catch (err) {
 				log.warn(`reload settings for session ${sessionId} failed`, err);
-				return { sessionId, cwd: entry.handle.cwd, settings, error: err instanceof Error ? err.message : String(err) };
+				return { sessionId, cwd: entry.handle.cwd, settings, failed: true };
 			}
 		}));
 	}

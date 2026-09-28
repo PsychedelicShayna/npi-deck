@@ -115,6 +115,61 @@ test("credentials are write-only: configured and saved secrets never appear in r
 	expect(await readFile(configFile, "utf8")).toContain("s3cret-saved");
 });
 
+test("a malformed config.yml fails with a generic error, never quotes the file, and stays in place", async () => {
+	// NeoPi's load error embeds the parser's message, which can quote the offending line.
+	const broken = "searxng:\n  token: s3cret-in-broken-line: [\n";
+	await writeFile(configFile, broken);
+	for (const response of [await request("/npi-config"), await patch({ id: "edit.mode", value: "replace" })]) {
+		expect(response.status).toBe(500);
+		const text = await response.text();
+		expect(text).not.toContain("s3cret");
+		expect(JSON.parse(text).error).toContain("server log");
+	}
+	expect(await readFile(configFile, "utf8")).toBe(broken);
+});
+
+test("rejected credential values are not echoed back", async () => {
+	for (const [id, value] of [["images.urls.credentials", "s3cret-not-json"], ["searxng.token", { token: "s3cret-wrong-type" }]] as const) {
+		const response = await patch({ id, value });
+		expect(response.status).toBe(400);
+		const text = await response.text();
+		expect(text).not.toContain("s3cret");
+		expect(JSON.parse(text).error).toContain(id);
+	}
+});
+
+test("credential record entries change one at a time and keep the hidden others", async () => {
+	await writeFile(configFile, "images:\n  urls:\n    credentials:\n      alpha:\n        token: s3cret-alpha\n      beta:\n        token: s3cret-beta\n");
+	const listed = (await list()).settings.find(s => s.id === "images.urls.credentials");
+	expect(listed).toMatchObject({ secret: true, value: null, secretEntryKeys: ["alpha", "beta"] });
+	const response = await patch({ id: "images.urls.credentials", entries: { beta: null, gamma: { token: "s3cret-gamma" } } });
+	expect(response.status).toBe(200);
+	const text = await response.text();
+	expect(text).not.toContain("s3cret");
+	expect((JSON.parse(text) as NpiConfigPatchResponse).setting.secretEntryKeys).toEqual(["alpha", "gamma"]);
+	const file = await readFile(configFile, "utf8");
+	expect(file).toContain("s3cret-alpha");
+	expect(file).toContain("s3cret-gamma");
+	expect(file).not.toContain("s3cret-beta");
+});
+
+test("a config.yaml NeoPi reads is reported and never shadowed by a new config.yml", async () => {
+	const yamlFile = path.join(agentDir, "config.yaml");
+	await rm(configFile);
+	await writeFile(yamlFile, "edit:\n  mode: patch\n");
+	try {
+		const body = await list();
+		expect(body.configPath).toBe(yamlFile);
+		expect(body.readOnlyReason).toContain("config.yaml");
+		expect(body.settings.find(s => s.id === "edit.mode")).toMatchObject({ provenance: "global", value: "patch" });
+		const response = await patch({ id: "edit.mode", value: "replace" });
+		expect(response.status).toBe(409);
+		expect(await Bun.file(configFile).exists()).toBe(false);
+	} finally {
+		await rm(yamlFile, { force: true });
+	}
+});
+
 test("an environment override locks its key with the reason and refuses writes", async () => {
 	process.env.PI_EDIT_FUZZY_THRESHOLD = "0.7";
 	const setting = (await list()).settings.find(s => s.id === "edit.fuzzyThreshold");

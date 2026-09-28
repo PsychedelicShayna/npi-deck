@@ -156,7 +156,7 @@ await check("identity: BUILD_INFO snapshots the source tree", ["BUILD_INFO"], ()
 });
 
 await check("npi-config: registry handles enumerate, parse, persist and report provenance", [
-	"orderedSettings", "allSettings", "SETTING_TABS", "TAB_METADATA", "TAB_GROUPS",
+	"orderedSettings", "allSettings", "SETTING_TABS", "TAB_METADATA", "TAB_GROUPS", "MAIN_CONFIG_FILENAMES",
 ], async () => {
 	const all = npiConfig.allSettings();
 	const ordered = new Set(npiConfig.orderedSettings());
@@ -178,6 +178,9 @@ await check("npi-config: registry handles enumerate, parse, persist and report p
 	assert(handle.get(read) === 0.9 && handle.provenance(read) === "global", `persisted ${String(handle.get(read))} via ${handle.provenance(read)}`);
 	handle.unset(writable);
 	await writable.flush();
+	// The deck reports the first existing name and refuses saves when only a later one exists.
+	const [primary] = npiConfig.MAIN_CONFIG_FILENAMES;
+	assert(primary === "config.yml" && await Bun.file(path.join(agentDir, primary)).exists(), `NeoPi saved to a file other than ${primary}`);
 	const cleared = await core.Settings.loadReadOnly({ cwd: agentDir, agentDir });
 	assert(handle.provenance(cleared) === "default", `unset left provenance ${handle.provenance(cleared)}`);
 	return `${all.length} settings (${all.filter(s => !s.ui).length} config-file only) across ${tabs.length} tabs; parse rejects "${rejected}"; set/unset round-trips global↔default`;

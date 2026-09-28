@@ -104,8 +104,8 @@ export interface LiveSettingsReload {
 	sessionId: string;
 	cwd: string;
 	settings: Settings;
-	/** The reload failed; the session keeps its previous layers. */
-	error?: string;
+	/** The reload failed and was logged (its message can quote config.yml); the session keeps its previous layers. */
+	failed?: true;
 }
 
 /** Invalid per-session MCP selection; callers can return a client error. */

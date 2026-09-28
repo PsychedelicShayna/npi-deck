@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { Hono } from "hono";
 import type { Settings } from "@oh-my-pi/pi-coding-agent";
@@ -18,6 +19,13 @@ import { logger } from "./log.ts";
 const log = logger("routes:npi-config");
 const OTHER_TAB = "other";
 const errorText = (err: unknown) => err instanceof Error ? err.message : String(err);
+// NeoPi's loader embeds parser errors, which quote the offending config.yml
+// line (possibly a credential). Clients get this; the log keeps the detail.
+const LOAD_FAILED = "NeoPi could not load or save its settings; the deck server log has the details.";
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+/** Record order is precedence in NeoPi, so equality is order-sensitive. */
+const sameValue = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 type RawLayer = ReturnType<Settings["getGlobalSettings"]>;
 
@@ -47,6 +55,23 @@ function layerValue(layer: RawLayer, segments: readonly string[]): unknown {
 function envLock(setting: AnySetting): string | undefined {
 	if (!setting.envName || setting.envFallback !== false || setting.envValue() === undefined) return undefined;
 	return `$${setting.envName} overrides this setting while it is set. Remove it from the deck's Env settings or the launching environment to edit it here.`;
+}
+
+/**
+ * The global file NeoPi reads: the first existing of its main config names.
+ * NeoPi always saves to the first name, so when only a later one exists a save
+ * would create a new file that shadows it; `readOnlyReason` explains that.
+ */
+function globalConfigFile(): { path: string; readOnlyReason?: string } {
+	const agentDir = sdk().getAgentDir();
+	const [primary, ...others] = feature("npi-config").MAIN_CONFIG_FILENAMES.map(name => path.join(agentDir, name));
+	if (existsSync(primary!)) return { path: primary! };
+	const fallback = others.find(file => existsSync(file));
+	if (!fallback) return { path: primary! };
+	return {
+		path: fallback,
+		readOnlyReason: `NeoPi reads ${fallback} but saves to ${primary}, which would then shadow it. Rename ${path.basename(fallback)} to ${path.basename(primary!)} to edit settings here.`,
+	};
 }
 
 function describe(setting: AnySetting, settings: Settings, globalLayer: RawLayer): NpiConfigSetting {
@@ -87,6 +112,8 @@ function describe(setting: AnySetting, settings: Settings, globalLayer: RawLayer
 	if (ui?.ordered) result.ordered = true;
 	if (definition.pathScoped) result.pathScoped = true;
 	if (setting.envName) result.env = { name: setting.envName, fallback: setting.envFallback !== false, active: setting.envValue() !== undefined };
+	// Entry names only, so write-only credential records can be edited per entry.
+	if (secret && definition.type === "record" && isRecord(raw)) result.secretEntryKeys = Object.keys(raw);
 	if (lockedReason) result.lockedReason = lockedReason;
 	return result;
 }
@@ -118,15 +145,35 @@ function tabsFor(settings: readonly NpiConfigSetting[]): NpiConfigTab[] {
 }
 
 /**
- * Converts a request value with the setting's own rules. Text goes through its
- * parser (booleans accept on/off, arrays and records take JSON, enums check
- * membership); string settings are JSON-quoted first so the exact text survives
- * the parser's trim. Typed JSON values reach `set`, which normalizes them and
- * runs the setting's validate and type checks.
+ * The value a request writes, converted with the setting's own rules. Text goes
+ * through its parser (booleans accept on/off, arrays and records take JSON,
+ * enums check membership); string settings are JSON-quoted first so the exact
+ * text survives the parser's trim. Typed JSON values reach `set`, which
+ * normalizes them and runs the setting's validate and type checks. `entries`
+ * sets (or with null deletes) single keys of the record in config.yml, so a
+ * write-only credential record is edited without resending the others.
  */
-function requestValue(setting: AnySetting, value: unknown): unknown {
-	if (typeof value !== "string") return value;
-	return setting.parse(setting.type === "string" ? JSON.stringify(value) : value);
+function requestValue(setting: AnySetting, body: NpiConfigPatchRequest, globalLayer: RawLayer): unknown {
+	if (body.entries !== undefined) {
+		const current = layerValue(globalLayer, setting.segments);
+		const next: Record<string, unknown> = isRecord(current) ? { ...current } : {};
+		for (const [key, value] of Object.entries(body.entries)) {
+			if (value === null) delete next[key];
+			else next[key] = value;
+		}
+		return next;
+	}
+	if (typeof body.value !== "string") return body.value;
+	return setting.parse(setting.type === "string" ? JSON.stringify(body.value) : body.value);
+}
+
+function requestShapeError(body: NpiConfigPatchRequest | null): string | undefined {
+	if (!isRecord(body) || typeof body.id !== "string") return "id required";
+	const modes = [body.value !== undefined, body.unset === true, body.entries !== undefined].filter(Boolean).length;
+	if (modes !== 1) return "exactly one of value, unset: true or entries required";
+	if (body.entries !== undefined && (!isRecord(body.entries) || Object.keys(body.entries).some(key => key.trim() === "")))
+		return "entries must map non-empty keys to values, or null to delete";
+	return undefined;
 }
 
 // One config.yml write at a time from this process; NeoPi's flush merges
@@ -153,16 +200,18 @@ export function buildNpiConfigRouter(bridge: AgentBridge, config: Config): Hono 
 			const settings = await load();
 			const globalLayer = settings.getGlobalSettings();
 			const described = registeredSettings().map(setting => describe(setting, settings, globalLayer));
+			const file = globalConfigFile();
 			const body: NpiConfigResponse = {
 				cwd: config.defaultCwd,
-				configPath: path.join(sdk().getAgentDir(), "config.yml"),
+				configPath: file.path,
+				...(file.readOnlyReason ? { readOnlyReason: file.readOnlyReason } : {}),
 				tabs: tabsFor(described),
 				settings: described,
 			};
 			return c.json(body);
 		} catch (err) {
 			log.warn("read NeoPi config failed", err);
-			return c.json({ error: errorText(err) }, 500);
+			return c.json({ error: LOAD_FAILED }, 500);
 		}
 	});
 
@@ -170,24 +219,38 @@ export function buildNpiConfigRouter(bridge: AgentBridge, config: Config): Hono 
 		let body: NpiConfigPatchRequest;
 		try { body = await c.req.json() as NpiConfigPatchRequest; }
 		catch { return c.json({ error: "JSON body required" }, 400); }
-		if (!body || typeof body.id !== "string" || (body.unset !== true && body.value === undefined))
-			return c.json({ error: "id and either value or unset: true required" }, 400);
+		const shapeError = requestShapeError(body);
+		if (shapeError) return c.json({ error: shapeError }, 400);
 		try {
 			return c.json(await serializeSave(async (): Promise<NpiConfigPatchResponse> => {
 				const setting = lookup(body.id);
 				if (!setting) throw new RequestError(`Unknown setting: ${body.id}`, 404);
 				const locked = envLock(setting);
 				if (locked) throw new RequestError(locked, 409);
+				const readOnly = globalConfigFile().readOnlyReason;
+				if (readOnly) throw new RequestError(readOnly, 409);
+				if (body.entries !== undefined && setting.type !== "record") throw new RequestError(`${setting.id} is not a record; send value instead of entries`, 400);
+				// A writable load moves a malformed config.yml aside; a read-only load
+				// fails first instead, leaving the user's file where it is.
+				await load();
 				const settings = await sdk().Settings.loadIsolated({ cwd: config.defaultCwd, agentDir: sdk().getAgentDir() });
 				try {
 					if (body.unset === true) setting.unset(settings);
-					else setting.set(settings, requestValue(setting, body.value));
+					else setting.set(settings, requestValue(setting, body, settings.getGlobalSettings()));
 				} catch (err) {
-					throw new RequestError(errorText(err), 400);
+					// Parser and type errors quote the submitted value; never echo a credential.
+					throw new RequestError(setting.isCredential
+						? `Invalid value for ${setting.id} (expected a ${setting.type}); it is not shown because this setting holds credentials.`
+						: errorText(err), 400);
 				}
+				const intended = layerValue(settings.getGlobalSettings(), setting.segments);
 				await settings.flush();
-				const live = await bridge.reloadLiveSettings();
 				const fresh = await load();
+				// NeoPi skips a pending write when another process changed the same key
+				// since it was read, and still resolves the flush.
+				if (!sameValue(layerValue(fresh.getGlobalSettings(), setting.segments), intended))
+					throw new RequestError(`${setting.id} changed in the config file while saving, so NeoPi kept that value. Reload and try again.`, 409);
+				const live = await bridge.reloadLiveSettings();
 				const described = describe(setting, fresh, fresh.getGlobalSettings());
 				return {
 					setting: described,
@@ -196,14 +259,14 @@ export function buildNpiConfigRouter(bridge: AgentBridge, config: Config): Hono 
 						cwd: entry.cwd,
 						provenance: setting.provenance(entry.settings),
 						effectiveValue: described.secret ? null : setting.get(entry.settings) ?? null,
-						...(entry.error ? { error: entry.error } : {}),
+						...(entry.failed ? { reloadFailed: true as const } : {}),
 					})),
 				};
 			}));
 		} catch (err) {
 			if (err instanceof RequestError) return c.json({ error: err.message }, err.status);
 			log.warn(`save NeoPi setting ${body.id} failed`, err);
-			return c.json({ error: errorText(err) }, 500);
+			return c.json({ error: LOAD_FAILED }, 500);
 		}
 	});
 

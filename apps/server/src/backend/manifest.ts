@@ -20,6 +20,7 @@
  */
 
 export type ModuleTypes = {
+	"@oh-my-pi/pi-utils": typeof import("@oh-my-pi/pi-utils");
 	"@oh-my-pi/pi-ai": typeof import("@oh-my-pi/pi-ai");
 	"@oh-my-pi/pi-coding-agent": typeof import("@oh-my-pi/pi-coding-agent");
 	"@oh-my-pi/pi-coding-agent/advisor/config": typeof import("@oh-my-pi/pi-coding-agent/advisor/config");
@@ -193,6 +194,7 @@ export const MANIFEST = {
 			SETTING_TABS: op("@oh-my-pi/pi-tui/overlays/settings-defs", "SETTING_TABS"),
 			TAB_METADATA: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_METADATA"),
 			TAB_GROUPS: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_GROUPS"),
+			MAIN_CONFIG_FILENAMES: op("@oh-my-pi/pi-utils", "MAIN_CONFIG_FILENAMES"),
 		},
 	},
 	/** neopi#122: runtime-snapshotted source identity; git remains the fallback for older trees. */
