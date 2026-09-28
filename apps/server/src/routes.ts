@@ -12,7 +12,6 @@ import type {
 import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
 import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
-import { getUpdateCheck } from "./update-check.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 
 const log = logger("routes");
@@ -63,12 +62,6 @@ export function buildRouter(
 			buildSha: info.buildSha,
 			uptimeSecs: getUptimeSecs(),
 		});
-	});
-
-	app.get("/version", async (c) => {
-		const info = getBuildInfo();
-		const body = await getUpdateCheck({ currentVersion: info.version });
-		return c.json(body);
 	});
 
 	app.get("/workspaces", async (c) => {

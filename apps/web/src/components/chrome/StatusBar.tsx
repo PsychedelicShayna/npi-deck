@@ -1,5 +1,4 @@
 import { selectActiveSession, useStore } from "@/lib/store";
-import { UpdatePill } from "./UpdatePill";
 import { cn, formatTokens } from "@/lib/utils";
 
 const STATUS_TONE: Record<string, string> = {
@@ -62,7 +61,6 @@ export function StatusBar() {
 					) : null}
 				</>
 			) : null}
-			<UpdatePill />
 		</div>
 	);
 }

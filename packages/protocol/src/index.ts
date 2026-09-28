@@ -299,32 +299,6 @@ export interface SeedKbSystemResponse {
 	skipped: string[];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Update check
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Composite response for `GET /api/version`. The web layer renders a
- * passive pill in the StatusBar when `updateAvailable === true`.
- *
- * Failure modes are baked into the type, not exceptions:
- *   - `disabled: true` — `OMP_DECK_DISABLE_UPDATE_CHECK` is set; the deck
- *     never hits the registry. Web should hide the pill entirely.
- *   - `latest: null` — registry was unreachable, response malformed, or
- *     no fetch has succeeded yet. Web should hide the pill.
- *   - `updateAvailable: false` with non-null `latest` — running version
- *     is already at or above the published latest.
- */
-export interface VersionInfo {
-	current: string;
-	latest: string | null;
-	updateAvailable: boolean;
-	lastCheckedAt: string | null;
-	releaseUrl: string;
-	packageUrl: string;
-	disabled: boolean;
-}
-
 export interface SetSessionModelRequest {
 	model: ModelRef;
 }

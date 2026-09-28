@@ -5,7 +5,7 @@
  * indicator.
  *
  * Resolution order for `buildSha`:
- *   1. `OMP_DECK_BUILD_SHA` env var (set by CI / docker image)
+ *   1. `OMP_DECK_BUILD_SHA` env var (set by CI)
  *   2. `apps/server/.buildinfo` file (`{ "sha": "...", "version": "..." }`)
  *   3. `git rev-parse HEAD` from the repo root (dev fallback)
  *   4. `null` (no git, no env, no .buildinfo)

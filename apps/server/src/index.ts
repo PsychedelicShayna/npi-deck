@@ -15,7 +15,6 @@ import { closeDb, openDb } from "./db/index.ts";
 import { loadConfig } from "./config.ts";
 import { logger } from "./log.ts";
 import { resolveBunExecutable } from "./runtime-bun.ts";
-import { primeUpdateCheckOnBoot } from "./update-check.ts";
 import { buildRouter } from "./routes.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
@@ -178,11 +177,6 @@ async function main(): Promise<void> {
 	});
 
 	log.info(`listening on http://${server.hostname}:${server.port}`);
-
-	// Background: prime the npm registry update check cache so the
-	// /api/version route returns a real answer on first call. Fire-and-
-	// forget; failures are logged and ignored.
-	primeUpdateCheckOnBoot();
 
 	let shuttingDown = false;
 	async function safeShutdown(reason: string): Promise<void> {
