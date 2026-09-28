@@ -11,6 +11,7 @@ test("refuses unprepared candidate before importing SDK modules", async () => {
 		writeFileSync(path.join(root, "packages/coding-agent/package.json"), "{}\n");
 		const result = await preflight(root);
 		expect(result.ok).toBe(false);
+		if (result.ok) throw new Error("unprepared backend unexpectedly passed preflight");
 		expect(result.reason).toContain("tree not prepared: node_modules missing");
 	} finally { rmSync(root, { recursive: true, force: true }); }
 });

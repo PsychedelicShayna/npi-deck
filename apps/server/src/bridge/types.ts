@@ -12,6 +12,8 @@ import type {
 	SessionSnapshot,
 	SessionSummary,
 	SessionTranscriptResponse,
+	SubagentNode,
+	SubagentTranscriptResponse,
 } from "@npi-deck/protocol";
 
 /**
@@ -29,6 +31,11 @@ export interface AgentBridge {
 	 * an SDK session. Undefined when `sessionPath` is not a listed session.
 	 */
 	readTranscript(sessionPath: string): Promise<SessionTranscriptResponse | undefined>;
+	/** Subagents belong to one live root generation; never accept a transcript file path from clients. */
+	subagentSnapshot(sessionId: string): SubagentNode[];
+	subscribeSubagents(sessionId: string, listener: (nodes: SubagentNode[]) => void): () => void;
+	readSubagentTranscript(sessionId: string, id: string, fromByte?: number): Promise<SubagentTranscriptResponse>;
+	abortSubagent(sessionId: string, id: string): Promise<void>;
 	/** Pin a session against the idle reaper while a client is subscribed. */
 	trackSubscriberAdded(sessionId: string, connectionId: string): void;
 	/** Drop a subscriber; once subscribers hit zero and idle window elapses, the reaper claims it. */
@@ -195,14 +202,11 @@ export type SlashDispatchResult =
 
 export interface AgentMessagePassthrough extends AgentMessageJson {}
 /**
- * Decision the user made on a `plan_proposed` card. `approved=false` is the
- * reject path (no rename, no synthetic prompt — just exit plan mode); the
- * other fields apply only when approving.
+ * Decision for `xd://propose`. Rejection returns feedback to the planning
+ * agent; approval may replace the proposed artifact in place.
  */
 export interface PlanApprovalResponse {
 	approved: boolean;
-	/** Optional rename: `local://*.md`. When absent, uses the suggested final path. */
-	finalPath?: string;
-	/** Optional edited plan body. When present, overwrites `local://PLAN.md` before the rename. */
+	feedback?: string;
 	editedContent?: string;
 }

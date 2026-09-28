@@ -32,7 +32,7 @@ describe("WsHub heartbeat", () => {
 			if (frame.type === "heartbeat") frames.push(frame);
 		});
 
-		const hub = new WsHub(stubBridge);
+		const hub = new WsHub(stubBridge, "heartbeat-test");
 		try {
 			// Wait long enough for at least one tick of the real interval. Cap at
 			// 7s so the test fails fast if the timer isn't firing rather than
@@ -63,7 +63,7 @@ describe("WsHub heartbeat", () => {
 		const unsub = broadcastBus.subscribe((f) => {
 			if (f.type === "heartbeat") before.push(f);
 		});
-		const hub = new WsHub(stubBridge);
+		const hub = new WsHub(stubBridge, "heartbeat-test");
 		hub.dispose();
 		// Give the loop a tick + a margin; no heartbeats expected.
 		await new Promise((r) => setTimeout(r, HEARTBEAT_INTERVAL_MS + 500));

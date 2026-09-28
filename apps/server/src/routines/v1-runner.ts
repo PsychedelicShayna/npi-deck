@@ -273,7 +273,7 @@ export async function runV1Pipeline(input: {
 				abortReason = "budget";
 				break;
 			}
-			if (result.status === "success" || result.status === "aborted" || abortSignal.aborted) break;
+			if (result.status === "success") break;
 			if (attempt < attemptCap) {
 				const delaySecs = Math.min(
 					backoff === "exponential" ? Math.pow(2, attempt - 1) : attempt,

@@ -4,18 +4,19 @@ import type { PendingPlanApprovalWire, PlanModeContextWire, ServerFrame } from "
 import { feature } from "../backend/runtime.ts";
 import { logger } from "../log.ts";
 import type { PlanApprovalResponse } from "./types.ts";
+import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 
 const log = logger("bridge:plan-mode");
 const DEFAULT_PLAN = "local://PLAN.md";
 type PlanModeFrame = Extract<ServerFrame, { type: "plan_mode_changed" | "plan_proposed" | "plan_proposal_resolved" }>;
 type FrameListener = (frame: PlanModeFrame) => void;
-type PlanState = { enabled: boolean; planFilePath: string; workflow: "parallel" | "iterative"; reentry?: boolean };
+type PlanState = NonNullable<ReturnType<AgentSession["getPlanModeState"]>>;
 
 /** The only SDK operations needed by the per-session plan bridge. */
 export interface PlanModeSession {
 	getPlanModeState(): PlanState | undefined;
-	setPlanModeState(state: PlanState | undefined): void;
-	setPlanProposalHandler(handler: ((title: string) => Promise<unknown>) | null): void;
+	setPlanModeState: AgentSession["setPlanModeState"];
+	setPlanProposalHandler: AgentSession["setPlanProposalHandler"];
 	getActiveToolNames(): string[];
 	hasBuiltInTool(name: string): boolean;
 	setActiveToolsByName(names: string[]): Promise<void>;

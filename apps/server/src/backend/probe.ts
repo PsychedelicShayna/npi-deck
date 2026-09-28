@@ -7,6 +7,9 @@ import { spawnOwned, terminateOwned } from "../owned-process.ts";
 import { MANIFEST } from "./manifest.ts";
 import { resolveManifest, formatDiagnostic, type BackendIdentity, type FeatureStatus } from "./runtime.ts";
 import type { FeatureName } from "./manifest.ts";
+export type ProbeResult =
+	| { ok: true; pinned: boolean; identity: BackendIdentity; features: Record<FeatureName, FeatureStatus> }
+	| { ok: false; pinned: false; reason: string };
 
 const pin = readFileSync(path.resolve(import.meta.dir, "../../../../neopi.pin"), "utf8").trim();
 

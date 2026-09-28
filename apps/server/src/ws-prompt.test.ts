@@ -28,7 +28,7 @@ function setup(handle: Record<string, unknown>) {
 		}),
 		bumpActivity: () => {},
 	} as unknown as Bridge;
-	hub = new WsHub(bridge);
+	hub = new WsHub(bridge, "prompt-test");
 	const sent: ServerFrame[] = [];
 	const ws = {
 		data: hub.createConnectionData(),

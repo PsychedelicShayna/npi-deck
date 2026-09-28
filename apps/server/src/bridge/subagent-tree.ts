@@ -125,7 +125,7 @@ export class SubagentTree {
 		// An existing ref must still identify the same transcript as the bus record.
 		if (ref && node.sessionFile && file !== node.sessionFile) throw new Error("Forbidden subagent");
 		const result = await feature("subagent-tree").readRpcSubagentTranscript(file, fromByte);
-		return { id, messages: result.messages as SubagentTranscriptResponse["messages"], nextByte: result.nextByte, reset: result.reset };
+		return { id, messages: result.messages as unknown as SubagentTranscriptResponse["messages"], nextByte: result.nextByte, reset: result.reset };
 	}
 
 	async abort(id: string): Promise<void> {

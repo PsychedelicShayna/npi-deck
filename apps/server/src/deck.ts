@@ -93,7 +93,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 	}, 40_000) : undefined;
 	let backendReason: string | undefined;
 	let backendImportFailed = false;
-	let validated: { id: string | null; result: ProbeResult } | null = null;
+	let validated: { id: string | null; result: Extract<ProbeResult, { ok: true }> } | null = null;
 	let bootSelection: BackendSelection | undefined;
 	try { bootSelection = resolveBackendSelection(); }
 	catch (err) { backendReason = String(err); }
@@ -236,7 +236,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 		return {
 			workerGeneration,
 			running: backend ? { id: selection!.id, path: backend.identity.path, source: selection!.source, version: backend.identity.version, commit: backend.identity.commit } : null,
-			validated: validated?.result.identity ? { id: validated.id, ...validated.result.identity, pinned: validated.result.pinned } : null,
+			validated: validated ? { id: validated.id, ...validated.result.identity, pinned: validated.result.pinned } : null,
 			desired,
 			pinned: Boolean(process.env.NPI_DECK_BACKEND?.trim()),
 			...(backendReason || configReason ? { reason: backendReason ?? configReason } : {}),

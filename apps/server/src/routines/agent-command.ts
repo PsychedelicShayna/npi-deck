@@ -5,7 +5,8 @@ import { resolveBunExecutable } from "../runtime-bun.ts";
 
 /** One authority for the headless agent entrypoint used by every routine action. */
 export function routineAgentCommand(args: string[]): string[] {
-	const tree = activeBackend()?.selection.path ?? resolveBackendSelection().path;
+	const tree = activeBackend()?.selection.path ?? resolveBackendSelection()?.path;
+	if (!tree) throw new Error("no backend configured for routine agent");
 	return [resolveBunExecutable(), path.join(tree, "packages/coding-agent/src/cli.ts"), ...args];
 }
 

@@ -33,6 +33,7 @@ import { feature, formatDiagnostic, loadBackend, resolveBackendSelection, resolv
 // temp root and re-runs this file as a child with the controlled env.
 if (!process.env.NPI_DECK_CONTRACT_ROOT) {
 	const selection = resolveBackendSelection();
+	if (!selection) throw new Error("no backend configured for contract fixture");
 	const root = mkdtempSync(path.join(os.tmpdir(), "npi-deck-contract-"));
 	const home = path.join(root, "home");
 	const env: Record<string, string> = {};
