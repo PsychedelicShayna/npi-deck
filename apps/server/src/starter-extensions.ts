@@ -20,9 +20,9 @@
 
 import { existsSync } from "node:fs";
 import { cp, readdir, stat } from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 
+import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
 
 const log = logger("starter-extensions");
@@ -44,7 +44,7 @@ export async function installStarterExtensions(): Promise<StarterExtensionInstal
 		return { installed: [], skipped: [] };
 	}
 
-	const targetRoot = path.join(os.homedir(), ".omp", "agent", "extensions");
+	const targetRoot = path.join(sdk().getAgentDir(), "extensions");
 
 	let entries;
 	try {

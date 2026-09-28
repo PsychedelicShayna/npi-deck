@@ -22,7 +22,6 @@
 
 import { watch, type FSWatcher } from "node:fs";
 import { existsSync } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import { sdk } from "./backend/runtime.ts";
@@ -44,10 +43,9 @@ export function startSkillsWatcher(config: Config): () => void {
 		return () => {};
 	}
 
-	const home = os.homedir();
 	const roots = [
 		// Native: user-level OMP skills
-		path.join(home, ".omp", "agent", "skills"),
+		path.join(sdk().getAgentDir(), "skills"),
 		// Native: project-level skills for the deck's default cwd. Other
 		// project cwds get coverage by the manual-refetch path via WS.
 		path.join(config.defaultCwd, ".omp", "skills"),

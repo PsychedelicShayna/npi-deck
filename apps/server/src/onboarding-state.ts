@@ -33,12 +33,12 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import type { OnboardingState, OnboardingStateProvider } from "@omp-deck/protocol";
 
 import { getDeckAuthStorage } from "./auth-singleton.ts";
+import { sdk } from "./backend/runtime.ts";
 import { getDataDir } from "./env-store.ts";
 import { resolveKbRoot } from "./kb-service.ts";
 import { logger } from "./log.ts";
@@ -112,10 +112,7 @@ function welcomeTaskIsInBacklog(): boolean {
  */
 async function persistedSessionCount(): Promise<number> {
 	try {
-		const sessionsDir = path.join(
-			process.env.OMP_AGENT_DIR?.trim() || path.join(os.homedir(), ".omp", "agent"),
-			"sessions",
-		);
+		const sessionsDir = path.join(sdk().getAgentDir(), "sessions");
 		if (!existsSync(sessionsDir)) return 0;
 		let count = 0;
 		for (const entry of readdirSync(sessionsDir)) {

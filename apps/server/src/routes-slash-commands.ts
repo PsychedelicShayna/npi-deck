@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import * as path from "node:path";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 
@@ -41,7 +40,7 @@ export function buildSlashCommandsRouter(): Hono {
 	app.get("/slash-commands", (c) => {
 		const cwd = c.req.query("cwd")?.trim();
 
-		const userDir = path.join(homedir(), ".omp", "agent", "commands");
+		const userDir = path.join(sdk().getAgentDir(), "commands");
 		// Map keyed by command name so project entries can shadow user entries.
 		const byName = new Map<string, SlashCommand>();
 

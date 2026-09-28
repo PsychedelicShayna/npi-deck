@@ -156,7 +156,7 @@ Chat is fully store-driven because it needs cross-session state.
 The SDK package is `@oh-my-pi/pi-coding-agent`, pinned in
 `apps/server/package.json`. The deck reads from:
 
-- `~/.omp/agent/` (override `OMP_AGENT_DIR`) — sessions JSONL, auth.db,
+- NeoPi's agent dir (`getAgentDir()`, default `~/.omp/agent/`; `PI_CODING_AGENT_DIR` overrides) — sessions JSONL, auth.db,
   marketplaces.json, installed_plugins.json.
 - The SDK's in-process `ModelRegistry`, `SessionManager`, `Settings`,
   `MarketplaceManager`, `BUILTIN_SLASH_COMMANDS_INTERNAL`,

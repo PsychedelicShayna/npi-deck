@@ -67,7 +67,7 @@ Host deck-host
 ```sh
 OMP_DECK_DB_PATH=/var/lib/omp-deck/deck.db    # outside the checkout
 OMP_DECK_DATA_DIR=/var/lib/omp-deck           # managed .env + audit + bridge db
-OMP_AGENT_DIR=/var/lib/omp/agent              # SDK session + auth
+PI_CODING_AGENT_DIR=/var/lib/omp/agent        # NeoPi agent dir: sessions + auth
 OMP_DECK_DEFAULT_CWD=/workspace               # mount your code here
 LOG_LEVEL=warn                                # quieter in steady state
 ```

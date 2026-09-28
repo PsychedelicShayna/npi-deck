@@ -132,7 +132,6 @@ function EnvSection() {
 		const entries = data?.entries ?? [];
 		const isDeckKey = (key: string) =>
 			key.startsWith("OMP_DECK_") ||
-			key === "OMP_AGENT_DIR" ||
 			key === "LOG_LEVEL" ||
 			key === "PI_NO_TITLE" ||
 			key === "OMP_MODEL";
@@ -1803,7 +1802,7 @@ function ProvidersSection() {
 					<p className="text-xs text-ink-3">
 						The stored credentials will be deleted from <code>auth.db</code>. Token refresh
 						will fail until you log in again. Other deck instances sharing the same
-						<code>OMP_AGENT_DIR</code> will lose access too.
+						agent dir will lose access too.
 					</p>
 					<div className="flex justify-end gap-2 border-t border-line pt-3">
 						<Button variant="ghost" onClick={() => setConfirmRevoke(null)} disabled={revoking}>

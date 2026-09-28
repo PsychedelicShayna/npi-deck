@@ -26,9 +26,9 @@
 
 import { existsSync } from "node:fs";
 import { cp, readdir, stat } from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 
+import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
 
 const log = logger("starter-skills");
@@ -50,7 +50,7 @@ export async function installStarterSkills(): Promise<StarterInstallResult> {
 		return { installed: [], skipped: [] };
 	}
 
-	const targetRoot = path.join(os.homedir(), ".omp", "agent", "skills");
+	const targetRoot = path.join(sdk().getAgentDir(), "skills");
 
 	let entries;
 	try {

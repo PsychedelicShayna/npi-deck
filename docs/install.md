@@ -178,7 +178,7 @@ If any of those fail, see [troubleshooting](#troubleshooting) below.
 
 ## Where state lives
 
-- **omp session/auth data**: `~/.omp/agent/` (override via `OMP_AGENT_DIR`).
+- **omp session/auth data**: `~/.omp/agent/` (NeoPi's `getAgentDir()`; `PI_CODING_AGENT_DIR` overrides).
 - **Deck kanban + routines + inbox**: `apps/server/data/deck.db` by default;
   override via `OMP_DECK_DB_PATH`.
 - **Deck-managed env file + audit log**: `<dataDir>/.env` and
