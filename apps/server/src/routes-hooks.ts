@@ -49,11 +49,6 @@ export function buildHooksRouter(runner: RoutinesRunner): Hono {
 			return c.json({ error: "signature invalid" }, 401);
 		}
 
-		if (getRoutine(record.routine_id)?.enabled === false) {
-			log.info(`refused webhook ${path}: routine ${record.routine_id} is disabled`);
-			return c.json({ error: "routine disabled" }, 409);
-		}
-
 		// Parse body as JSON when possible; otherwise pass through as raw string.
 		let payload: Record<string, unknown> = {};
 		const ct = c.req.header("content-type") ?? "";
@@ -67,6 +62,20 @@ export function buildHooksRouter(runner: RoutinesRunner): Hono {
 			}
 		} catch {
 			payload = { body: "<unparsable>" };
+		}
+
+		// Re-read the routine after the body arrives: it may have been disabled
+		// or deleted while the body streamed. Everything from here to the
+		// runner's own enabled guard in `fire` is synchronous.
+		const routine = getRoutine(record.routine_id);
+		if (!routine) {
+			// Deletion cascades the webhook registration, so answer exactly as a
+			// request arriving after the deletion would.
+			return c.json({ error: "hook not registered" }, 404);
+		}
+		if (!routine.enabled) {
+			log.info(`refused webhook ${path}: routine ${record.routine_id} is disabled`);
+			return c.json({ error: "routine disabled" }, 409);
 		}
 
 		touchWebhookSecret(record.routine_id);

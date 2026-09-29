@@ -4,8 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { RoutineSpec } from "@npi-deck/protocol";
 import { closeDb, openDb } from "./db/index.ts";
-import { upsertWebhookSecret } from "./db/routine-step-runs.ts";
-import { createV1Routine, listRuns } from "./db/routines.ts";
+import { getWebhookSecretByPath, upsertWebhookSecret } from "./db/routine-step-runs.ts";
+import { createV1Routine, deleteRoutine, listRuns, updateV1Routine } from "./db/routines.ts";
 import { initializeOwnedGeneration, stopOwnedProcesses } from "./owned-process.ts";
 import { buildHooksRouter, hashSecretForStorage } from "./routes-hooks.ts";
 import { RoutinesRunner } from "./routines-runner.ts";
@@ -37,12 +37,34 @@ function setup(enabled: boolean) {
 	const routine = createV1Routine({ name: `hooked-${crypto.randomUUID()}`, spec, specYaml: JSON.stringify(spec), enabled });
 	expect(upsertWebhookSecret({ routineId: routine.id, path: hookPath, secretHash: hashSecretForStorage(SECRET) })).toBe(true);
 	const app = buildHooksRouter(runner);
-	const deliver = (signature = SECRET) => app.request(hookPath, {
+	const deliver = (signature = SECRET, body: string | ReadableStream<Uint8Array> = JSON.stringify({ key: "value" })) => app.request(hookPath, {
 		method: "POST",
 		headers: { "content-type": "application/json", "x-routine-signature": signature },
-		body: JSON.stringify({ key: "value" }),
+		body,
+		duplex: "half",
+	} as RequestInit);
+	return { routine, marker, hookPath, deliver };
+}
+
+/**
+ * A request body whose bytes are held back until `release()`. `reading`
+ * resolves once the receiver starts pulling the body, i.e. after it has
+ * passed every check that runs before the body read.
+ */
+function gatedBody() {
+	let started!: () => void;
+	let release!: () => void;
+	const reading = new Promise<void>((resolve) => { started = resolve; });
+	const gate = new Promise<void>((resolve) => { release = resolve; });
+	const body = new ReadableStream<Uint8Array>({
+		async pull(controller) {
+			started();
+			await gate;
+			controller.enqueue(new TextEncoder().encode(JSON.stringify({ key: "late" })));
+			controller.close();
+		},
 	});
-	return { routine, marker, deliver };
+	return { body, reading, release };
 }
 
 async function waitFor(check: () => boolean, ms = 3000): Promise<boolean> {
@@ -72,4 +94,34 @@ test("a signed webhook for an enabled routine is accepted and runs", async () =>
 	expect(await waitFor(() => listRuns(routine.id)[0]?.endedAt !== undefined)).toBe(true);
 	expect(fs.readFileSync(marker, "utf8").trim()).toBe("yes");
 	expect(JSON.parse(listRuns(routine.id)[0]!.triggerPayload!)).toEqual({ key: "value" });
+});
+
+test("a routine disabled while the webhook body streams is refused with 409 and not marked used", async () => {
+	const { routine, marker, hookPath, deliver } = setup(true);
+	const { body, reading, release } = gatedBody();
+	const pending = deliver(SECRET, body);
+	await reading;
+	updateV1Routine(routine.id, { enabled: false });
+	release();
+	const response = await pending;
+	expect(response.status).toBe(409);
+	expect(await response.json()).toEqual({ error: "routine disabled" });
+	expect(getWebhookSecretByPath(hookPath)?.last_used_at).toBeNull();
+	await Bun.sleep(300);
+	expect(fs.existsSync(marker)).toBe(false);
+	expect(listRuns(routine.id)).toHaveLength(0);
+});
+
+test("a routine deleted while the webhook body streams answers 404 like an unregistered hook", async () => {
+	const { routine, marker, deliver } = setup(true);
+	const { body, reading, release } = gatedBody();
+	const pending = deliver(SECRET, body);
+	await reading;
+	expect(deleteRoutine(routine.id)).toBe(true);
+	release();
+	const response = await pending;
+	expect(response.status).toBe(404);
+	expect(await response.json()).toEqual({ error: "hook not registered" });
+	await Bun.sleep(300);
+	expect(fs.existsSync(marker)).toBe(false);
 });
