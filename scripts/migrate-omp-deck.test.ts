@@ -1,7 +1,7 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, setSystemTime, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { migrate } from "./migrate-omp-deck.ts";
@@ -219,4 +219,58 @@ test("a write-ahead log left by the deck counts as changed state and moves aside
 	expect(aside).toEqual({ "deck.db": live["deck.db"], "deck.db-wal": live["deck.db-wal"], "deck.db-shm": live["deck.db-shm"] });
 	expect(existsSync(path.join(target, "deck.db-wal"))).toBe(false);
 	expect(snapshot(target)["deck.db"]).toBe(live["deck.db"]!);
+});
+
+test("refuses a deck home that reaches the legacy state through a symlink", async () => {
+	const { base, home } = legacyFixture("npi-migration-symlink-home-test-");
+	const source = snapshot(home);
+	symlinkSync(path.join(home, ".omp-deck"), path.join(base, "deck-link"));
+	symlinkSync(home, path.join(base, "home-link"));
+	// The home itself, a not-yet-existing directory under a symlinked ancestor, and a home containing the legacy state.
+	for (const target of [path.join(base, "deck-link"), path.join(base, "home-link", ".omp-deck", "nested"), path.join(base, "home-link")]) {
+		await expect(migrate(["--from", home, "--apply", "--force"], { NPI_DECK_HOME: target })).rejects.toThrow("legacy source");
+	}
+	expect(snapshot(home)).toEqual(source);
+	expect(readdirSync(base).sort()).toEqual(["deck-link", "home-link", "legacy"]);
+});
+
+test("forced runs in the same millisecond keep every file they move aside", async () => {
+	const { home, target } = legacyFixture("npi-migration-same-stamp-test-");
+	const env = { NPI_DECK_HOME: target };
+	await migrate(["--from", home, "--apply"], env);
+	setSystemTime(new Date("2026-09-29T00:00:00.000Z"));
+	try {
+		const displaced: string[] = [];
+		for (const row of ["first", "second"]) {
+			const live = new Database(path.join(target, "deck.db"));
+			live.query("INSERT INTO tasks VALUES (?, ?)").run(row, row);
+			live.close();
+			displaced.push(snapshot(target)["deck.db"]!);
+			await migrate(["--from", home, "--apply", "--force"], env);
+		}
+		const replaced = path.join(target, ".omp-deck-migration-replaced");
+		expect(readdirSync(replaced).map((dir) => snapshot(path.join(replaced, dir))["deck.db"]).sort()).toEqual(displaced.sort());
+	} finally { setSystemTime(); }
+});
+
+test("never writes through a deck-home directory that is a symlink", async () => {
+	const { base, home, target } = legacyFixture("npi-migration-symlink-dir-test-");
+	const outside = path.join(base, "outside");
+	mkdirSync(outside);
+	const env = { NPI_DECK_HOME: target };
+	// Swapped in after the conflict scan, between two installs.
+	const plant = { afterInstall: (relative: string) => { if (relative === "deck.db") symlinkSync(outside, path.join(target, "routine-runs")); } };
+	await expect(migrate(["--from", home, "--apply"], env, plant)).rejects.toThrow("not a directory");
+	expect(readdirSync(outside)).toEqual([]);
+	// The archive directory --force moves changed state into.
+	rmSync(path.join(target, "routine-runs"));
+	await migrate(["--from", home, "--apply"], env);
+	const live = new Database(path.join(target, "deck.db"));
+	live.query("INSERT INTO tasks VALUES (?, ?)").run("t2", "after");
+	live.close();
+	const changed = snapshot(target);
+	symlinkSync(outside, path.join(target, ".omp-deck-migration-replaced"));
+	await expect(migrate(["--from", home, "--apply", "--force"], env)).rejects.toThrow("not a directory");
+	expect(readdirSync(outside)).toEqual([]);
+	expect(snapshot(target)).toEqual(changed);
 });

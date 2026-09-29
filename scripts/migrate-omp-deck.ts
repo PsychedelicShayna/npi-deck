@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /** One-time, non-destructive migration of omp-deck's local state. Dry-run by default. */
 import { Database } from "bun:sqlite";
-import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, constants, cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { readManagedEnvFile, writeManagedEnvUpdates } from "../apps/server/src/env-store.ts";
@@ -116,6 +116,46 @@ function sameFile(a: string, b: string): boolean {
 	return target.isFile() && target.size === statSync(a).size && readFileSync(a).equals(readFileSync(b));
 }
 
+function lexists(file: string): boolean {
+	try { lstatSync(file); return true; } catch (error) {
+		if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+		throw error;
+	}
+}
+
+/** `file` with every symlink in its longest existing ancestor resolved; a missing tail is appended as is. A dangling symlink is refused. */
+function physical(file: string): string {
+	let existing = path.resolve(file);
+	const tail: string[] = [];
+	for (;;) {
+		try { return path.join(realpathSync(existing), ...tail); } catch (error) {
+			if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+			if (lexists(existing)) throw new Error(`Dangling symlink in path: ${existing}`);
+		}
+		const parent = path.dirname(existing);
+		if (parent === existing) return path.join(existing, ...tail);
+		tail.unshift(path.basename(existing));
+		existing = parent;
+	}
+}
+
+function within(inner: string, outer: string): boolean {
+	return inner === outer || inner.startsWith(outer.endsWith("/") ? outer : `${outer}/`);
+}
+
+/** Creates `relative` under `root` one component at a time. Any existing component that is not a real directory (a symlink included) is refused. */
+function ensureDir(root: string, relative: string): string {
+	if (!lstatSync(root).isDirectory()) throw new Error(`Destination path component is not a directory: ${root}`);
+	let dir = root;
+	for (const part of relative.split(path.sep)) {
+		if (!part || part === ".") continue;
+		dir = path.join(dir, part);
+		try { mkdirSync(dir); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+		if (!lstatSync(dir).isDirectory()) throw new Error(`Destination path component is not a directory: ${dir}`);
+	}
+	return dir;
+}
+
 /** Test seam: `afterInstall` runs after each migrated file lands in the deck home, so a test can stop the run there like a crash. */
 export type MigrateHooks = { afterInstall?: (relative: string) => void };
 
@@ -141,8 +181,6 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 		return value ? path.resolve(source.home, value) : undefined;
 	};
 	source.data = configuredPath("OMP_DECK_DATA_DIR") ?? source.data;
-	if (target === source.data || target === source.config || target.startsWith(`${source.data}/`) || target.startsWith(`${source.config}/`)) throw new Error("Destination overlaps legacy source");
-	if (source.data.startsWith(`${target}/`) || source.config.startsWith(`${target}/`)) throw new Error("Destination contains legacy source");
 	const configuredDb = configuredPath("OMP_DECK_DB_PATH") ?? configuredPath("OMP_DECK_DB");
 	const configuredUploads = configuredPath("OMP_DECK_UPLOADS_ROOT");
 	const configuredBridgeDb = configuredPath("TELEGRAM_BRIDGE_DB_PATH");
@@ -163,8 +201,17 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 	}
 	const externalUploads = configuredUploads && !configuredUploads.startsWith(`${source.data}/`) && configuredUploads !== source.data ? configuredUploads : undefined;
 	if (externalUploads) source.extra.push([externalUploads, path.join(target, "uploads")]);
-	for (const [origin] of source.extra) {
-		if (target === origin || target.startsWith(`${origin}/`) || origin.startsWith(`${target}/`)) throw new Error(`Destination overlaps configured legacy source: ${origin}`);
+	// Compare where the paths physically lead, so a symlinked deck home (or any
+	// symlinked ancestor) cannot reach into the legacy state, or the reverse.
+	// `target` stays the path the deck is configured with; files go to `root`.
+	const root = physical(target);
+	const stage = `${root}.omp-deck-staging`;
+	for (const [label, legacy] of [["legacy source", source.data], ["legacy source", source.config], ...source.extra.map(([origin]) => ["configured legacy source", origin] as const)] as const) {
+		const real = physical(legacy);
+		for (const destination of [root, stage]) {
+			if (within(destination, real)) throw new Error(`Destination overlaps ${label}: ${destination} is inside ${legacy}`);
+			if (within(real, destination)) throw new Error(`Destination contains ${label}: ${legacy} is inside ${destination}`);
+		}
 	}
 	const dataFiles = walk(source.data).filter((file) => !SKIP_FILES.has(path.basename(file)) && !/-wal$|-shm$/.test(file));
 	const uploadFiles = externalUploads ? walk(externalUploads) : [];
@@ -188,9 +235,9 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 	}
 	if (new Set(dbJobs.map(([, filename]) => filename)).size !== dbJobs.length) throw new Error("Multiple legacy databases map to the same destination");
 	const otherFiles = dataFiles.filter((file) => !file.endsWith(".db"));
-	const marker = path.join(target, MARKER);
+	const marker = path.join(root, MARKER);
 	const already = existsSync(marker);
-	const stage = `${target}.omp-deck-staging`;
+	if (lexists(stage) && !lstatSync(stage).isDirectory()) throw new Error(`Staging path is not a directory: ${stage}`);
 	const stageMarker = path.join(stage, ".migration-staging");
 	const partial = existsSync(stageMarker);
 	const transfer = [
@@ -204,7 +251,7 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 	if (partial && readFileSync(stageMarker, "utf8") !== stageIdentity) throw new Error(`Staging directory belongs to another migration: ${stage}`);
 	const sidecars = new Set(dbJobs.flatMap(([, filename]) => [`${filename}-wal`, `${filename}-shm`, `${filename}-journal`]));
 	const statePaths = [...new Set(["deck.db", "deck.db-wal", "deck.db-shm", "telegram-bridge.db", "telegram-bridge.db-wal", "telegram-bridge.db-shm", "uploads", "routine-runs", ".env", "onboarding.json", ...transfer, ...sidecars])];
-	const conflicts = existingFiles(target, statePaths);
+	const conflicts = existingFiles(root, statePaths);
 	console.log(`${apply ? "Apply" : "Dry run"}: ${source.data} + ${source.config} -> ${target}`);
 	console.log(`SQLite backups: ${dbJobs.map(([file, dest]) => `${file} -> ${dest}`).join(", ") || "none"} (WAL included by backup API)`);
 	console.log(`Data files: ${otherFiles.length + uploadFiles.length}; config files: ${configFiles.length}; env keys: ${Object.keys(settings).length}; dropped legacy keys: ${dropped.join(", ") || "none"}`);
@@ -252,8 +299,8 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 	const transferSet = new Set(transfer);
 	// Opening a migrated database, even read-only, leaves a shared-memory index
 	// and an empty WAL beside it; neither holds data of its own.
-	const inert = (relative: string) => sidecars.has(relative) && (relative.endsWith("-shm") || lstatSync(path.join(target, relative)).size === 0);
-	const identical = new Set(conflicts.filter((relative) => transferSet.has(relative) && sameFile(path.join(stage, relative), path.join(target, relative))));
+	const inert = (relative: string) => sidecars.has(relative) && (relative.endsWith("-shm") || lstatSync(path.join(root, relative)).size === 0);
+	const identical = new Set(conflicts.filter((relative) => transferSet.has(relative) && sameFile(path.join(stage, relative), path.join(root, relative))));
 	const differing = conflicts.filter((relative) => !identical.has(relative) && !inert(relative));
 	if (differing.length && !force) {
 		rmSync(stage, { recursive: true, force: true });
@@ -270,27 +317,42 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 	const kept = differing.filter((relative) => !displaced.has(relative));
 	// Install only migration-owned state, preserving config.yml, neopi/, run/
 	// and any other backend/launcher files already present in the deck home.
-	mkdirSync(target, { recursive: true });
-	const aside = path.join(target, REPLACED, new Date().toISOString().replaceAll(":", "-"));
-	for (const relative of [...displaced].sort()) {
-		mkdirSync(path.dirname(path.join(aside, relative)), { recursive: true });
-		renameSync(path.join(target, relative), path.join(aside, relative));
+	// Every directory on the way is checked at use time: a symlink swapped in
+	// after the scan must not carry a write out of the deck home.
+	mkdirSync(root, { recursive: true });
+	let aside: string | undefined;
+	if (displaced.size) {
+		// mkdtemp: two forced runs in the same millisecond never share (and overwrite) an archive.
+		aside = mkdtempSync(path.join(ensureDir(root, REPLACED), `${new Date().toISOString().replaceAll(":", "-")}-`));
+		for (const relative of [...displaced].sort()) {
+			ensureDir(root, path.dirname(relative));
+			const archived = path.join(ensureDir(aside, path.dirname(relative)), path.basename(relative));
+			if (lexists(archived)) throw new Error(`Archive entry already exists: ${archived}`);
+			renameSync(path.join(root, relative), archived);
+		}
 	}
 	let installed = 0;
 	for (const relative of transfer) {
 		if (identical.has(relative)) continue;
-		const destination = path.join(target, relative);
-		mkdirSync(path.dirname(destination), { recursive: true });
+		const dir = ensureDir(root, path.dirname(relative));
+		const destination = path.join(dir, path.basename(relative));
 		// link() never replaces an existing entry, unlike rename().
 		try { linkSync(path.join(stage, relative), destination); } catch (error) {
 			if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Destination became populated during migration: ${destination}`);
 			throw error;
 		}
+		// A directory swapped for a symlink between the check and the link: undo and stop.
+		if (realpathSync(dir) !== dir) {
+			unlinkSync(destination);
+			throw new Error(`Destination path component is not a directory: ${dir} changed during migration`);
+		}
 		installed++;
 		hooks.afterInstall?.(relative);
 	}
 	if (!already || installed || displaced.size) {
-		writeFileSync(marker, `${JSON.stringify({ from: source.home, at: new Date().toISOString(), rewrittenFields: rewritten, ...(displaced.size ? { movedAside: aside } : {}) }, null, 2)}\n`);
+		const record = `${JSON.stringify({ from: source.home, at: new Date().toISOString(), rewrittenFields: rewritten, ...(aside ? { movedAside: aside } : {}) }, null, 2)}\n`;
+		const fd = openSync(marker, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o644);
+		try { writeFileSync(fd, record); } finally { closeSync(fd); }
 	}
 	rmSync(stage, { recursive: true, force: true });
 	if (displaced.size) console.log(`Moved aside (differing from the legacy source): ${[...displaced].sort().join(", ")} -> ${aside}`);
