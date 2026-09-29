@@ -100,7 +100,9 @@ Before exposing the deck on a network anyone else can reach:
 cd /path/to/npi-deck
 git pull
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts   # prepares and registers the tree if neopi.pin moved
+# prepares and registers the tree if neopi.pin moved; the flags can be dropped
+# once NPI_DECK_NEOPI_SOURCE and NPI_DECK_NATIVE_DIRS are exported (install.md)
+bun scripts/neopi-setup.ts --source /path/to/neopi --native-dir /path/to/prebuilt-natives
 ```
 
 Then stop the launcher (Ctrl-C) and start `npi-deck` again; it rebuilds the

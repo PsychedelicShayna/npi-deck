@@ -20,12 +20,14 @@ npi-deck never auto-updates, never checks for updates, and never replaces user-e
 cd /path/to/your/npi-deck/checkout
 git pull
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts   # prepares and registers the NeoPi tree if neopi.pin moved
+# prepares and registers the NeoPi tree if neopi.pin moved; the flags can be
+# dropped once NPI_DECK_NEOPI_SOURCE and NPI_DECK_NATIVE_DIRS are exported
+bun scripts/neopi-setup.ts --source /path/to/neopi --native-dir /path/to/prebuilt-natives
 # stop the running launcher (Ctrl-C), then:
 npi-deck
 ```
 
-The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. Re-running `scripts/neopi-setup.ts` is safe. It registers a newly pinned tree in `~/.npi-deck/config.yml` but does not make it `activeBackend`; switch to it in **Settings → Backend**. The launcher rebuilds the web bundle when its sources changed. If you're skipping a major version, also run a `bun run --filter '@npi-deck/*' typecheck` once to catch any local divergence before booting.
+The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. `neopi-setup` needs the same NeoPi checkout and addon directory you installed with; export `NPI_DECK_NEOPI_SOURCE` and `NPI_DECK_NATIVE_DIRS` once (see [install.md](./install.md#installing-npi-deck)) so every later run finds them without flags. Without either, it falls back to the maintainer's paths under `~/source/github/PsychedelicShayna/`. Re-running `scripts/neopi-setup.ts` is safe. It registers a newly pinned tree in `~/.npi-deck/config.yml` but does not make it `activeBackend`; switch to it in **Settings → Backend**. The launcher rebuilds the web bundle when its sources changed. If you're skipping a major version, also run a `bun run --filter '@npi-deck/*' typecheck` once to catch any local divergence before booting.
 
 The deck:
 
@@ -101,7 +103,7 @@ If a new version breaks something for you, downgrade to the previous one and fil
 ```sh
 git checkout <previous-commit-or-tag>
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts
+bun scripts/neopi-setup.ts --source /path/to/neopi --native-dir /path/to/prebuilt-natives   # or no flags, with the env vars exported
 # stop the running launcher (Ctrl-C), then:
 npi-deck
 ```

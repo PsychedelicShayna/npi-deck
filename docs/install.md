@@ -30,6 +30,17 @@ there. `--native-dir` is searched only when the tree has no matching addon
 yet, both directly and under `packages/natives/native`, so a NeoPi checkout
 that has run `build:native` works as the directory.
 
+Every later `neopi-setup` run (a pin change, an upgrade, a rollback) needs the
+same two locations. Export them once, for example in your shell profile, and
+the flags can be left off from then on:
+
+```sh
+export NPI_DECK_NEOPI_SOURCE=/path/to/neopi
+export NPI_DECK_NATIVE_DIRS=/path/to/prebuilt-natives   # `:`-separated for several
+```
+
+An explicit `--source` or `--native-dir` still wins over the variable.
+
 - [Prerequisites](#prerequisites)
 - [NeoPi backend tree](#neopi-backend-tree)
 - [config.yml](#configyml)
@@ -61,10 +72,16 @@ source tree pinned in `neopi.pin`. Prepare that tree once per pin:
 
 ```bash
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts            # the pinned commit
-bun scripts/neopi-setup.ts <sha>      # another commit
-bun scripts/neopi-setup.ts --path DIR # an existing NeoPi tree, prepared in place
+# the pinned commit
+bun scripts/neopi-setup.ts --source /path/to/neopi --native-dir /path/to/prebuilt-natives
+# another commit
+bun scripts/neopi-setup.ts <sha> --source /path/to/neopi --native-dir /path/to/prebuilt-natives
+# an existing NeoPi tree, prepared in place (--source is not used)
+bun scripts/neopi-setup.ts --path DIR --native-dir /path/to/prebuilt-natives
 ```
+
+With `NPI_DECK_NEOPI_SOURCE` and `NPI_DECK_NATIVE_DIRS` exported, drop the
+flags.
 
 If dependencies are already provisioned in the target tree, pass
 `--skip-install` to avoid any package-manager operation. The script checks that
