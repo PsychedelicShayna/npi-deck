@@ -40,6 +40,16 @@ interface ScheduledCron {
 	routineId: string;
 }
 
+/** Earliest upcoming fire across every cron of a routine, as persisted `nextRunAt`. */
+function earliestNextRun(entries: readonly ScheduledCron[]): string | null {
+	let earliest: Date | null = null;
+	for (const { cron } of entries) {
+		const next = cron.nextRun();
+		if (next && (!earliest || next < earliest)) earliest = next;
+	}
+	return earliest?.toISOString() ?? null;
+}
+
 export class RoutinesRunner {
 	private crons = new Map<string, ScheduledCron[]>();
 	private disposed = false;
@@ -86,7 +96,6 @@ export class RoutinesRunner {
 		}
 
 		const scheduled: ScheduledCron[] = [];
-		let earliestNext: Date | null = null;
 		for (const expr of cronExprs) {
 			try {
 				const cron = new Cron(
@@ -101,14 +110,12 @@ export class RoutinesRunner {
 					},
 				);
 				scheduled.push({ cron, routineId: r.id });
-				const next = cron.nextRun();
-				if (next && (!earliestNext || next < earliestNext)) earliestNext = next;
 			} catch (err) {
 				log.warn(`failed to schedule cron '${expr}' for ${r.id}`, err);
 			}
 		}
 		this.crons.set(r.id, scheduled);
-		setRoutineSchedule(r.id, { nextRunAt: earliestNext?.toISOString() ?? null });
+		setRoutineSchedule(r.id, { nextRunAt: earliestNextRun(scheduled) });
 	}
 
 	unschedule(routineId: string): void {
@@ -145,12 +152,11 @@ export class RoutinesRunner {
 			await this.fireV0(routine, trigger === "cron" || trigger === "manual" ? trigger : "manual", payload);
 		}
 
-		const entries = this.crons.get(routineId) ?? [];
-		const next = entries.map(({ cron }) => cron.nextRun()).filter((date): date is Date => date !== null).sort((a, b) => a.getTime() - b.getTime())[0];
+		const next = earliestNextRun(this.crons.get(routineId) ?? []);
 		const now = new Date().toISOString();
 		setRoutineSchedule(routineId, {
 			lastRunAt: now,
-			nextRunAt: next?.toISOString() ?? null,
+			nextRunAt: next,
 		});
 	}
 

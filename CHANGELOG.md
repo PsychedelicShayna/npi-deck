@@ -45,6 +45,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 - Backendless startup now serves the backend picker without trying to install starters through an unloaded SDK (#36). A committed backend switch remains latched until worker exit (#78).
 - Session browsing uses a read-only global scan for project filters instead of repairing NeoPi session backups (#76); model-picker discovery uses read-only settings and cannot migrate user config (#77).
 - The plan-mode bridge tests wait for a proposal to become pending instead of sleeping a fixed 10 ms, so a slower backend load no longer fails them (#85).
+- A routine with several cron triggers keeps reporting its earliest upcoming fire as the next run after it runs, instead of switching to the first trigger's next fire (#25). Scheduling and post-run updates now compute next-run metadata the same way.
 
 ### Removed
 
