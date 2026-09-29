@@ -20,7 +20,8 @@
             "list_tasks",
             "list_inbox",
             "get_task",
-            "get_inbox_item"
+            "get_inbox_item",
+            "kb_orphan_census"
           ]
         }
       },
@@ -99,6 +100,13 @@
           "properties": {
             "action": { "const": "get_inbox_item" },
             "inbox_ref": { "type": "string", "minLength": 1, "maxLength": 120 }
+          }
+        },
+        {
+          "required": ["action"],
+          "properties": {
+            "action": { "const": "kb_orphan_census" },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 10000 }
           }
         }
       ]

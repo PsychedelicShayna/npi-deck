@@ -9,7 +9,7 @@
  * with `enabled: false` by default so a fresh install doesn't fire unscheduled
  * agent runs against the user's BYOK keys.
  *
- * V1 ships one template (`daily-briefing`); the visual builder's marketplace
+ * V1 ships `daily-briefing` and `kb-orphan-census`; the visual builder's marketplace
  * (Phase 3 / V2) surfaces them in a curated catalog with screenshots + tags.
  */
 

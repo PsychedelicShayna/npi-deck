@@ -162,6 +162,25 @@ interface FileRecord {
 	mtime: Date;
 }
 
+/** A note that no other note links to. */
+export interface KbOrphan {
+	path: string;
+	title: string;
+	/** Resolved links from this note to other notes. 0 means it is isolated. */
+	outbound: number;
+}
+
+/** Result of `KbService.getOrphanCensus`. */
+export interface KbOrphanCensus {
+	root: string;
+	/** Notes the census covered: the index after the skip set and `.kbignore`. */
+	notes: number;
+	/** Every orphan, sorted by path. */
+	orphans: KbOrphan[];
+	/** Wikilinks that resolve to no indexed note. */
+	unresolvedLinks: number;
+}
+
 export interface KbServiceOptions {
 	root: string;
 }
@@ -521,6 +540,37 @@ export class KbService {
 		}
 		const backlinks = this.graphCache.backlinks.get(cleanRel) ?? [];
 		return { path: cleanRel, backlinks };
+	}
+
+	/**
+	 * Orphan census (T-41): every indexed note that no other note links to.
+	 * It covers exactly what the cockpit indexes, so the skip set,
+	 * `NPI_DECK_KB_EXCLUDE_DIRS` and `.kbignore` apply, and a link from an
+	 * excluded note does not rescue its target. Links from a note to itself
+	 * count on neither side.
+	 */
+	async getOrphanCensus(): Promise<KbOrphanCensus> {
+		await this.ensureIndex();
+		if (!this.graphCache) {
+			this.graphCache = await this.buildGraph();
+		}
+		const linked = new Set<string>();
+		const outbound = new Map<string, number>();
+		for (const edge of this.graphCache.edges) {
+			if (edge.source === edge.target) continue;
+			linked.add(edge.target);
+			outbound.set(edge.source, (outbound.get(edge.source) ?? 0) + 1);
+		}
+		const orphans = this.graphCache.nodes
+			.filter((node) => !linked.has(node.path))
+			.map((node) => ({ path: node.path, title: node.title, outbound: outbound.get(node.path) ?? 0 }))
+			.sort((a, b) => a.path.localeCompare(b.path));
+		return {
+			root: this.root,
+			notes: this.graphCache.nodes.length,
+			orphans,
+			unresolvedLinks: this.graphCache.unresolvedCount,
+		};
 	}
 
 	/**

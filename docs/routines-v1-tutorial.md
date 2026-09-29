@@ -32,6 +32,10 @@ curl -X POST http://127.0.0.1:1701/api/routines/<id>/run
 Or just click **Run now** in the editor. Once it's finished, the routine creates
 a new **capture item in the deck's native Inbox** (`/inbox`, kind=`capture`).
 
+The other shipped template, `kb-orphan-census`, installs the same way. Once
+enabled it runs every Monday and files one inbox item listing the KB notes that
+no other note links to (honouring `.kbignore`); it never edits the KB.
+
 ## Author one yourself in the visual builder
 
 1. Open `/routines` and click **New routine**.
@@ -60,7 +64,7 @@ templating).
 | `agent`     | prompt the omp SDK; costs LLM tokens                                                     |
 | `write`     | write a templated string to a file (overwrite or append)                                 |
 | `http`      | GET / POST / PUT / PATCH / DELETE against a URL; internal calls get an HMAC bearer token |
-| `deck`      | mutate deck-native state without hand-rolling API calls (`create_inbox_item`, `create_task`, `move_task`, `promote_inbox_item_to_task`) |
+| `deck`      | read or mutate deck-native state without hand-rolling API calls (`create_inbox_item`, `create_task`, `move_task`, `promote_inbox_item_to_task`, `list_tasks`, `list_inbox`, `get_task`, `get_inbox_item`, `kb_orphan_census`) |
 | `transform` | JS expression in a quickjs sandbox; sets `steps.<id>.json`                               |
 | `set_state` | UPSERT key/value pairs into the routine's persistent state                               |
 | `wait`      | sleep N seconds (useful between polling steps)                                           |

@@ -465,3 +465,65 @@ describe("executeDeckStep", () => {
 		});
 	});
 });
+
+describe("kb_orphan_census", () => {
+	const savedRoot = process.env.NPI_DECK_KB_ROOT;
+	let kbRoot: string | null = null;
+
+	afterEach(() => {
+		if (savedRoot === undefined) delete process.env.NPI_DECK_KB_ROOT;
+		else process.env.NPI_DECK_KB_ROOT = savedRoot;
+		if (kbRoot) fs.rmSync(kbRoot, { recursive: true, force: true });
+		kbRoot = null;
+	});
+
+	function bootKb(files: Record<string, string>): void {
+		kbRoot = fs.mkdtempSync(path.join(os.tmpdir(), "npi-deck-census-"));
+		for (const [rel, body] of Object.entries(files)) {
+			fs.mkdirSync(path.dirname(path.join(kbRoot, rel)), { recursive: true });
+			fs.writeFileSync(path.join(kbRoot, rel), body);
+		}
+		process.env.NPI_DECK_KB_ROOT = kbRoot;
+	}
+
+	test("counts every orphan under the configured root and lists up to `limit`", async () => {
+		bootKb({
+			"hub.md": "# Hub\n\n[[linked]]\n",
+			"linked.md": "# Linked\n",
+			"a.md": "# A\n",
+			"b.md": "# B\n\n[[linked]]\n",
+			"hidden/c.md": "# C\n",
+			".kbignore": "hidden/\n",
+		});
+		const result = await executeDeckStep(
+			{ id: "census", type: "deck", action: "kb_orphan_census", limit: 2 },
+			ctx(),
+			AbortSignal.timeout(5000),
+		);
+		expect(result.status).toBe("success");
+		expect(result.json).toEqual({
+			root: path.resolve(kbRoot!),
+			notes: 4,
+			orphanCount: 3,
+			isolatedCount: 1,
+			unresolvedLinks: 0,
+			orphans: [
+				{ path: "a.md", title: "a", outbound: 0 },
+				{ path: "b.md", title: "b", outbound: 1 },
+			],
+			truncated: true,
+		});
+	});
+
+	test("fails when the kb root does not exist", async () => {
+		const missing = path.join(os.tmpdir(), `npi-deck-census-missing-${crypto.randomUUID()}`);
+		process.env.NPI_DECK_KB_ROOT = missing;
+		const result = await executeDeckStep(
+			{ id: "census", type: "deck", action: "kb_orphan_census" },
+			ctx(),
+			AbortSignal.timeout(5000),
+		);
+		expect(result.status).toBe("failed");
+		expect(result.error).toBe(`kb root does not exist: ${missing}`);
+	});
+});

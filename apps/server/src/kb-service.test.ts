@@ -147,3 +147,21 @@ describe("KbService with .kbignore", () => {
 		expect(JSON.parse(out.trim().split("\n").pop()!)).toEqual(["archive"]);
 	});
 });
+
+describe("KbService orphan census", () => {
+	test("lists indexed notes nothing else links to; ignored notes and self-links do not count", async () => {
+		// drafts/ is ignored, so its link cannot rescue public-after-all, and
+		// public-after-all's link to itself is not a backlink.
+		put("drafts/idea.md", "# Idea\n\n[[public-after-all]]\n");
+		put("notes/private/public-after-all.md", "# Nested\n\n[[public-after-all]] and [[missing-note]]\n");
+		const census = await new KbService({ root }).getOrphanCensus();
+		expect(census.root).toBe(path.resolve(root));
+		expect(census.notes).toBe(3);
+		expect(census.orphans).toEqual([
+			{ path: "notes/hub.md", title: "hub", outbound: 1 },
+			{ path: "notes/private/public-after-all.md", title: "public-after-all", outbound: 0 },
+		]);
+		// hub → idea, secret, tossed (all ignored) plus public-after-all → missing-note.
+		expect(census.unresolvedLinks).toBe(4);
+	});
+});

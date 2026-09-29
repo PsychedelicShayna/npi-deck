@@ -18,7 +18,7 @@ import { validateRoutineSpec } from "@npi-deck/protocol";
 import { listTemplates, loadTemplate } from "./templates.ts";
 
 /** Templates that MUST ship in the public repo. Anything else is best-effort. */
-const REQUIRED_SHIPPED = ["daily-briefing"] as const;
+const REQUIRED_SHIPPED = ["daily-briefing", "kb-orphan-census"] as const;
 
 describe("routine templates", () => {
 	test("every required shipped template is in the listing", () => {

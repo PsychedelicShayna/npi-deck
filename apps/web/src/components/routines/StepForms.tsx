@@ -383,6 +383,13 @@ export function DeckStepForm({ step, onChange }: FormProps<"deck">) {
 					inbox_ref: step.action === action ? step.inbox_ref : "i_...",
 				});
 				return;
+			case "kb_orphan_census":
+				onChange({
+					...common,
+					action,
+					limit: step.action === action ? step.limit : 200,
+				});
+				return;
 		}
 	}
 
@@ -402,6 +409,7 @@ export function DeckStepForm({ step, onChange }: FormProps<"deck">) {
 					<option value="list_inbox">list_inbox</option>
 					<option value="get_task">get_task</option>
 					<option value="get_inbox_item">get_inbox_item</option>
+					<option value="kb_orphan_census">kb_orphan_census</option>
 				</select>
 			</Field>
 			{step.action === "create_inbox_item" ? (
@@ -564,6 +572,13 @@ export function DeckStepForm({ step, onChange }: FormProps<"deck">) {
 				<div className="space-y-2">
 					<Field label="inbox_ref">
 						<TextInput value={step.inbox_ref} onChange={(v) => onChange({ ...step, inbox_ref: v })} placeholder="i_..." mono />
+					</Field>
+				</div>
+			) : null}
+			{step.action === "kb_orphan_census" ? (
+				<div className="space-y-2">
+					<Field label="limit (optional — orphans listed; orphanCount counts them all)">
+						<NumInput value={step.limit} onChange={(v) => onChange({ ...step, limit: v ?? undefined })} placeholder="200" />
 					</Field>
 				</div>
 			) : null}

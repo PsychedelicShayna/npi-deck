@@ -1766,7 +1766,8 @@ export type RoutineDeckAction =
 	| "list_tasks"
 	| "list_inbox"
 	| "get_task"
-	| "get_inbox_item";
+	| "get_inbox_item"
+	| "kb_orphan_census";
 
 
 /** Common fields every step type accepts. */
@@ -1883,6 +1884,13 @@ export type RoutineStep =
 						action: "get_inbox_item";
 						/** Inbox item id. */
 						inbox_ref: string;
+				  }
+				| {
+						type: "deck";
+						/** Notes in the KB (after `.kbignore`) that no other note links to. */
+						action: "kb_orphan_census";
+						/** Cap on the orphans listed; `orphanCount` still counts them all. Defaults to unlimited. */
+						limit?: number;
 				  }
 			))
 	| (RoutineStepCommon & {

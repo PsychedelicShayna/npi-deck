@@ -2,7 +2,7 @@
 
 Status: approved 2026-05-20 (decisions locked, see end)
 Author: omp-deck team
-Tracks: T-33 (this proposal) — T-41 (deferred maintenance hook). Implements
+Tracks: T-33 (this proposal) — T-41 (maintenance hook + orphan census, shipped; see Phased plan). Implements
 [Karpathy's llm-wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
 in omp-deck as a first-class viewer / editor / graph view over the user's
 existing knowledge base at `~/kb`.
@@ -88,7 +88,8 @@ Out:
   separate future proposal if we want it)
 - Cross-vault navigation (one kb root per deck instance for v1)
 - Maintenance automation — orphan census, broken links, stale dates
-  (deferred to T-41, references vincitamore/opus-extensions)
+  (deferred to T-41, references vincitamore/opus-extensions; the orphan
+  census has since shipped, see Phased plan)
 
 ## Key design choices
 
@@ -188,14 +189,39 @@ Tasks already filed (T-34..T-41). Summary:
 | T-38 | Obsidian-style force-directed graph view                | T-37          |
 | T-39 | Inspector — frontmatter + outbound + backlinks + tags   | T-35 + T-37   |
 | T-40 | Search + quick-open (Ctrl-P) palette                    | T-34          |
-| T-41 | (deferred) Maintenance hook + orphan census routine     | T-34..T-40    |
+| T-41 | Maintenance hook + orphan census routine (shipped)      | T-34..T-40    |
 
 Natural shipping order: T-34 → T-35 → T-36 → T-37 → T-38 → T-39 → T-40.
-T-41 stays in backlog until the rest has been live for at least a week.
+T-41 stayed in backlog until the rest had been live for a while.
 
 The shipping unit users notice is **T-34..T-35** together (browse + read),
 which is enough to start using the cockpit. T-36 (edit) and T-38 (graph)
 are independently valuable. T-39 and T-40 polish the experience.
+
+### T-41 as shipped
+
+- **Maintenance hook**: the `maintenance-gate` starter extension, ported
+  from vincitamore/opus-extensions in omp-deck 0.2.0 and opt-in from
+  Settings → Starters since #34. At a yield point in a deck session it asks
+  the agent to capture what it learned under the org root, which the deck
+  points at the kb root. Nothing further was needed here.
+- **Orphan census** (#28): the bundled routine template `kb-orphan-census`,
+  installed disabled like every template, weekly once enabled. A read-only
+  `kb_orphan_census` deck step lists every indexed note that no other note
+  links to, so the skip set, `NPI_DECK_KB_EXCLUDE_DIRS` and `.kbignore`
+  apply; a link from a hidden note or a self-link is not a backlink.
+- **Where findings go**: one `investigation` item in the deck inbox per run,
+  not a note in the kb. The census reports and the user decides per note
+  (link it from a hub, list it in `.kbignore`, delete it), as "What this is
+  NOT" below requires. A report written into the kb would
+  change what it measures: it would be an orphan itself in the next census,
+  and it would trip the watcher and rebuild the index. The inbox is also
+  where the other routine output lands, and an item can be promoted to a
+  task. No item is filed when there are no orphans, or while the previous
+  report is still unprocessed.
+- **Not done**: a listing of broken links (the report gives only their
+  count) and stale-date checks on `updated:` frontmatter. No issue tracks
+  either yet.
 
 ## Risks and sharp edges
 
@@ -225,8 +251,8 @@ are independently valuable. T-39 and T-40 polish the experience.
 ## What this is NOT (yet, restated)
 
 - **An agent-driven wiki maintainer.** The cockpit shows what's there;
-  it doesn't autonomously rewrite or restructure. That's the T-41 hook's
-  job, and even then it's user-approved-per-finding, not autonomous.
+  it doesn't autonomously rewrite or restructure. The T-41 census only
+  reports; every fix is the user's call, per finding.
 - **A replacement for `kb_sync.py`.** The Python tooling does
   source-to-wiki promotion; we're not building that into the deck.
 - **A cross-vault mounter.** One kb root per deck. Multi-vault is v2.

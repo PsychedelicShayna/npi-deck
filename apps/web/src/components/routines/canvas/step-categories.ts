@@ -65,8 +65,8 @@ export const STEP_CATEGORIES: ReadonlyArray<StepCategory> = [
 	{
 		key: "deck-read",
 		label: "Deck · Read",
-		tagline: "Read tasks and inbox.",
-		entries: pick("list_tasks", "list_inbox", "get_task", "get_inbox_item"),
+		tagline: "Read tasks, inbox and the KB.",
+		entries: pick("list_tasks", "list_inbox", "get_task", "get_inbox_item", "kb_orphan_census"),
 	},
 	{
 		key: "deck-write",

@@ -60,6 +60,7 @@ Read (returns slim records — `{id, ref, displayId, title, stateId, updatedAt, 
 - `list_inbox` — filters: `kind`, `since_hours`, `include_processed`, `limit`
 - `get_task` — `task_ref` accepts `T-N` or `t_<id>`
 - `get_inbox_item` — `inbox_ref` accepts the inbox id
+- `kb_orphan_census` — KB notes (after `.kbignore`) that no other note links to; optional `limit` caps the `orphans` list, `orphanCount` counts them all
 
 Write:
 - `create_task` — `title` (req), `body`, `stateId`/`state_ref`

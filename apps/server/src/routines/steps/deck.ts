@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import type { RoutineStep } from "@npi-deck/protocol";
 
 import { createInbox, getInbox, listInbox, updateInbox } from "../../db/inbox.ts";
@@ -11,6 +13,7 @@ import {
 	listTasks,
 	moveTask,
 } from "../../db/tasks.ts";
+import { KbService, resolveKbRoot } from "../../kb-service.ts";
 import { renderString } from "../template.ts";
 import { notificationService } from "../../notifications/index.ts";
 import type { RunContext, StepResult } from "../types.ts";
@@ -174,6 +177,27 @@ export async function executeDeckStep(
 				const item = getInbox(ref);
 				if (!item) return fail(startedMs, `inbox item not found: ${ref}`);
 				return ok(startedMs, `fetched inbox ${item.id}: ${item.title}`, item);
+			}
+			case "kb_orphan_census": {
+				// A fresh index per run reads the tree and `.kbignore` as they are
+				// now, and leaves the cockpit's cached index alone.
+				const kb = new KbService({ root: resolveKbRoot() });
+				if (!existsSync(kb.root)) return fail(startedMs, `kb root does not exist: ${kb.root}`);
+				const census = await kb.getOrphanCensus();
+				const orphans = step.limit === undefined ? census.orphans : census.orphans.slice(0, step.limit);
+				return ok(
+					startedMs,
+					`${census.orphans.length} orphan(s) among ${census.notes} note(s) under ${census.root}`,
+					{
+						root: census.root,
+						notes: census.notes,
+						orphanCount: census.orphans.length,
+						isolatedCount: census.orphans.filter((o) => o.outbound === 0).length,
+						unresolvedLinks: census.unresolvedLinks,
+						orphans,
+						truncated: orphans.length < census.orphans.length,
+					},
+				);
 			}
 		}
 	} catch (err) {
