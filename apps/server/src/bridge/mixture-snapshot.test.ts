@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mixtureSnapshotTraces } from "./mixture-snapshot.ts";
+import { latestErrorTerminal, mixtureSnapshotTraces } from "./mixture-snapshot.ts";
 
 const hop = (runId: string, seq: number, memberId: string) => ({
 	role: "custom",
@@ -41,4 +41,27 @@ test("a member failure's persisted error checkpoint becomes an error checkpoint 
 	});
 	// Ordinary hop and decision checkpoints are not terminal and add nothing.
 	expect(mixtureSnapshotTraces([hop("r3", 3, "writer")], [lifecycle({ v: 1, reason: "hop", run: { id: "r3", status: "running", seq: 3 } })])).toHaveLength(1);
+});
+
+test("a run that fails before its first hop gets an error card built from the serialized run", () => {
+	// NeoPi: a hop request that does not fit the member's context fails the run before any hop card.
+	const checkpoint = {
+		...lifecycle({
+			v: 1,
+			reason: "error",
+			run: { id: "r4", status: "error", seq: 1, key: { host: "s", mixture: "tea", lineage: [], conversation: "s" }, lifetime: { hops: 0, usd: 0, startedAt: 5 }, window: { hops: 0, usd: 0, startedAt: 5 } },
+			committedThrough: 0,
+		}),
+		timestamp: "2026-09-29T01:00:00.000Z",
+	};
+	const traces = mixtureSnapshotTraces([{ role: "user", content: "hi" }], [checkpoint]);
+	expect(traces).toEqual([
+		expect.objectContaining({
+			customType: "mixture_trace",
+			details: expect.objectContaining({ runId: "r4", mixture: "tea", seq: 2, kind: "checkpoint", reason: "error", at: Date.parse("2026-09-29T01:00:00.000Z"), run: expect.objectContaining({ status: "error", hops: 0, usd: 0, window: { hops: 0, usd: 0 } }) }),
+		}),
+	]);
+	// The bridge's live path finds it as the branch's latest failure, and only then.
+	expect(latestErrorTerminal([], [checkpoint])).toMatchObject({ details: { runId: "r4", reason: "error" } });
+	expect(latestErrorTerminal([], [checkpoint, lifecycle({ v: 1, reason: "hop", run: { id: "r5", seq: 1 } })])).toBeUndefined();
 });

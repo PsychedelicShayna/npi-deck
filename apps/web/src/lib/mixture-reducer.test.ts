@@ -70,6 +70,18 @@ describe("mixture panel state", () => {
 		expect(mixtureRunPhase(onlyRun(withCheckpoint), live)).toEqual({ kind: "interrupted", reason: "error" });
 	});
 
+	test("a run that failed before any hop shows interrupted from its lone error card, live and on replay", () => {
+		const errorCard = { ...header(2, "error"), kind: "checkpoint", reason: "error" };
+		// Live: the bridge sends the rebuilt card after the failed response ends.
+		const liveState = applyEvent(session(), { type: "mixture_checkpoint", details: errorCard } as never);
+		expect(mixtureRunPhase(onlyRun(liveState), { ...live, streaming: false })).toEqual({ kind: "interrupted", reason: "error" });
+		expect(mixtureHops(onlyRun(liveState))).toEqual([]);
+		// Replay while a new turn streams on the same mixture: history, still interrupted.
+		const replayed = initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: true, model: { provider: "mixture", id: "draft-then-edit" }, messages: [], todoPhases: [], mixtureTraces: [card(errorCard)] as never });
+		expect(onlyRun(replayed).live).toBe(false);
+		expect(mixtureRunPhase(onlyRun(replayed), live)).toEqual({ kind: "interrupted", reason: "error" });
+	});
+
 	test("replayed history never shows as running, even while a new turn streams", () => {
 		const replayed = onlyRun(session([card(hop(1, "writer", "editor"))], "/s/one.jsonl", false));
 		expect(mixtureRunPhase(replayed, live)).toEqual({ kind: "unrecorded" });

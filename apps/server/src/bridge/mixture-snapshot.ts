@@ -8,7 +8,8 @@
  * failed. Without them a client that was away when the run ended would replay
  * its last hop as still pending. This rebuilds a `run_end` card, or an
  * `error` checkpoint card, per ended run on the active branch, keeping its
- * runId; the header's counters come from the run's last persisted card.
+ * runId. Counters come from the run's last persisted card, or, for a run that
+ * failed before its first hop and so has no cards, from the serialized run.
  */
 
 type Fields = Record<string, unknown>;
@@ -33,8 +34,8 @@ export function mixtureSnapshotTraces(messages: readonly unknown[], entries: rea
 		if (!previous || (previous.seq as number) < details.seq) last.set(details.runId, details);
 	}
 	const rebuilt: Fields[] = [];
-	const push = (tail: Fields, details: Fields, label: string) => {
-		rebuilt.push({ role: "custom", customType: "mixture_trace", display: true, content: `${String(tail.mixture)} · ${label}`, details, timestamp: details.at });
+	const push = (mixture: unknown, details: Fields, label: string) => {
+		rebuilt.push({ role: "custom", customType: "mixture_trace", display: true, content: `${String(mixture)} · ${label}`, details, timestamp: details.at });
 		last.set(details.runId as string, details);
 	};
 	for (const entry of entries) {
@@ -47,7 +48,7 @@ export function mixtureSnapshotTraces(messages: readonly unknown[], entries: rea
 			if (!tail || tail.kind === "run_end") continue;
 			const at = typeof data.at === "number" ? data.at : (tail.at as number);
 			const run = record(tail.run) ? tail.run : {};
-			push(tail, {
+			push(tail.mixture, {
 				v: 1,
 				runId: data.runId,
 				mixture: tail.mixture,
@@ -60,20 +61,26 @@ export function mixtureSnapshotTraces(messages: readonly unknown[], entries: rea
 			}, "run end");
 			continue;
 		}
-		// A failed member ends the run with an `error` checkpoint and no card or run end
-		// (the failed hop's card still says the run is running). Rebuild that terminal.
+		// A failed run ends with an `error` checkpoint and no card or run end: after a
+		// failed hop (whose card still says running), or before any hop (a request that
+		// does not fit the member's context), when the run has no cards at all.
 		if (data.reason === "error" && record(data.run) && typeof data.run.id === "string") {
 			const serialized = data.run;
 			const tail = last.get(serialized.id as string);
-			if (!tail || tail.kind === "run_end" || (tail.kind === "checkpoint" && tail.reason === "error")) continue;
-			const run = record(tail.run) ? tail.run : {};
-			const seq = Math.max((tail.seq as number) + 1, typeof serialized.seq === "number" ? serialized.seq + 1 : 0);
-			push(tail, {
+			if (tail && (tail.kind === "run_end" || (tail.kind === "checkpoint" && tail.reason === "error"))) continue;
+			const mixture = tail?.mixture ?? (record(serialized.key) && typeof serialized.key.mixture === "string" ? serialized.key.mixture : undefined);
+			if (typeof mixture !== "string") continue;
+			const counters = (value: unknown) => (record(value) && typeof value.hops === "number" && typeof value.usd === "number" ? { hops: value.hops, usd: value.usd } : undefined);
+			const lifetime = counters(serialized.lifetime) ?? { hops: 0, usd: 0 };
+			const run = tail && record(tail.run) ? tail.run : { ...lifetime, window: counters(serialized.window) ?? lifetime };
+			const seq = Math.max(tail ? (tail.seq as number) + 1 : 1, typeof serialized.seq === "number" ? serialized.seq + 1 : 0);
+			const startedAt = record(serialized.window) && typeof serialized.window.startedAt === "number" ? serialized.window.startedAt : Date.now();
+			push(mixture, {
 				v: 1,
 				runId: serialized.id,
-				mixture: tail.mixture,
+				mixture,
 				seq,
-				at: Number.isFinite(entryAt) ? entryAt : (tail.at as number),
+				at: Number.isFinite(entryAt) ? entryAt : ((tail?.at as number | undefined) ?? startedAt),
 				run: { ...run, status: "error", phase: "ended", activeMemberId: undefined, endReason: typeof serialized.endReason === "string" ? serialized.endReason : "error" },
 				kind: "checkpoint",
 				reason: "error",
@@ -81,4 +88,18 @@ export function mixtureSnapshotTraces(messages: readonly unknown[], entries: rea
 		}
 	}
 	return [...cards, ...rebuilt];
+}
+
+/**
+ * The terminal card for the run the branch's latest `mixture_run` error
+ * checkpoint belongs to, if that checkpoint is the branch's last mixture
+ * record. NeoPi emits no live event for it, so the bridge sends this after the
+ * failed outer response ends.
+ */
+export function latestErrorTerminal(messages: readonly unknown[], entries: readonly unknown[]): Fields | undefined {
+	const lastRecord = entries.findLast(entry => record(entry) && entry.type === "custom" && entry.customType === "mixture_run" && record(entry.data));
+	if (!record(lastRecord) || !record(lastRecord.data) || lastRecord.data.reason !== "error" || !record(lastRecord.data.run)) return undefined;
+	const runId = lastRecord.data.run.id;
+	const cards = mixtureSnapshotTraces(messages, entries);
+	return cards.findLast(card => record(card.details) && card.details.runId === runId && card.details.kind === "checkpoint" && card.details.reason === "error");
 }

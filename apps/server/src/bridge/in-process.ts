@@ -42,7 +42,7 @@ import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import { SubagentTree } from "./subagent-tree.ts";
 import { transcriptTail } from "./transcript-tail.ts";
-import { mixtureSnapshotTraces } from "./mixture-snapshot.ts";
+import { latestErrorTerminal, mixtureSnapshotTraces } from "./mixture-snapshot.ts";
 import { McpAllowlistError } from "./types.ts";
 import type {
 	AgentBridge,
@@ -788,6 +788,16 @@ export class InProcessAgentBridge implements AgentBridge {
 				return;
 			}
 			handle.emit(event as unknown as AgentSessionEventJson);
+			// A mixture run that fails, even before its first hop, ends with only a persisted
+			// `error` checkpoint; NeoPi emits no event for it. Once the failed response ends,
+			// send its rebuilt terminal card so the live panel and chat show the run failed.
+			if (type === "message_end") {
+				const message = (event as { message?: { role?: string; api?: string; stopReason?: string } }).message;
+				if (message?.role === "assistant" && message.api === "mixture" && message.stopReason === "error") {
+					const terminal = handle.mixtureErrorTerminal();
+					if (terminal) handle.emit({ type: "mixture_checkpoint", details: terminal.details } as unknown as AgentSessionEventJson);
+				}
+			}
 			// After the SDK's own event reaches subscribers, fire a synthetic
 			// `context_usage` event on the moments where the underlying number
 			// changes: a turn finishing (fresh assistant usage now available)
@@ -1076,6 +1086,11 @@ export class InProcessSessionHandle implements SessionHandle {
 				log.warn(`queue_state listener failed`, err);
 			}
 		}
+	}
+
+	/** The rebuilt terminal card of a mixture run that just failed, from its persisted `error` checkpoint. */
+	mixtureErrorTerminal(): { details: unknown } | undefined {
+		return latestErrorTerminal(this.sessionManager.buildSessionContext({ transcript: true }).messages, this.sessionManager.getBranch()) as { details: unknown } | undefined;
 	}
 
 	snapshot(): SessionSnapshot {
