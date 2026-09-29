@@ -1090,7 +1090,7 @@ export class InProcessSessionHandle implements SessionHandle {
 
 	/** The rebuilt terminal card of a mixture run that just failed, from its persisted `error` checkpoint. */
 	mixtureErrorTerminal(): { details: unknown } | undefined {
-		return latestErrorTerminal(this.sessionManager.buildSessionContext({ transcript: true }).messages, this.sessionManager.getBranch()) as { details: unknown } | undefined;
+		return latestErrorTerminal(this.sessionManager.getBranch()) as { details: unknown } | undefined;
 	}
 
 	snapshot(): SessionSnapshot {
@@ -1119,7 +1119,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		if (this.shadowQueue.length > 0) snap.queuedPrompts = [...this.shadowQueue];
 		// The model context never holds display-only trace cards; the session file's branch does,
 		// and its lifecycle entries say which runs ended.
-		const traces = mixtureSnapshotTraces(this.sessionManager.buildSessionContext({ transcript: true }).messages, this.sessionManager.getBranch());
+		const traces = mixtureSnapshotTraces(this.sessionManager.getBranch());
 		if (traces.length > 0) snap.mixtureTraces = traces as unknown as AgentMessageJson[];
 		// Legacy backends limit async jobs to their first root. On multi-root
 		// backends each root owns its own manager, including later chats.

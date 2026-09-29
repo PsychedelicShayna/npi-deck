@@ -10,6 +10,8 @@
  * `error` checkpoint card, per ended run on the active branch, keeping its
  * runId. Counters come from the run's last persisted card, or, for a run that
  * failed before its first hop and so has no cards, from the serialized run.
+ * Only the current conversation counts: entries before the latest `/clear`
+ * reset boundary belong to runs NeoPi has dropped.
  */
 
 type Fields = Record<string, unknown>;
@@ -21,11 +23,26 @@ function record(value: unknown): value is Fields {
 const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 
 /**
- * `messages`: the branch's transcript messages (custom cards included).
- * `entries`: the branch's session entries, root to leaf.
+ * The current conversation's part of a branch: the entries after the latest
+ * `/clear` `reset_boundary`. NeoPi drops every run at that boundary
+ * (`resetConversation`) and starts the live transcript and model context after
+ * it. Compaction is different: it neither drops runs nor removes entries from
+ * the branch, so runs before a compaction stay.
  */
-export function mixtureSnapshotTraces(messages: readonly unknown[], entries: readonly unknown[]): Fields[] {
-	const cards = messages.filter((message): message is Fields => record(message) && message.role === "custom" && message.customType === "mixture_trace");
+function afterReset(branch: readonly unknown[]): readonly unknown[] {
+	const boundary = branch.findLastIndex(entry => record(entry) && entry.type === "reset_boundary");
+	return boundary < 0 ? branch : branch.slice(boundary + 1);
+}
+
+/** `branch`: the session's branch entries, root to leaf (`SessionManager.getBranch()`). */
+export function mixtureSnapshotTraces(branch: readonly unknown[]): Fields[] {
+	const entries = afterReset(branch);
+	// Persisted cards are `custom_message` entries; shape them as the transcript's custom messages.
+	const cards: Fields[] = entries.flatMap(entry =>
+		record(entry) && entry.type === "custom_message" && entry.customType === "mixture_trace" && entry.display !== false
+			? [{ role: "custom", customType: "mixture_trace", display: true, content: entry.content, details: entry.details, timestamp: typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : undefined }]
+			: [],
+	);
 	const last = new Map<string, Fields>();
 	for (const card of cards) {
 		const details = card.details;
@@ -96,10 +113,11 @@ export function mixtureSnapshotTraces(messages: readonly unknown[], entries: rea
  * record. NeoPi emits no live event for it, so the bridge sends this after the
  * failed outer response ends.
  */
-export function latestErrorTerminal(messages: readonly unknown[], entries: readonly unknown[]): Fields | undefined {
+export function latestErrorTerminal(branch: readonly unknown[]): Fields | undefined {
+	const entries = afterReset(branch);
 	const lastRecord = entries.findLast(entry => record(entry) && entry.type === "custom" && entry.customType === "mixture_run" && record(entry.data));
 	if (!record(lastRecord) || !record(lastRecord.data) || lastRecord.data.reason !== "error" || !record(lastRecord.data.run)) return undefined;
 	const runId = lastRecord.data.run.id;
-	const cards = mixtureSnapshotTraces(messages, entries);
+	const cards = mixtureSnapshotTraces(entries);
 	return cards.findLast(card => record(card.details) && card.details.runId === runId && card.details.kind === "checkpoint" && card.details.reason === "error");
 }
