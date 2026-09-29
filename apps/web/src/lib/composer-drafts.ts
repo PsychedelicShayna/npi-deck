@@ -18,12 +18,6 @@ export interface ComposerDraft {
 }
 
 /**
- * Most unsent drafts kept. Read-only chats stay in the store until the page
- * reloads, so the drafts touched least recently are dropped past this.
- */
-export const MAX_DRAFTS = 20;
-
-/**
  * Most image bytes held across the drafts of chats not on screen. Past it,
  * the least recently touched drafts lose their images first; their text
  * stays, without the images' placeholders.
@@ -36,7 +30,8 @@ const IMAGE_PLACEHOLDER = /\[Image #\d+\] ?/g;
 /**
  * Unsent composer drafts by session id, oldest-touched first. The composer
  * remounts per session, so text typed for one chat is never sent to another
- * and is still there when the reader switches back.
+ * and is still there when the reader switches back. A draft lives until its
+ * session leaves the store; only its images can be evicted, never its text.
  */
 const drafts = new Map<string, ComposerDraft>();
 
@@ -65,11 +60,6 @@ export function saveDraft(sessionId: string, draft: ComposerDraft): void {
 	drafts.delete(sessionId);
 	if (!draft.text && draft.images.length === 0 && !draft.droppedImages) return;
 	drafts.set(sessionId, draft);
-	for (const [oldest, d] of drafts) {
-		if (drafts.size <= MAX_DRAFTS) break;
-		releaseImages(d.images);
-		drafts.delete(oldest);
-	}
 	// The draft being saved is the one on screen; its images are in the
 	// composer anyway. Older drafts give up theirs, oldest first, and say so
 	// when the reader returns.

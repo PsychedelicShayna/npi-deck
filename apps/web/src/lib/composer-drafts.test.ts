@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { dropDraft, MAX_DRAFTS, readDraft, saveDraft, type PendingImage } from "./composer-drafts";
+import { dropDraft, readDraft, saveDraft, type PendingImage } from "./composer-drafts";
 
 const MiB = 1024 * 1024;
-const ids = Array.from({ length: MAX_DRAFTS + 2 }, (_, i) => `s${i}`);
+const ids = Array.from({ length: 25 }, (_, i) => `s${i}`);
 const originalRevoke = URL.revokeObjectURL;
 let revoked: string[] = [];
 
@@ -20,14 +20,9 @@ function image(name: string, bytes: number): PendingImage {
 	return { id: name, file: new Blob([new Uint8Array(bytes)], { type: "image/png" }), mimeType: "image/png", preview: `blob:${name}` };
 }
 
-test("past the cap, the draft touched least recently is dropped", () => {
-	for (const id of ids.slice(0, MAX_DRAFTS)) saveDraft(id, { text: `draft ${id}`, images: [] });
-	// Reopening s0 makes it recent; s1 is now the oldest.
-	expect(readDraft("s0")?.text).toBe("draft s0");
-	saveDraft(ids[MAX_DRAFTS]!, { text: "one more", images: [] });
-	expect(readDraft("s1")).toBeUndefined();
-	expect(readDraft("s0")?.text).toBe("draft s0");
-	expect(readDraft(ids[MAX_DRAFTS]!)?.text).toBe("one more");
+test("text drafts are never evicted, however many chats have one", () => {
+	for (const id of ids) saveDraft(id, { text: `draft ${id}`, images: [] });
+	expect(ids.map((id) => readDraft(id)?.text)).toEqual(ids.map((id) => `draft ${id}`));
 });
 
 test("an emptied draft is not kept", () => {
