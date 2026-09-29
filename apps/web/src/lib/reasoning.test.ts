@@ -8,7 +8,7 @@ import { createElement } from "react";
 
 import { AssistantMessage } from "../components/messages/AssistantMessage";
 import { applyEvent, initSession } from "./reducer";
-import { reasoningBlockView, unreportedReasoningView } from "./reasoning";
+import { reasoningBlockView, reasoningBlockViews, unreportedReasoningView } from "./reasoning";
 import type { AssistantMsg, RedactedThinkingBlock, ThinkingBlock } from "./types";
 
 const usage = (reasoningTokens?: number) => ({
@@ -97,16 +97,41 @@ describe("reasoning view per shape", () => {
 		expect(reasoningBlockView(reasoningBlocks(msg!)[0]!, msg!)).toEqual({ kind: "withheld", reason: "redacted" });
 	});
 
-	test("an empty block while the turn still streams is pending, then withheld once it ends empty", () => {
-		const block = { type: "thinking", thinking: "", thinkingSignature: codexItem("gAAAAB") };
+	test("an empty streaming block is pending until its encrypted payload lands, even mid-turn", () => {
+		const open = { type: "thinking", thinking: "" };
+		const ended = { ...open, thinkingSignature: codexItem("gAAAAB") };
 		let s = initSession({ sessionId: "s", cwd: "/tmp", isStreaming: true, todoPhases: [], messages: [] } as never);
-		s = applyEvent(s, { type: "message_update", message: { role: "assistant", content: [block] } } as never);
+		s = applyEvent(s, { type: "message_update", message: { role: "assistant", content: [open] } } as never);
 		const live = s.messages[0] as AssistantMsg;
 		expect(reasoningBlockView(reasoningBlocks(live)[0]!, live)).toEqual({ kind: "pending" });
 
-		s = applyEvent(s, { type: "message_end", message: { role: "assistant", content: [block], usage: usage(7) } } as never);
+		const answering = { role: "assistant", content: [ended, { type: "text", text: "ans" }] };
+		s = applyEvent(s, { type: "message_update", message: answering } as never);
+		const midTurn = s.messages[0] as AssistantMsg;
+		expect(midTurn.isStreaming).toBe(true);
+		expect(reasoningBlockView(reasoningBlocks(midTurn)[0]!, midTurn)).toEqual({ kind: "withheld", reason: "encrypted" });
+
+		s = applyEvent(s, { type: "message_end", message: { ...answering, usage: usage(7) } } as never);
 		const done = s.messages[0] as AssistantMsg;
 		expect(reasoningBlockView(reasoningBlocks(done)[0]!, done)).toEqual({ kind: "withheld", reason: "encrypted", tokens: 7 });
+	});
+
+	test("the turn's reasoning token count appears on one withheld block, not on each", () => {
+		const [msg] = reduce({
+			content: [
+				{ type: "thinking", thinking: "plan" },
+				{ type: "thinking", thinking: "", thinkingSignature: codexItem("gAAAAB") },
+				{ type: "text", text: "mid" },
+				{ type: "thinking", thinking: "", thinkingSignature: codexItem("gAAAAC") },
+			],
+			usage: usage(42),
+		});
+		expect(reasoningBlockViews(msg!)).toEqual([
+			{ kind: "text", text: "plan" },
+			{ kind: "withheld", reason: "encrypted", tokens: 42 },
+			undefined,
+			{ kind: "withheld", reason: "encrypted" },
+		]);
 	});
 
 	test("reasoning tokens with no reasoning block are reported for the finished turn only", () => {

@@ -1,7 +1,7 @@
 import type { AssistantMsg, ToolCallStream } from "@/lib/types";
 import { Markdown } from "@/lib/markdown";
 import { formatCost, formatDurationMs, formatTokens } from "@/lib/utils";
-import { reasoningBlockView, unreportedReasoningView } from "@/lib/reasoning";
+import { reasoningBlockView, reasoningBlockViews, unreportedReasoningView } from "@/lib/reasoning";
 import { ReasoningBlock } from "./ThinkingBlock";
 import { ToolCallCard } from "../tools/ToolCallCard";
 
@@ -13,6 +13,7 @@ interface Props {
 export function AssistantMessage({ msg, toolCalls }: Props) {
 	const lastBlockIdx = msg.blocks.length - 1;
 	const unreportedReasoning = unreportedReasoningView(msg);
+	const reasoningViews = reasoningBlockViews(msg);
 
 	return (
 		<div className="space-y-2">
@@ -57,7 +58,8 @@ export function AssistantMessage({ msg, toolCalls }: Props) {
 						);
 					}
 					if (b.type === "thinking" || b.type === "redactedThinking") {
-						return <ReasoningBlock key={i} view={reasoningBlockView(b, msg)} streaming={msg.isStreaming} />;
+						const view = reasoningViews[i] ?? reasoningBlockView(b, msg);
+						return <ReasoningBlock key={i} view={view} streaming={msg.isStreaming} />;
 					}
 					if (b.type === "toolCall") {
 						const stream = toolCalls[b.id];

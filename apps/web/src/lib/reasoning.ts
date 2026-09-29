@@ -30,11 +30,32 @@ export type ReasoningView =
 
 type TurnContext = Pick<AssistantMsg, "isStreaming" | "usage">;
 
+/**
+ * Views for every reasoning block of a turn, indexed like `msg.blocks`
+ * (undefined for non-reasoning blocks). The turn-wide reasoning token count
+ * belongs to the turn, not to any one block, so only the first withheld block
+ * carries it.
+ */
+export function reasoningBlockViews(msg: Pick<AssistantMsg, "isStreaming" | "usage" | "blocks">): (ReasoningView | undefined)[] {
+	let tokensShown = false;
+	return msg.blocks.map((b) => {
+		if (b.type !== "thinking" && b.type !== "redactedThinking") return undefined;
+		const view = reasoningBlockView(b, msg);
+		if (view.kind !== "withheld" || view.tokens === undefined) return view;
+		if (tokensShown) return { kind: "withheld", reason: view.reason };
+		tokensShown = true;
+		return view;
+	});
+}
+
 export function reasoningBlockView(block: ThinkingBlock | RedactedThinkingBlock, turn: TurnContext): ReasoningView {
 	if (block.type === "redactedThinking") return withheld("redacted", turn);
 	if (block.thinking.trim().length > 0) return { kind: "text", text: block.thinking };
+	// A signature arrives at thinking_end, so an encrypted block is final even
+	// while the rest of the turn keeps streaming.
+	if (block.encrypted) return withheld("encrypted", turn);
 	if (turn.isStreaming) return { kind: "pending" };
-	return withheld(block.encrypted ? "encrypted" : "empty", turn);
+	return withheld("empty", turn);
 }
 
 /**
