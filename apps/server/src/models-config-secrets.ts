@@ -122,35 +122,46 @@ const tokenLike = (text: string) => text.length >= MIN_URL_SEGMENT && /\d/.test(
  * the survival checks (never substituted): userinfo, its user and password,
  * every query value and the fragment at any length, and each token-like path
  * segment and host label (MIN_URL_SEGMENT or more characters and holding a
- * digit). Other path segments and host labels (`v1`, `api`, `anthropic`,
- * `openrouter`, `completions`) are not registered, since they are public words
- * that recur in provider names and `api` values and would withhold ordinary
- * files. Accepted limitation: a credential in a host or path that is shorter
- * than that or has no digit can appear elsewhere in the file unnoticed.
+ * digit). Every raw and decoded form of each of those components is also split
+ * on runs of characters outside [A-Za-z0-9._~-], and each token-like piece is
+ * registered too, so a token behind an encoded delimiter
+ * (`/v1%3Ftoken%3Dsk-…`, `?auth=Bearer%20sk-…`) is found. Other path
+ * segments and host labels (`v1`, `api`, `anthropic`, `openrouter`,
+ * `completions`) are not registered, since they are public words that recur in
+ * provider names and `api` values and would withhold ordinary files. Accepted
+ * limitation: a credential in a host or path that is shorter than that or has
+ * no digit can appear elsewhere in the file unnoticed.
  */
 function urlParts(value: string): string[] {
 	const match = /^(?:[^:/?#]+:)?(?:\/\/([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/s.exec(value);
 	if (!match) return [];
 	const [, authority, pathPart, query, fragment] = match;
 	const parts: string[] = [];
+	/** Register a component's forms (all of them, or only token-like ones) and their token-like pieces. */
+	const register = (componentForms: string[], whole: boolean) => {
+		for (const form of componentForms) {
+			if (whole || tokenLike(form)) parts.push(form);
+			for (const piece of form.split(/[^A-Za-z0-9._~-]+/)) if (tokenLike(piece)) parts.push(piece);
+		}
+	};
 	if (authority !== undefined) {
 		const at = authority.lastIndexOf("@");
 		if (at >= 0) {
 			const userinfo = authority.slice(0, at);
 			const colon = userinfo.indexOf(":");
-			for (const piece of colon >= 0 ? [userinfo, userinfo.slice(0, colon), userinfo.slice(colon + 1)] : [userinfo]) parts.push(...forms(piece));
+			for (const piece of colon >= 0 ? [userinfo, userinfo.slice(0, colon), userinfo.slice(colon + 1)] : [userinfo]) register(forms(piece), true);
 		}
 		const host = authority.slice(at + 1).replace(/:\d*$/, "").replace(/^\[|\]$/g, "");
-		for (const label of host.split(".")) for (const form of forms(label)) if (tokenLike(form)) parts.push(form);
+		for (const label of host.split(".")) register(forms(label), false);
 	}
-	for (const segment of (pathPart ?? "").split("/")) for (const form of forms(segment)) if (tokenLike(form)) parts.push(form);
+	for (const segment of (pathPart ?? "").split("/")) register(forms(segment), false);
 	if (query !== undefined) {
 		for (const pair of query.split("&")) {
 			const equals = pair.indexOf("=");
-			parts.push(...forms(equals >= 0 ? pair.slice(equals + 1) : pair, true));
+			register(forms(equals >= 0 ? pair.slice(equals + 1) : pair, true), true);
 		}
 	}
-	if (fragment !== undefined) parts.push(...forms(fragment));
+	if (fragment !== undefined) register(forms(fragment), true);
 	return parts.filter(part => part !== "");
 }
 

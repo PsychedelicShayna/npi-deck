@@ -190,6 +190,8 @@ test("a baseUrl's query value, path token or host label repeated in a shown fiel
 		["encoded query value", provider("gw", "https://gw.test/v1?token=sk%2Dlive%2D456", "gw-model\n        name: sk-live-456"), "sk-live-456"],
 		["path token", provider("gw", "https://gw.test/v1/keys/sk-path-tok-4242", "sk-path-tok-4242"), "sk-path-tok-4242"],
 		["host label", provider("tenant-7f3a9c2e", "https://tenant-7f3a9c2e.gw.test/v1", "gw-model"), "tenant-7f3a9c2e"],
+		["token behind an encoded path delimiter", provider("gw", "https://gw.test/v1%3Ftoken%3Dsk-live-789", "gw-model\n        name: sk-live-789"), "sk-live-789"],
+		["token behind an encoded query space", provider("gw", "https://gw.test/v1?auth=Bearer%20sk-live-321", "gw-model\n        name: sk-live-321"), "sk-live-321"],
 	];
 	for (const [what, file, secret] of cases) {
 		await writeFile(modelsFile, file);
