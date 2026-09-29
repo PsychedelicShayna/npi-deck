@@ -17,6 +17,12 @@ export interface TextBlock {
 export interface ThinkingBlock {
 	type: "thinking";
 	thinking: string;
+	/**
+	 * The provider returned this reasoning as an encrypted payload kept for
+	 * replay (OpenAI Responses `encrypted_content` in `thinkingSignature`).
+	 * Paired with empty `thinking`, the step had no readable summary.
+	 */
+	encrypted?: boolean;
 }
 export interface RedactedThinkingBlock {
 	type: "redactedThinking";

@@ -5,7 +5,9 @@
  * real omp turn. Mounted by App.tsx when `?preview=1` is in the URL.
  */
 
-import type { AssistantContentBlock, ToolCallStream } from "@/lib/types";
+import type { AgentMessageJson } from "@npi-deck/protocol";
+import type { AssistantContentBlock, AssistantMsg, ToolCallStream } from "@/lib/types";
+import { applyEvent, initSession } from "@/lib/reducer";
 import { AssistantMessage } from "./components/messages/AssistantMessage";
 import { UserMessage } from "./components/messages/UserMessage";
 import { ThinkingBlock } from "./components/messages/ThinkingBlock";
@@ -198,6 +200,72 @@ const toolCalls: Record<string, ToolCallStream> = {
 	}),
 };
 
+// Reasoning as NeoPi's providers deliver it (shapes taken from real session
+// transcripts), reduced through the same path as a live snapshot so the
+// gallery exercises the reducer as well as the renderer.
+function reasoningUsage(reasoningTokens?: number) {
+	return {
+		input: 4751,
+		output: 49,
+		cacheRead: 56320,
+		cacheWrite: 0,
+		totalTokens: 61120,
+		...(reasoningTokens === undefined ? {} : { reasoningTokens }),
+		cost: { input: 0.0095, output: 0.0005, cacheRead: 0.0113, cacheWrite: 0, total: 0.0213 },
+	};
+}
+
+const reasoningShapes: Array<[string, AssistantMsg]> = (() => {
+	const codexReasoningItem = JSON.stringify({
+		type: "reasoning",
+		id: "rs_0d95af9a1d5fb81f016aba21473dcc87",
+		summary: [],
+		encrypted_content: "gAAAAABqbkYz3Xk-preview-ciphertext",
+	});
+	const raw: Array<[string, AgentMessageJson]> = [
+		["Readable thinking — Anthropic, signed", {
+			role: "assistant", provider: "anthropic", model: "claude-opus-5-5", stopReason: "stop", usage: reasoningUsage(),
+			content: [
+				{ type: "thinking", thinking: "**Checking the pin**\n\nThe backend tree matches neopi.pin, so the contract run is valid.", thinkingSignature: "EqQBCkYIBxgCKkBpreviewsignature" },
+				{ type: "text", text: "The pin matches." },
+			],
+		}],
+		["Encrypted, no summary — OpenAI Codex (GPT-6 Sol) live", {
+			role: "assistant", provider: "openai-codex", model: "gpt-6-sol", stopReason: "toolUse", usage: reasoningUsage(10),
+			content: [
+				{ type: "thinking", thinking: "", thinkingSignature: codexReasoningItem },
+				{ type: "text", text: "Checking the integrated typecheck." },
+			],
+		}],
+		["Empty block after reload — signature dropped by session persistence", {
+			role: "assistant", provider: "openai-codex", model: "gpt-6-sol", stopReason: "toolUse", usage: reasoningUsage(10),
+			content: [
+				{ type: "thinking", thinking: "" },
+				{ type: "text", text: "Checking the integrated typecheck." },
+			],
+		}],
+		["Redacted — Anthropic redacted_thinking", {
+			role: "assistant", provider: "anthropic", model: "claude-opus-5-5", stopReason: "stop", usage: reasoningUsage(),
+			content: [
+				{ type: "redactedThinking", data: "EmwKAhgBEgy3preview" },
+				{ type: "text", text: "Done." },
+			],
+		}],
+		["Reasoning tokens, no block — nous-portal/openai/gpt-6-sol", {
+			role: "assistant", provider: "nous-portal", model: "openai/gpt-6-sol", stopReason: "stop", usage: reasoningUsage(412),
+			content: [{ type: "text", text: "Upstream PRs 159 and 160 are merged." }],
+		}],
+	];
+	const snapshot = initSession({ sessionId: "preview", cwd: "/tmp", isStreaming: false, todoPhases: [], messages: raw.map(([, m]) => m) });
+	const shapes: Array<[string, AssistantMsg]> = raw.map(([title], i) => [title, snapshot.messages[i] as AssistantMsg]);
+	const live = applyEvent(initSession({ sessionId: "preview-live", cwd: "/tmp", isStreaming: true, todoPhases: [], messages: [] }), {
+		type: "message_update",
+		message: { role: "assistant", provider: "openai-codex", model: "gpt-6-sol", content: [{ type: "thinking", thinking: "" }] },
+	} as never);
+	shapes.push(["Streaming, no text yet", live.messages[0] as AssistantMsg]);
+	return shapes;
+})();
+
 export function PreviewPage() {
 	return (
 		<div className="h-full w-full overflow-y-auto bg-paper">
@@ -255,6 +323,15 @@ export function PreviewPage() {
 					<ThinkingBlock
 						text={`Reasoning step by step\n1. Plan\n2. Execute\n3. Report\n\n**Sub-plan:** explore, then act.`}
 					/>
+				</Section>
+
+				<Section title="Reasoning shapes — every provider variant">
+					{reasoningShapes.map(([title, msg]) => (
+						<div key={title} className="space-y-2">
+							<div className="font-mono text-2xs text-ink-4">{title}</div>
+							<AssistantMessage msg={msg} toolCalls={{}} />
+						</div>
+					))}
 				</Section>
 
 				<Section title="Notices">

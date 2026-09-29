@@ -1,7 +1,8 @@
 import type { AssistantMsg, ToolCallStream } from "@/lib/types";
 import { Markdown } from "@/lib/markdown";
 import { formatCost, formatDurationMs, formatTokens } from "@/lib/utils";
-import { ThinkingBlock } from "./ThinkingBlock";
+import { reasoningBlockView, unreportedReasoningView } from "@/lib/reasoning";
+import { ReasoningBlock } from "./ThinkingBlock";
 import { ToolCallCard } from "../tools/ToolCallCard";
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
 
 export function AssistantMessage({ msg, toolCalls }: Props) {
 	const lastBlockIdx = msg.blocks.length - 1;
+	const unreportedReasoning = unreportedReasoningView(msg);
 
 	return (
 		<div className="space-y-2">
@@ -44,6 +46,7 @@ export function AssistantMessage({ msg, toolCalls }: Props) {
 			) : null}
 
 			<div className="space-y-3">
+				{unreportedReasoning ? <ReasoningBlock view={unreportedReasoning} /> : null}
 				{msg.blocks.map((b, i) => {
 					if (b.type === "text") {
 						const last = i === lastBlockIdx;
@@ -53,18 +56,8 @@ export function AssistantMessage({ msg, toolCalls }: Props) {
 							</Markdown>
 						);
 					}
-					if (b.type === "thinking") {
-						return <ThinkingBlock key={i} text={b.thinking} streaming={msg.isStreaming} />;
-					}
-					if (b.type === "redactedThinking") {
-						return (
-							<ThinkingBlock
-								key={i}
-								text="(redacted thinking)"
-								streaming={false}
-								redacted
-							/>
-						);
+					if (b.type === "thinking" || b.type === "redactedThinking") {
+						return <ReasoningBlock key={i} view={reasoningBlockView(b, msg)} streaming={msg.isStreaming} />;
 					}
 					if (b.type === "toolCall") {
 						const stream = toolCalls[b.id];

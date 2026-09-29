@@ -1,17 +1,33 @@
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, EyeOff } from "lucide-react";
 import { Markdown } from "@/lib/markdown";
-import { cn } from "@/lib/utils";
+import { withheldReasoningNote, type ReasoningView } from "@/lib/reasoning";
+import { cn, formatTokens } from "@/lib/utils";
 
-export function ThinkingBlock({
-	text,
-	streaming,
-	redacted,
-}: {
-	text: string;
-	streaming?: boolean;
-	redacted?: boolean;
-}) {
+/** One reasoning block: readable text expands; hidden reasoning says why instead. */
+export function ReasoningBlock({ view, streaming }: { view: ReasoningView; streaming?: boolean }) {
+	if (view.kind === "text") return <ThinkingBlock text={view.text} streaming={streaming} />;
+	const redacted = view.kind === "withheld" && view.reason === "redacted";
+	return (
+		<div className="border-l-2 border-line-strong pl-2 py-0.5">
+			<div className="flex items-center gap-1.5 font-mono text-2xs uppercase tracking-meta text-thinking">
+				<EyeOff className="h-3 w-3 shrink-0" aria-hidden />
+				<span>{view.kind === "pending" ? "thinking" : redacted ? "redacted thinking" : "reasoning hidden"}</span>
+				{view.kind === "withheld" && view.tokens !== undefined ? (
+					<span className="text-ink-3 normal-case tracking-normal">
+						· {formatTokens(view.tokens)} reasoning tok this turn
+					</span>
+				) : null}
+				{view.kind === "pending" ? <span className="text-accent">· live</span> : null}
+			</div>
+			<div className="pt-0.5 text-xs text-ink-3">
+				{view.kind === "pending" ? "Waiting for reasoning text…" : withheldReasoningNote(view.reason)}
+			</div>
+		</div>
+	);
+}
+
+export function ThinkingBlock({ text, streaming }: { text: string; streaming?: boolean }) {
 	const [open, setOpen] = useState(Boolean(streaming));
 	const lines = text.split(/\r?\n/).length;
 	return (
@@ -24,7 +40,7 @@ export function ThinkingBlock({
 				<ChevronRight
 					className={cn("h-3 w-3 shrink-0 transition-transform", open && "rotate-90")}
 				/>
-				<span>{redacted ? "redacted thinking" : "thinking"}</span>
+				<span>thinking</span>
 				<span className="text-ink-3 normal-case tracking-normal">
 					· {lines} line{lines === 1 ? "" : "s"}
 				</span>

@@ -18,6 +18,7 @@ import type {
 	QueuedPrompt,
 	SessionUi,
 	TextBlock,
+	ThinkingBlock,
 	ToolCallStream,
 	TodoPhase,
 	UsageRollup,
@@ -592,7 +593,9 @@ function extractAssistantBlocks(content: unknown): AssistantContentBlock[] {
 		if (type === "text" && typeof (c as any).text === "string") {
 			out.push({ type: "text", text: (c as any).text });
 		} else if (type === "thinking" && typeof (c as any).thinking === "string") {
-			out.push({ type: "thinking", thinking: (c as any).thinking });
+			const block: ThinkingBlock = { type: "thinking", thinking: (c as any).thinking };
+			if (hasEncryptedReasoning((c as any).thinkingSignature)) block.encrypted = true;
+			out.push(block);
 		} else if (type === "redactedThinking") {
 			out.push({ type: "redactedThinking", data: String((c as any).data ?? "") });
 		} else if (type === "toolCall") {
@@ -610,6 +613,16 @@ function extractAssistantBlocks(content: unknown): AssistantContentBlock[] {
 		}
 	}
 	return out;
+}
+
+/**
+ * OpenAI Responses/Codex store the whole reasoning item as JSON in
+ * `thinkingSignature`; a non-empty `encrypted_content` means the provider
+ * kept the reasoning encrypted. Anthropic signatures are opaque base64 and
+ * chat-completions signatures are field names, so neither matches.
+ */
+function hasEncryptedReasoning(signature: unknown): boolean {
+	return typeof signature === "string" && signature.startsWith("{") && /"encrypted_content":"[^"]/.test(signature);
 }
 
 
