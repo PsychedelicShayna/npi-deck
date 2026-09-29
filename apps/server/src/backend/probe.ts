@@ -6,6 +6,16 @@ import * as path from "node:path";
 import { spawnOwned, spawnOwnedSync, terminateOwned } from "../owned-process.ts";
 import { MANIFEST } from "./manifest.ts";
 import { resolveManifest, formatDiagnostic, type BackendIdentity, type FeatureStatus } from "./runtime.ts";
+import {
+	bunEngineProblem,
+	containsSentinel,
+	NATIVE_RECORD,
+	nativeInputsFingerprint,
+	nativeRecordMismatches,
+	readNativeRecord,
+	sha256,
+	versionSentinel,
+} from "./native-addon.ts";
 import type { FeatureName } from "./manifest.ts";
 export type ProbeResult =
 	| { ok: true; pinned: boolean; identity: BackendIdentity; features: Record<FeatureName, FeatureStatus> }
@@ -13,29 +23,36 @@ export type ProbeResult =
 
 const pin = readFileSync(path.resolve(import.meta.dir, "../../../../neopi.pin"), "utf8").trim();
 
-function sentinelPresent(file: string, sentinel: string): boolean {
-	const bytes = readFileSync(file);
-	let at = 0;
-	while ((at = bytes.indexOf(sentinel, at, "latin1")) !== -1) {
-		const next = bytes[at + sentinel.length];
-		if (next === undefined || !((next >= 48 && next <= 57) || (next >= 65 && next <= 90) || (next >= 97 && next <= 122) || next === 95)) return true;
-		at += sentinel.length;
-	}
-	return false;
-}
-
 async function inspect(tree: string): Promise<ProbeResult> {
 	const pkg = path.join(tree, "packages/coding-agent/package.json");
 	if (!existsSync(pkg)) throw new Error("not a NeoPi source tree: packages/coding-agent/package.json missing");
 	if (!existsSync(path.join(tree, "node_modules/@oh-my-pi/pi-coding-agent"))) throw new Error("tree not prepared: node_modules missing; run scripts/neopi-setup.ts");
-	const nativePkg = JSON.parse(readFileSync(path.join(tree, "packages/natives/package.json"), "utf8")) as { version: string };
-	const sentinel = `__piNativesV${nativePkg.version.replace(/[^A-Za-z0-9]/g, "_")}`;
+	const engine = bunEngineProblem(tree);
+	if (engine) throw new Error(engine);
+	const packageVersion = (JSON.parse(readFileSync(path.join(tree, "packages/natives/package.json"), "utf8")) as { version: string }).version;
+	const sentinel = versionSentinel(packageVersion);
 	const loaderFile = path.join(tree, "packages/natives/native/loader-state.js");
 	if (!existsSync(loaderFile)) throw new Error("tree not prepared: native loader-state.js missing");
-	const loader = (await import(loaderFile)) as { initLoaderContext(): { candidates: string[] } };
-	const candidate = loader.initLoaderContext().candidates.find(existsSync);
+	const loader = (await import(loaderFile)) as {
+		initLoaderContext(): { platformTag: string; addonFilenames: string[]; candidates: string[] };
+	};
+	const ctx = loader.initLoaderContext();
+	const candidate = ctx.candidates.find(existsSync);
 	if (!candidate) throw new Error(`tree not prepared: native addon missing (need ${sentinel})`);
-	if (!sentinelPresent(candidate, sentinel)) throw new Error(`native addon ${candidate} lacks ${sentinel}`);
+	const bytes = readFileSync(candidate);
+	if (!containsSentinel(bytes, sentinel)) throw new Error(`native addon ${candidate} lacks ${sentinel}`);
+	const fix = `re-run scripts/neopi-setup.ts --path ${tree}`;
+	const record = readNativeRecord(tree);
+	if (!record) throw new Error(`native addon ${candidate} has no fingerprint record (${NATIVE_RECORD}); ${fix}`);
+	const inputs = nativeInputsFingerprint(tree);
+	if (!inputs) throw new Error(`cannot fingerprint the native inputs of ${tree}: not a git work tree root`);
+	const problems = nativeRecordMismatches(record, path.basename(candidate), sha256(bytes), {
+		inputs,
+		platformTag: ctx.platformTag,
+		addonFilenames: ctx.addonFilenames,
+		packageVersion,
+	});
+	if (problems.length) throw new Error(`native addon ${candidate} does not match this tree: ${problems.join("; ")}; ${fix}`);
 	const git = spawnOwnedSync(["git", "-C", tree, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
 	if (git.exitCode !== 0) throw new Error(`cannot identify backend git HEAD: ${git.stderr.toString().trim()}`);
 	const commit = git.stdout.toString().trim();

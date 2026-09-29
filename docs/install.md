@@ -59,7 +59,7 @@ An explicit `--source` or `--native-dir` still wins over the variable.
 | [Bun](https://bun.sh) | ≥ 1.3.14 | Runs the deck, the launcher, `neopi-setup` and the web build. |
 | Git | any recent | Clones the deck and adds the NeoPi worktree. |
 | A NeoPi checkout | contains the commit in `neopi.pin` | `neopi-setup` adds its backend tree from it (`--source`). |
-| A prebuilt `pi_natives` addon | matching the tree's `packages/natives` version | `neopi-setup` links it into the tree (`--native-dir`). Without one, `--build-native` builds it, which needs the tree's Rust toolchain. |
+| A prebuilt `pi_natives` addon | built from the same native sources as the tree | `neopi-setup` links it into the tree (`--native-dir`). Without one, `--build-native` builds it, which needs the tree's Rust toolchain. |
 | A systemd user manager | — | The launcher runs the server as a user service. Without one, pass `--no-systemd`; `setpriv` (util-linux) is then used when present. |
 | A modern browser | recent Chrome / Edge / Firefox / Safari | Renders the deck. WebSocket support is required. |
 
@@ -92,16 +92,30 @@ The script:
 
 1. Adds a detached worktree at `~/.npi-deck/neopi/<sha>` from the NeoPi
    checkout (`--source`, or `NPI_DECK_NEOPI_SOURCE`).
-2. Runs `bun install --frozen-lockfile --ignore-scripts` unless
+2. Checks the Bun running the script, and the `bun` on `PATH`, against the
+   tree's `engines.bun` (`packages/utils/package.json`, `>=1.3.14` at the pin)
+   and stops on an older Bun.
+3. Runs `bun install --frozen-lockfile --ignore-scripts` unless
    `--skip-install` was passed, then runs `gen:tool-views` inside the tree.
-3. Links in a prebuilt `pi_natives` addon whose version sentinel matches the
-   tree's `packages/natives` version. It searches `--native-dir` (repeatable)
-   or `NPI_DECK_NATIVE_DIRS` (`:`-separated). `--copy` copies the file
-   instead of symlinking it. If no addon matches, it prints the
-   `build:native` command and exits. `--build-native` runs that build.
-4. Registers the tree under `backends` in `~/.npi-deck/config.yml`, and sets
+4. Provides the `pi_natives` addon. The version sentinel is not enough: every
+   commit of a release carries the same one. The script fingerprints the
+   tree's native inputs (`packages/natives`, `crates`, `Cargo.toml`,
+   `Cargo.lock`, `rust-toolchain.toml`, `.cargo`; tracked and untracked
+   non-ignored files, as they are on disk) and reuses an addon only when it
+   was built from the same fingerprint, for this platform and CPU variant.
+   Evidence for a candidate is, in order: this tree's record for those exact
+   bytes, the record in the checkout holding the file, or that checkout's own
+   native inputs (reported as `derived`: the sources match, the build itself
+   was not observed). It searches `--native-dir` (repeatable) or
+   `NPI_DECK_NATIVE_DIRS` (`:`-separated); `--copy` copies the file instead of
+   symlinking it. If nothing matches, including an addon already in the tree
+   that was built from other sources, it prints the `build:native` command and
+   exits; `--build-native` runs that build. The accepted addon's fingerprint,
+   platform, CPU variant and file sha256 are written to
+   `<tree>/node_modules/.npi-deck/native-addon.json`.
+5. Registers the tree under `backends` in `~/.npi-deck/config.yml`, and sets
    `activeBackend` if it isn't set yet (see [config.yml](#configyml)).
-5. For the pinned commit (or with `--tsconfig`), writes the gitignored
+6. For the pinned commit (or with `--tsconfig`), writes the gitignored
    `tsconfig.neopi.json`. `apps/server` extends it, so typechecking the server
    needs this step first.
 
@@ -138,9 +152,12 @@ The server imports NeoPi from the selected tree at startup. If no backend is
 configured, the deck still starts: kanban, inbox, routine editing and settings
 remain available. Agent-backed endpoints return HTTP 503 with
 `backend_unavailable`. Open **Settings → Backend** to choose a prepared source
-tree. The picker runs an isolated preflight (dependencies, native addon
-version sentinel and required SDK exports) before switching. It reports the
-tree's commit, version and whether it matches `neopi.pin`.
+tree. The picker runs an isolated preflight (Bun engine, dependencies, native
+addon version sentinel and recorded fingerprint, required SDK exports) before
+switching. It reports the tree's commit, version and whether it matches
+`neopi.pin`. A tree prepared before the fingerprint record existed, or whose
+native sources changed since, fails preflight until `neopi-setup` is re-run
+for it.
 
 A normal switch refuses while work is active, listing live sessions and
 prompts without changing the running backend. **Force —
