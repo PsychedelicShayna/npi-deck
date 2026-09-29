@@ -67,6 +67,22 @@ export function renderString(template: string, context: Record<string, unknown>)
 	return stringify(value);
 }
 
+/**
+ * Render every string leaf of a JSON-shaped value (object and array shapes
+ * kept). A leaf that is a single `{{ expr }}` keeps the evaluated type, so
+ * `limit: "{{ state.n }}"` passes a number through.
+ */
+export function renderDeep(value: unknown, context: Record<string, unknown>): unknown {
+	if (typeof value === "string") return render(value, context);
+	if (Array.isArray(value)) return value.map((item) => renderDeep(item, context));
+	if (value && typeof value === "object") {
+		const out: Record<string, unknown> = {};
+		for (const [key, item] of Object.entries(value as Record<string, unknown>)) out[key] = renderDeep(item, context);
+		return out;
+	}
+	return value;
+}
+
 function evalExpression(rawExpr: string, context: Record<string, unknown>): unknown {
 	// Split on `|` for helper application. Path is first segment.
 	const parts = rawExpr.split("|").map((p) => p.trim());

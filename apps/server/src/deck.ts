@@ -307,7 +307,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 						return Response.json(result.body, { status: result.code });
 					} catch (err) { return Response.json({ ok: false, message: String(err) }, { status: 500 }); }
 				}
-				if (!activeBackend() && (/^\/(sessions|workspaces|models|subagents|advisors|auth\/oauth|bridges|skills|marketplace|slash-commands|fs)(\/|$)/.test(endpoint) || /^\/settings\/(providers|models|auth)(\/|$)/.test(endpoint))) {
+				if (!activeBackend() && (/^\/(sessions|workspaces|models|subagents|advisors|auth\/oauth|bridges|skills|marketplace|slash-commands|fs|integrations)(\/|$)/.test(endpoint) || /^\/settings\/(providers|models|auth)(\/|$)/.test(endpoint))) {
 					return Response.json({ error: "backend_unavailable", reason: backendReason ?? "no backend configured" }, { status: 503 });
 				}
 				const trimmed = new URL(req.url);

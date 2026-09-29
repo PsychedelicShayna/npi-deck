@@ -10,7 +10,7 @@
 
 import type { RoutineStep } from "@npi-deck/protocol";
 import { INTERNAL_AUTH_HEADERS, mintInternalToken } from "../internal-auth.ts";
-import { render, renderString } from "../template.ts";
+import { renderDeep, renderString } from "../template.ts";
 import type { RunContext, StepResult } from "../types.ts";
 
 const MAX_EXCERPT = 8 * 1024;
@@ -56,7 +56,7 @@ export async function executeHttpStep(
 				if (!headers.has("content-type")) headers.set("content-type", "text/plain");
 			} else {
 				// Walk object body, template every leaf string.
-				body = JSON.stringify(deepRender(step.body, context as unknown as Record<string, unknown>));
+				body = JSON.stringify(renderDeep(step.body, context as unknown as Record<string, unknown>));
 				if (!headers.has("content-type")) headers.set("content-type", "application/json");
 			}
 		}
@@ -118,17 +118,4 @@ export async function executeHttpStep(
 			durationMs: Date.now() - startedMs,
 		};
 	}
-}
-
-function deepRender(value: unknown, ctx: Record<string, unknown>): unknown {
-	if (typeof value === "string") return render(value, ctx);
-	if (Array.isArray(value)) return value.map((v) => deepRender(v, ctx));
-	if (value && typeof value === "object") {
-		const out: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-			out[k] = deepRender(v, ctx);
-		}
-		return out;
-	}
-	return value;
 }

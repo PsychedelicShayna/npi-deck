@@ -47,6 +47,9 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/mcp/config-writer": typeof import("@oh-my-pi/pi-coding-agent/mcp/config-writer");
 	"@oh-my-pi/pi-coding-agent/mcp/settings": typeof import("@oh-my-pi/pi-coding-agent/mcp/settings");
 	"@oh-my-pi/pi-coding-agent/capability/mcp": typeof import("@oh-my-pi/pi-coding-agent/capability/mcp");
+	// #26 routine `mcp` steps and the Integrations page call tools without a chat.
+	"@oh-my-pi/pi-coding-agent/mcp/client": typeof import("@oh-my-pi/pi-coding-agent/mcp/client");
+	"@oh-my-pi/pi-coding-agent/mcp/manager": typeof import("@oh-my-pi/pi-coding-agent/mcp/manager");
 	"@oh-my-pi/pi-coding-agent/capability/fs": typeof import("@oh-my-pi/pi-coding-agent/capability/fs");
 	"@oh-my-pi/pi-coding-agent/discovery": typeof import("@oh-my-pi/pi-coding-agent/discovery");
 	"@oh-my-pi/pi-coding-agent/extensibility/settings": typeof import("@oh-my-pi/pi-coding-agent/extensibility/settings");
@@ -303,6 +306,27 @@ export const MANIFEST = {
 				"@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime",
 				"applyMcpToggleRuntime",
 			),
+		},
+	},
+	/**
+	 * #26: call one MCP tool without a chat, for routine `mcp` steps and the
+	 * Integrations page. NeoPi's discovery picks the servers a chat in the same
+	 * workspace would start; its MCP manager resolves `!command` values and
+	 * stored OAuth tokens; its client connects, lists and calls.
+	 */
+	"mcp-calls": {
+		tier: "optional-feature",
+		consumers: ["mcp-headless.ts"],
+		exports: {
+			MCPManager: op("@oh-my-pi/pi-coding-agent/mcp/manager", "MCPManager"),
+			connectToServer: op("@oh-my-pi/pi-coding-agent/mcp/client", "connectToServer"),
+			listTools: op("@oh-my-pi/pi-coding-agent/mcp/client", "listTools"),
+			callTool: op("@oh-my-pi/pi-coding-agent/mcp/client", "callTool"),
+			disconnectServer: op("@oh-my-pi/pi-coding-agent/mcp/client", "disconnectServer"),
+			loadAllMCPConfigs: op("@oh-my-pi/pi-coding-agent/mcp/config", "loadAllMCPConfigs"),
+			validateServerConfig: op("@oh-my-pi/pi-coding-agent/mcp/config", "validateServerConfig"),
+			cfgMcpEnableProjectConfig: op("@oh-my-pi/pi-coding-agent/mcp/settings", "cfgMcpEnableProjectConfig"),
+			clearFsCache: op("@oh-my-pi/pi-coding-agent/capability/fs", "clearCache"),
 		},
 	},
 	/** neopi#122: runtime-snapshotted source identity; git remains the fallback for older trees. */

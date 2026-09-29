@@ -434,7 +434,7 @@ async function dispatchStep(
 		case "deck":
 			return executeDeckStep(step, context, signal);
 		case "mcp":
-			return executeMcpStep(step, context, signal);
+			return executeMcpStep(step, context, signal, routineCwd);
 		case "transform":
 			return executeTransformStep(step, context, signal);
 		case "wait":

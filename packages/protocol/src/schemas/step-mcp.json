@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://npi-deck.app/schemas/step-mcp.json",
   "title": "RoutineStep — mcp",
-  "description": "Deterministic MCP tool call. The named server must be installed via /mcp install. Args are validated against the tool's input schema (cached from tools/list) at runtime before invocation.",
+  "description": "Deterministic MCP tool call. The server is resolved the way a chat opened in the routine's cwd would resolve it (Settings → MCP servers), connected for the step and closed after. Args are validated against the tool's input schema from tools/list before the call.",
   "type": "object",
   "allOf": [
     { "$ref": "https://npi-deck.app/schemas/step-common.json" },
@@ -14,7 +14,7 @@
         "server": {
           "type": "string",
           "minLength": 1,
-          "description": "MCP server id as registered with the omp SDK's MCP client. In V1.5+ the Integrations page surfaces installed servers; for V1 this is a free-form string."
+          "description": "MCP server name as NeoPi's discovery reports it for the routine's cwd. The Integrations page lists enabled servers and their tools."
         },
         "tool": {
           "type": "string",

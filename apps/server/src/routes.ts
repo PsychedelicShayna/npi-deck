@@ -38,6 +38,7 @@ import { buildSubagentsRouter } from "./routes-subagents.ts";
 import { buildAdvisorsRouter } from "./routes-advisors.ts";
 import { buildModelsConfigRouter } from "./routes-models-config.ts";
 import { buildNpiConfigRouter } from "./routes-npi-config.ts";
+import { buildIntegrationsRouter } from "./routes-integrations.ts";
 import { buildMcpServersRouter } from "./routes-mcp-servers.ts";
 import { buildMixturesRouter } from "./routes-mixtures.ts";
 import { buildFallbackChainRouter } from "./routes-fallback-chain.ts";
@@ -287,6 +288,7 @@ export function buildRouter(
 	app.route("/", buildModelsConfigRouter());
 	app.route("/", buildNpiConfigRouter(bridge, config));
 	app.route("/", buildMcpServersRouter(bridge, config));
+	app.route("/", buildIntegrationsRouter(config));
 	app.route("/", buildMixturesRouter(bridge, config));
 	app.route("/", buildFallbackChainRouter(bridge));
 

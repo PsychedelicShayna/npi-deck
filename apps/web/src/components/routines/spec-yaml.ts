@@ -392,6 +392,6 @@ export const STEP_TYPE_DESCRIPTIONS: ReadonlyArray<StepTemplateDescriptor> = [
 	{ key: "transform", value: "transform", label: "transform", help: "JS expression in a sandbox; sets context.steps.X.json." },
 	{ key: "set_state", value: "set_state", label: "set_state", help: "Upsert keys into the routine's persistent state." },
 	{ key: "wait", value: "wait", label: "wait", help: "Sleep N seconds. Useful between polling steps." },
-	{ key: "mcp", value: "mcp", label: "mcp", help: "Invoke an MCP server tool. V1.5 — currently stubbed." },
+	{ key: "mcp", value: "mcp", label: "mcp", help: "Call one MCP server tool directly; args are checked against its input schema." },
 	{ key: "if", value: "transform", label: "if", help: "Branch the graph on a boolean condition. Wire downstream nodes to the true/false outputs.", presetKind: "if" },
 ];

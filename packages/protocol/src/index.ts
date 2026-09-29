@@ -2310,3 +2310,41 @@ export interface McpServerMutationResponse {
 	applyNote: string;
 	live: McpLiveApply[];
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Integrations: the MCP servers and tools a routine `mcp` step can call
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One tool a server advertised in `tools/list`. */
+export interface McpIntegrationTool {
+	name: string;
+	title?: string;
+	description?: string;
+	/** The JSON Schema an `mcp` step's `args` is validated against. */
+	inputSchema: Record<string, unknown>;
+}
+
+/**
+ * One enabled server, connected once for this listing and closed again. A
+ * failure carries NeoPi's reason with every config credential scrubbed out.
+ */
+export interface McpIntegrationServer {
+	name: string;
+	transport: McpTransport;
+	/** The config file that defines it, and its scope as NeoPi reports it. */
+	sourcePath?: string;
+	level?: "user" | "project" | "native";
+	providerName?: string;
+	status: "connected" | "failed";
+	error?: string;
+	/** The server's own name and version from `initialize`. */
+	serverInfo?: { name: string; version: string };
+	tools: McpIntegrationTool[];
+}
+
+export interface McpIntegrationsResponse {
+	/** Workspace whose servers were discovered (the deck's default cwd). */
+	cwd: string;
+	checkedAt: string;
+	servers: McpIntegrationServer[];
+}

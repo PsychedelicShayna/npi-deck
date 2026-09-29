@@ -4,6 +4,7 @@
  * on_failure, retry, timeout_secs) live in <StepCommonFields/>; this file only
  * renders the type-specific tail.
  */
+import { Link } from "react-router-dom";
 import type { RoutineStep } from "@npi-deck/protocol";
 
 import { Field, KeyValueEditor, NumInput, TagInput, TextArea, TextInput } from "./form-primitives";
@@ -578,9 +579,10 @@ export function McpStepForm({ step, onChange }: FormProps<"mcp">) {
 	}
 	return (
 		<div className="space-y-2">
-			<div className="rounded border border-warn/40 bg-warn/5 px-2 py-1.5 font-mono text-2xs text-warn">
-				The <code>mcp</code> step type is stubbed in V1. Runs will fail with a clear V1.5 pointer.
-				Use an <code>agent</code> step with <code>mcp_servers_allowed</code> for now.
+			<div className="rounded border border-line bg-paper-2 px-2 py-1.5 font-mono text-2xs text-ink-3">
+				Calls one tool on a server enabled for the routine's cwd, without a model. <code>args</code> are
+				templated, then checked against the tool's input schema. Servers and their tools are listed on the{" "}
+				<Link to="/integrations" className="text-accent hover:underline">Integrations</Link> page.
 			</div>
 			<div className="grid grid-cols-2 gap-2">
 				<Field label="server">

@@ -64,7 +64,7 @@ templating).
 | `transform` | JS expression in a quickjs sandbox; sets `steps.<id>.json`                               |
 | `set_state` | UPSERT key/value pairs into the routine's persistent state                               |
 | `wait`      | sleep N seconds (useful between polling steps)                                           |
-| `mcp`       | invoke an MCP server tool — stubbed in V1, lands in V1.5                                 |
+| `mcp`       | call one MCP server tool directly (no model); see [The `mcp` step](#the-mcp-step)         |
 
 Every step type has the shared fields:
 
@@ -94,6 +94,41 @@ Helpers: `{{ steps.X.json | json }}` (JSON-stringify), `{{ items | length }}`.
 
 In a single-expression payload (e.g. an HTTP body), the value is preserved
 as its native type, not coerced to a string.
+
+## The `mcp` step
+
+```yaml
+- id: issues
+  type: mcp
+  server: github          # a server enabled for the routine's cwd
+  tool: search_issues     # a tool that server advertises
+  args:
+    query: "repo:me/app is:open label:{{ trigger.label }}"
+    per_page: "{{ state.page_size }}"   # a lone {{ }} keeps its type
+```
+
+- The server is found the way a chat opened in the routine's cwd (its
+  `actionCwd`, else the deck's default cwd) would find it: user and project
+  `mcp.json`, other tools' configs, the deny and force-enable lists,
+  `mcp.enableProjectConfig` and `mcp.includeServers`. A routine does not
+  borrow a live chat's MCP connection; routines run from cron and webhooks
+  with no chat open. The step connects the server, makes the call and closes
+  it, so every attempt (retries included) gets a fresh server process.
+- `args` are templated, then validated against the tool's input schema
+  before anything is sent. If the tool's schema cannot be compiled, the call
+  goes out anyway and `stderr` says local validation was skipped.
+- The step's timeout (`timeout_secs`, default 60) and cancelling the run both
+  abort the handshake or the call and stop the server.
+- `steps.<id>.stdout` holds the text content; `steps.<id>.json` holds
+  `{ content, structuredContent?, isError? }`, with image and audio data
+  replaced by its size. A result with `isError: true` fails the step with the
+  tool's text.
+- Values from the server's config that can be credentials (env and header
+  values, URL parts, the value after a key-shaped flag, resolved `!command`
+  and OAuth tokens) are replaced with `••••••` in everything the step records,
+  even when the server echoes them back.
+- **Integrations** lists every enabled server for the deck's workspace with
+  its tools and input schemas, and a step snippet for each tool.
 
 ## Triggers
 
@@ -266,7 +301,7 @@ errors if anything is off.
 
 ## Limitations in V1
 
-- The `mcp` step type is **stubbed**. For `agent` steps, omitting
+- For `agent` steps, omitting
   `mcp_servers_allowed` inherits the backend's configured MCP servers; `[]`
   disables them. Any explicit MCP restriction requires a probed backend with
   NeoPi's `mcp.includeServers` and `--mcp`/`--no-mcp` support (neopi#120);
@@ -290,8 +325,8 @@ errors if anything is off.
 - Workspace MCP integration: Gmail / Calendar / Drive / Docs via the
   [taylorwilsdon/google_workspace_mcp](https://github.com/taylorwilsdon/google_workspace_mcp)
   server. Inbox-triager is the V1.5 proof point.
-- Real `mcp` step type with `server` + `tool` dropdowns sourced from
-  installed MCP servers.
+- `server` + `tool` dropdowns in the `mcp` step form, sourced from the
+  Integrations listing (today they are typed by name).
 - Drag-and-drop step reordering with smart warnings when a reorder breaks
   a downstream context reference.
 - Per-step "Test this step" runner against the last-run context.

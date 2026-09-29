@@ -27,20 +27,13 @@ import { feature, sdk } from "./backend/runtime.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
+import { REDACTED, SECRET_FLAG, isSecretFlag } from "./mcp-secrets.ts";
 
 const log = logger("routes:mcp-servers");
 // A JSON parse failure quotes the offending text, which can be a header or env
 // value. Clients get this sentence; the deck log keeps the real error.
 const LOAD_FAILED = "NeoPi could not read the MCP configuration; the deck server log has the details.";
 const WRITE_FAILED = "NeoPi could not save the MCP configuration; the deck server log has the details.";
-
-/**
- * A flag whose argument is a credential. Used only to decide what to hide;
- * anything it misses is still safe, because values the deck shows are limited
- * to arguments and URLs the user typed, and env/header values are never sent.
- */
-const SECRET_FLAG = /(key|token|secret|password|passwd|credential|auth|cookie|session|bearer|pat)/i;
-const REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
 /**
  * Key for entry revisions, private to this process. A revision must not be a
@@ -308,11 +301,6 @@ function mergeEntries(
 		out[key] = stored;
 	}
 	return Object.keys(out).length > 0 ? out : undefined;
-}
-
-/** An argument that is a credential only because a `--api-key`-shaped flag precedes it. */
-function isSecretFlag(arg: string | undefined): boolean {
-	return arg !== undefined && arg.startsWith("-") && !arg.includes("=") && SECRET_FLAG.test(arg);
 }
 
 /**

@@ -556,6 +556,42 @@ await check("MCP servers: list every source, write one scope, toggle, apply live
 	}
 });
 
+await check("MCP calls: discover, resolve, connect, list and call one tool without a chat", [
+	"MCPManager", "connectToServer", "listTools", "callTool", "disconnectServer",
+	"loadAllMCPConfigs", "validateServerConfig", "cfgMcpEnableProjectConfig", "clearFsCache",
+], async () => {
+	const calls = feature("mcp-calls");
+	const cwd = mkdir("root-mcp-calls");
+	const fixture = path.join(import.meta.dir, "../routines/steps/mcp-test-server.ts");
+	const events = path.join(cwd, "events.jsonl");
+	mkdirSync(path.join(cwd, ".omp"), { recursive: true });
+	writeFileSync(path.join(cwd, ".omp", "mcp.json"), JSON.stringify({
+		mcpServers: { "contract-calls": { type: "stdio", command: process.execPath, args: [fixture, events], env: { FAKE_TOKEN: "CONTRACT_MCP_TOKEN" } } },
+	}));
+	process.env.CONTRACT_MCP_TOKEN = "contract-resolved-token";
+	calls.clearFsCache();
+	const settings = await core.Settings.loadReadOnly({ cwd, agentDir });
+	const { configs } = await calls.loadAllMCPConfigs(cwd, { enableProjectConfig: calls.cfgMcpEnableProjectConfig.get(settings), filterExa: false });
+	const config = configs["contract-calls"];
+	assert(config, `discovery missed the project server: ${Object.keys(configs).join(",")}`);
+	assert(calls.validateServerConfig("contract-calls", config).length === 0, "a valid stdio entry failed validation");
+	const manager = new calls.MCPManager(cwd);
+	const resolved = await manager.prepareConfig(config);
+	assert(resolved.type !== "http" && resolved.type !== "sse" && resolved.env?.FAKE_TOKEN === "contract-resolved-token",
+		"prepareConfig did not resolve an env-name value");
+	const connection = await calls.connectToServer("contract-calls", resolved, { signal: AbortSignal.timeout(10_000) });
+	try {
+		const tools = await calls.listTools(connection);
+		assert(tools.some(tool => tool.name === "echo" && tool.inputSchema.type === "object"), "tools/list lacks echo");
+		const reply = await calls.callTool(connection, "echo", { text: "contract" });
+		assert(reply.content[0]?.type === "text" && (reply.content[0] as { text: string }).text === "contract", `tools/call returned ${JSON.stringify(reply)}`);
+	} finally {
+		await calls.disconnectServer(connection);
+		delete process.env.CONTRACT_MCP_TOKEN;
+	}
+	return `connected ${connection.serverInfo.name} ${connection.serverInfo.version}; env name resolved; echo called; disconnected`;
+});
+
 await check("commands: builtin registry, ACP dispatch, session commands", [
 	"BUILTIN_SLASH_COMMAND_DEFS",
 	"ACP_BUILTIN_SLASH_COMMANDS",

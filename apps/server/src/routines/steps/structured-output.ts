@@ -19,24 +19,28 @@ function message(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/** What a check reports on; each message starts with it. */
+export const STRUCTURED_OUTPUT_SUBJECT = "structured_output";
+
 /**
  * Compile the schema, parse the answer, then validate it; each failure class
  * reports separately. Synchronous and unbounded: a routine-supplied `pattern`
  * can backtrack for seconds, so the server only calls this on a worker thread
- * through {@link checkStructuredOutput}.
+ * through {@link checkStructuredOutput}. `subject` names the value in messages
+ * (an `mcp` step checks its tool arguments the same way).
  */
-export function checkStructuredOutputSync(schema: unknown, answer: string): StructuredOutputCheck {
+export function checkStructuredOutputSync(schema: unknown, answer: string, subject = STRUCTURED_OUTPUT_SUBJECT): StructuredOutputCheck {
 	let validate: ReturnType<typeof compileStructuredOutputSchema>;
 	try {
 		validate = compileStructuredOutputSchema(schema);
 	} catch (error) {
-		return { ok: false, kind: "schema", error: `structured_output schema could not be compiled: ${message(error)}` };
+		return { ok: false, kind: "schema", error: `${subject} schema could not be compiled: ${message(error)}` };
 	}
 	let json: unknown;
 	try {
 		json = JSON.parse(answer);
 	} catch (error) {
-		return { ok: false, kind: "parse", error: `structured_output is not valid JSON: ${message(error)}` };
+		return { ok: false, kind: "parse", error: `${subject} is not valid JSON: ${message(error)}` };
 	}
 	const validation = validate(json);
 	if (validation.valid) return { ok: true, json };
@@ -46,7 +50,7 @@ export function checkStructuredOutputSync(schema: unknown, answer: string): Stru
 		return `${error.path} ${error.message}${property}`;
 	});
 	if (errors.length > MAX_REPORTED_SCHEMA_ERRORS) described.push(`(+${errors.length - MAX_REPORTED_SCHEMA_ERRORS} more)`);
-	return { ok: false, kind: "mismatch", error: `structured_output does not match schema: ${described.join("; ")}` };
+	return { ok: false, kind: "mismatch", error: `${subject} does not match schema: ${described.join("; ")}` };
 }
 
 /**
@@ -60,9 +64,14 @@ const WORKER_URL = new URL(import.meta.url.endsWith(".ts") ? "./structured-outpu
  * {@link checkStructuredOutputSync} on a fresh worker thread, terminated after
  * `timeoutMs` so a pathological schema cannot stall the server's event loop.
  */
-export function checkStructuredOutput(schema: unknown, answer: string, timeoutMs = STRUCTURED_OUTPUT_TIMEOUT_MS): Promise<StructuredOutputCheck> {
+export function checkStructuredOutput(
+	schema: unknown,
+	answer: string,
+	{ timeoutMs = STRUCTURED_OUTPUT_TIMEOUT_MS, subject = STRUCTURED_OUTPUT_SUBJECT }: { timeoutMs?: number; subject?: string } = {},
+): Promise<StructuredOutputCheck> {
 	if (answer.length > MAX_STRUCTURED_ANSWER_CHARS) {
-		return Promise.resolve({ ok: false, kind: "size", error: `structured_output answer is ${answer.length} characters; the limit is ${MAX_STRUCTURED_ANSWER_CHARS}` });
+		const value = subject === STRUCTURED_OUTPUT_SUBJECT ? "structured_output answer" : subject;
+		return Promise.resolve({ ok: false, kind: "size", error: `${value} is ${answer.length} characters; the limit is ${MAX_STRUCTURED_ANSWER_CHARS}` });
 	}
 	return new Promise(resolve => {
 		const worker = new Worker(WORKER_URL);
@@ -74,10 +83,10 @@ export function checkStructuredOutput(schema: unknown, answer: string, timeoutMs
 			worker.terminate();
 			resolve(check);
 		};
-		const timer = setTimeout(() => finish({ ok: false, kind: "timeout", error: `structured_output validation timed out after ${timeoutMs} ms` }), timeoutMs);
+		const timer = setTimeout(() => finish({ ok: false, kind: "timeout", error: `${subject} validation timed out after ${timeoutMs} ms` }), timeoutMs);
 		worker.addEventListener("message", (event: MessageEvent<StructuredOutputCheck>) => finish(event.data));
-		worker.addEventListener("error", (event: ErrorEvent) => finish({ ok: false, kind: "worker", error: `structured_output validation failed: ${event.message}` }));
-		worker.addEventListener("close", () => finish({ ok: false, kind: "worker", error: "structured_output validation worker exited without a result" }));
-		worker.postMessage({ schema, answer });
+		worker.addEventListener("error", (event: ErrorEvent) => finish({ ok: false, kind: "worker", error: `${subject} validation failed: ${event.message}` }));
+		worker.addEventListener("close", () => finish({ ok: false, kind: "worker", error: `${subject} validation worker exited without a result` }));
+		worker.postMessage({ schema, answer, subject });
 	});
 }
