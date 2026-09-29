@@ -13,10 +13,22 @@ install updates.
 git clone https://github.com/PsychedelicShayna/npi-deck.git
 cd npi-deck
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts                        # prepare the pinned NeoPi tree, register it in config.yml
+# prepare the pinned NeoPi tree and register it in ~/.npi-deck/config.yml
+bun scripts/neopi-setup.ts --source /path/to/neopi --native-dir /path/to/prebuilt-natives
+#   no prebuilt addon? replace --native-dir … with --build-native (cold Rust build)
+mkdir -p ~/.local/bin
 ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck   # once
 npi-deck                                          # http://127.0.0.1:1701
 ```
+
+Without flags, `neopi-setup` falls back to the maintainer's layout:
+`--source` defaults to `~/source/github/PsychedelicShayna/neopi` (env
+`NPI_DECK_NEOPI_SOURCE`) and `--native-dir` to
+`~/source/github/PsychedelicShayna/neopi-sync-v18.3.2` (env
+`NPI_DECK_NATIVE_DIRS`, `:`-separated). Pass both unless your checkouts live
+there. `--native-dir` is searched only when the tree has no matching addon
+yet, both directly and under `packages/natives/native`, so a NeoPi checkout
+that has run `build:native` works as the directory.
 
 - [Prerequisites](#prerequisites)
 - [NeoPi backend tree](#neopi-backend-tree)
@@ -35,8 +47,8 @@ npi-deck                                          # http://127.0.0.1:1701
 |---|---|---|
 | [Bun](https://bun.sh) | ≥ 1.3.14 | Runs the deck, the launcher, `neopi-setup` and the web build. |
 | Git | any recent | Clones the deck and adds the NeoPi worktree. |
-| A NeoPi checkout | contains the commit in `neopi.pin` | `neopi-setup` adds its backend tree from it. |
-| A prebuilt `pi_natives` addon | matching the tree's `packages/natives` version | Or pass `--build-native` to build one. |
+| A NeoPi checkout | contains the commit in `neopi.pin` | `neopi-setup` adds its backend tree from it (`--source`). |
+| A prebuilt `pi_natives` addon | matching the tree's `packages/natives` version | `neopi-setup` links it into the tree (`--native-dir`). Without one, `--build-native` builds it, which needs the tree's Rust toolchain. |
 | A systemd user manager | — | The launcher runs the server as a user service. Without one, pass `--no-systemd`; `setpriv` (util-linux) is then used when present. |
 | A modern browser | recent Chrome / Edge / Firefox / Safari | Renders the deck. WebSocket support is required. |
 

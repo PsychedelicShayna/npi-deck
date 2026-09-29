@@ -62,18 +62,21 @@ NPI deck is the cockpit that holds all of that. The chat surface stays at parity
 
 NPI deck runs one way: from a git checkout, with a NeoPi source tree prepared by `scripts/neopi-setup.ts` and registered in `~/.npi-deck/config.yml`, started by the `npi-deck` launcher. There is no npm package, Docker image, or Windows launcher, and the deck does not check for updates.
 
-**Prerequisites:** [Bun](https://bun.sh) ≥ 1.3.14 and Git on your `PATH`, a NeoPi checkout for `scripts/neopi-setup.ts` to build from (see [docs/install.md](./docs/install.md#neopi-backend-tree)), and a systemd user manager (or run the launcher with `--no-systemd`).
+**Prerequisites:** [Bun](https://bun.sh) ≥ 1.3.14 and Git on your `PATH`; a NeoPi checkout that contains the commit in `neopi.pin`; a prebuilt `pi_natives` addon matching that commit's `packages/natives` version (or a Rust toolchain for `--build-native`); and a systemd user manager (or run the launcher with `--no-systemd`). See [docs/install.md](./docs/install.md#prerequisites).
 
 ```sh
 git clone https://github.com/PsychedelicShayna/npi-deck.git
 cd npi-deck
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts                        # prepare the pinned NeoPi tree, register it in config.yml
+# prepare the pinned NeoPi tree and register it in ~/.npi-deck/config.yml
+bun scripts/neopi-setup.ts --source /path/to/neopi --native-dir /path/to/prebuilt-natives
+#   no prebuilt addon? replace --native-dir … with --build-native (cold Rust build)
+mkdir -p ~/.local/bin
 ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck   # once
 npi-deck
 ```
 
-`neopi-setup` adds a worktree of the commit in `neopi.pin` under `~/.npi-deck/neopi/`, links its native addon, and records it under `backends` in `~/.npi-deck/config.yml`, making it `activeBackend` if none is set; see [config.yml](./docs/install.md#configyml). `npi-deck` builds the web bundle if needed and serves the deck on <http://127.0.0.1:1701> as the systemd user service `npi-deck` in `neopi-deck.slice`; Ctrl-C stops it, and anything the deck spawned dies with it. See [the launcher](./docs/install.md#the-npi-deck-launcher). For working on the deck itself, `bun run dev` starts an unsupervised server on :1701 and the Vite app with hot reload on <http://127.0.0.1:5173>; see [CONTRIBUTING.md](./CONTRIBUTING.md).
+Without flags, `--source` defaults to `~/source/github/PsychedelicShayna/neopi` (env `NPI_DECK_NEOPI_SOURCE`) and `--native-dir` to `~/source/github/PsychedelicShayna/neopi-sync-v18.3.2` (env `NPI_DECK_NATIVE_DIRS`), the maintainer's layout; pass both unless your checkouts live there. `neopi-setup` adds a worktree of the commit in `neopi.pin` under `~/.npi-deck/neopi/`, links the matching native addon into it, and records it under `backends` in `~/.npi-deck/config.yml`, making it `activeBackend` if none is set; see [the backend tree](./docs/install.md#neopi-backend-tree) and [config.yml](./docs/install.md#configyml). `npi-deck` builds the web bundle if needed and serves the deck on <http://127.0.0.1:1701> as the systemd user service `npi-deck` in `neopi-deck.slice`; Ctrl-C stops it, and anything the deck spawned dies with it. See [the launcher](./docs/install.md#the-npi-deck-launcher). For working on the deck itself, `bun run dev` starts an unsupervised server on :1701 and the Vite app with hot reload on <http://127.0.0.1:5173>; see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 On first run, the deck creates `~/.omp/agent/` from scratch; its own state lives in `~/.npi-deck/` (override with `NPI_DECK_HOME`). If you already use `omp` in a terminal on this machine, your existing `~/.omp/agent` is picked up automatically — no re-auth.
 

@@ -14,7 +14,7 @@ How to update your install, what changed, what might break, and how to roll back
 
 ## The general upgrade procedure
 
-npi-deck never auto-updates, never checks for updates, never migrates your data without your explicit say-so, and never replaces user-edited files. Upgrades are an explicit `git pull` you run in your checkout, followed by a launcher restart. There is no npm package, Docker image, or Windows launcher.
+npi-deck never auto-updates, never checks for updates, and never replaces user-edited files. Moving legacy omp-deck state (`~/.omp-deck`, `~/.config/omp-deck`) into `~/.npi-deck` is opt-in: `bun scripts/migrate-omp-deck.ts` only reports what it would do until you pass `--apply`. SQLite schema migrations are different: they run automatically on the first boot of a newer deck (see below). Upgrades are an explicit `git pull` you run in your checkout, followed by a launcher restart. There is no npm package, Docker image, or Windows launcher.
 
 ```sh
 cd /path/to/your/npi-deck/checkout
@@ -53,7 +53,7 @@ Unreleased. npi-deck is a hard fork of omp-deck and drops every upstream distrib
 - **No npm package.** `omp-deck` from npm, its `omp-deck` CLI shim and its in-app "update available" pill are gone. Remove the global `omp-deck` package with the package manager you installed it with, then install from a checkout as in [install.md](./install.md).
 - **No Docker image and no Windows launcher.** `Dockerfile`, `docker-compose.yml`, `Start-OMP-Deck.cmd` and the `scripts/*.ps1` helpers were deleted. The `npi-deck` launcher (systemd user service, or `--no-systemd`) is the only supported way to run the deck.
 - **NeoPi comes from a source tree**, prepared by `bun scripts/neopi-setup.ts` and registered in `~/.npi-deck/config.yml`; the deck no longer depends on `@oh-my-pi/*` packages.
-- **New data dir and env names.** Deck state lives in `~/.npi-deck`, and every `OMP_DECK_*` variable is now `NPI_DECK_*`. Old `~/.omp-deck` data is not read.
+- **New data dir and env names.** Deck state lives in `~/.npi-deck`, and every `OMP_DECK_*` variable is now `NPI_DECK_*`. Old `~/.omp-deck` data is not read; `bun scripts/migrate-omp-deck.ts` copies it over, renaming the env keys, when you pass `--apply` (without it, the script is a dry run). It leaves the old dirs in place and refuses to overwrite a `~/.npi-deck` that already holds deck state (a database, uploads, `.env`, …).
 
 ---
 

@@ -235,6 +235,7 @@
 </head>
 <body>
   <div class="wrap">
+    <div class="callout"><strong>Historical.</strong> This is an upstream omp-deck proposal, kept for reference. npi-deck has no Docker support: the <code>Dockerfile</code> and <code>docker-compose.yml</code> it refers to were removed in #51, and the deck runs only from a checkout through the <code>npi-deck</code> launcher (see <code>docs/install.md</code>).</div>
     <div class="doc-meta">Architecture proposal · v0.1 · companion to AgentVolt V0</div>
     <h1>omp-deck Managed Hosting — V0 Implementation Proposal</h1>
     <p class="sub">Hosted, per-tenant omp-deck on Hetzner. BYOK + flat subscription. MIT source, exit-path-friendly. Same chassis as AgentVolt V0 minus the inference gateway and billing ledger. Designed to scale to 1000 customers without rework. Different audience than AgentVolt: developers who want their omp-deck always-on, on a tier of compute they don't have to maintain.</p>
