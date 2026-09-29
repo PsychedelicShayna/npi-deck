@@ -17,8 +17,11 @@ function textOf(message: AgentMessageJson): string {
 	return "";
 }
 
+// One shared empty list: a fresh `[]` per store read makes useSyncExternalStore re-render forever.
+const NO_NODES: SubagentNode[] = [];
+
 export function SubagentTreePanel({ sessionId }: { sessionId: string }) {
-	const nodes = useStore(s => s.subagentsBySession[sessionId] ?? []);
+	const nodes = useStore(s => s.subagentsBySession[sessionId] ?? NO_NODES);
 	const [selected, setSelected] = useState<string>();
 	const [messages, setMessages] = useState<AgentMessageJson[]>([]);
 	const [cursor, setCursor] = useState(0);
