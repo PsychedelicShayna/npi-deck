@@ -343,9 +343,14 @@ export const useStore = create<StoreState>()(
 			const ro = get().sessionsById[id]?.readOnly;
 			if (!ro?.earlier) return;
 			const t = await api.getTranscript(ro.path);
-			// Resumed or closed while loading: the live snapshot, or nothing, wins.
-			if (get().sessionsById[id]?.readOnly?.path !== ro.path) return;
-			set((s) => ({ sessionsById: { ...s.sessionsById, [id]: readOnlySession(t) } }));
+			// Each open, reopen or worker restart gives the session a new
+			// `readOnly` object, and a resume drops it. Anything but the object
+			// this load started from means the response is stale.
+			const current = get().sessionsById[id];
+			if (current?.readOnly !== ro) return;
+			const next = readOnlySession(t);
+			if (current.endedByRestart) next.endedByRestart = true;
+			set((s) => ({ sessionsById: { ...s.sessionsById, [id]: next } }));
 		},
 
 		async resumeSession(id) {
@@ -574,7 +579,7 @@ function handleFrame(
 					for (const [id, session] of Object.entries(s.sessionsById)) {
 						if (!session.sessionFile) continue;
 						sessionsById[id] = {
-							...session, status: "idle", readOnly: { path: session.sessionFile },
+							...session, status: "idle", readOnly: { ...session.readOnly, path: session.sessionFile },
 							endedByRestart: true, queuedPrompts: [], pendingPlanApproval: undefined,
 							messages: session.messages.map(m => m.role === "assistant" ? { ...m, isStreaming: false } : m),
 						};

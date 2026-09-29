@@ -15,24 +15,38 @@ export const MESSAGE_PAGE = 40;
 export const TRANSCRIPT_TAIL = 200;
 
 /**
- * Where the rendered window starts. `id` pins it to a message; `fromEnd`
- * counts from the newest message and places the window when `id` is unset or
- * gone (the messages were replaced, e.g. a resumed chat's live snapshot or a
- * read-only transcript's full load).
+ * Most messages a chat ever mounts at once. Past it, showing earlier messages
+ * drops the newest ones from the bottom, and a pinned window stops growing as
+ * new messages stream in. At least `TRANSCRIPT_TAIL + MESSAGE_PAGE`, so a
+ * read-only transcript's full load still ends at its newest message.
+ */
+export const MAX_RENDERED = TRANSCRIPT_TAIL + MESSAGE_PAGE;
+
+/**
+ * A window pinned by the reader: it starts at message `id` and holds `count`
+ * messages. `fromEnd` counts from the newest message and places the start
+ * when `id` is unset or gone (the messages were replaced, e.g. a resumed
+ * chat's live snapshot or a read-only transcript's full load).
  */
 export interface WindowAnchor {
 	id?: string;
 	fromEnd: number;
+	count: number;
 }
 
 /**
- * Index of the first rendered message. Unanchored, the window is the newest
- * `MESSAGE_PAGE` messages.
+ * Rendered messages `[start, end)`. Unanchored, the window is the newest
+ * `MESSAGE_PAGE` messages and follows new ones. Anchored, it never holds
+ * more than `MAX_RENDERED`, so messages arriving while the reader is
+ * scrolled up are counted, not mounted.
  */
-export function windowStart(messages: readonly Pick<ChatMessage, "id">[], anchor: WindowAnchor | undefined): number {
-	if (anchor?.id !== undefined) {
-		const pinned = messages.findIndex((m) => m.id === anchor.id);
-		if (pinned >= 0) return pinned;
-	}
-	return Math.max(0, messages.length - (anchor?.fromEnd ?? MESSAGE_PAGE));
+export function windowRange(
+	messages: readonly Pick<ChatMessage, "id">[],
+	anchor: WindowAnchor | undefined,
+): { start: number; end: number } {
+	const len = messages.length;
+	if (!anchor) return { start: Math.max(0, len - MESSAGE_PAGE), end: len };
+	let start = anchor.id === undefined ? -1 : messages.findIndex((m) => m.id === anchor.id);
+	if (start < 0) start = Math.max(0, len - anchor.fromEnd);
+	return { start, end: Math.min(len, start + Math.min(anchor.count, MAX_RENDERED)) };
 }

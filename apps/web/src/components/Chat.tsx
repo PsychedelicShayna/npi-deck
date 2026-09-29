@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore, selectActiveSession } from "@/lib/store";
-import { MESSAGE_PAGE, windowStart, type WindowAnchor } from "@/lib/transcript-window";
-import type { SessionUi } from "@/lib/types";
+import { MAX_RENDERED, MESSAGE_PAGE, windowRange, type WindowAnchor } from "@/lib/transcript-window";
+import type { ChatMessage, SessionUi } from "@/lib/types";
 import { ChatHeader } from "./chat/ChatHeader";
 import { SessionPicker } from "./chat/SessionPicker";
 import { SubagentTreePanel } from "./chat/SubagentTreePanel";
@@ -40,46 +40,88 @@ export function Chat() {
 	);
 }
 
+/**
+ * Where the reader was before a window change: a mounted message and its
+ * offset in the viewport, else the distance from the bottom (used when the
+ * change replaced every message, as a full load does).
+ */
+interface ViewportMark {
+	el: Element | null;
+	top: number;
+	fromBottom: number;
+}
+
+function nearBottom(el: HTMLElement): boolean {
+	return el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+}
+
 function ChatTranscript({ session }: { session: SessionUi }) {
 	const loadEarlierTranscript = useStore((s) => s.loadEarlierTranscript);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const stickyRef = useRef(true);
-	/** Distance from the bottom to restore after earlier messages mount above the view. */
-	const restoreFromBottomRef = useRef<number | undefined>(undefined);
+	/** Viewport to restore once the window change has mounted. */
+	const restoreRef = useRef<ViewportMark | undefined>(undefined);
+	/**
+	 * From an earlier-message request until its restored viewport has
+	 * painted: bottom-following is off and scroll events don't re-pin, so
+	 * neither undoes the restore.
+	 */
+	const settlingRef = useRef(false);
 	const [anchor, setAnchor] = useState<WindowAnchor | undefined>(undefined);
 	const [loadingEarlier, setLoadingEarlier] = useState(false);
 
 	const { messages, toolCalls, queuedPrompts } = session;
-	const start = windowStart(messages, anchor);
-	const shown = useMemo(() => (start > 0 ? messages.slice(start) : messages), [messages, start]);
+	const { start, end } = windowRange(messages, anchor);
+	const shown = useMemo(() => messages.slice(start, end), [messages, start, end]);
 	const notLoaded = session.readOnly?.earlier ?? 0;
+	const newer = messages.length - end;
+
+	function settle(): void {
+		requestAnimationFrame(() => {
+			settlingRef.current = false;
+			const el = scrollRef.current;
+			if (el) stickyRef.current = nearBottom(el);
+		});
+	}
 
 	useLayoutEffect(() => {
 		const el = scrollRef.current;
-		const fromBottom = restoreFromBottomRef.current;
-		if (!el || fromBottom === undefined) return;
-		restoreFromBottomRef.current = undefined;
-		el.scrollTop = el.scrollHeight - fromBottom;
-	}, [start, messages]);
+		const mark = restoreRef.current;
+		if (!el || !mark) return;
+		restoreRef.current = undefined;
+		if (mark.el?.isConnected) el.scrollTop += mark.el.getBoundingClientRect().top - mark.top;
+		else el.scrollTop = el.scrollHeight - mark.fromBottom;
+		settle();
+	}, [start, end, messages]);
 
 	useEffect(() => {
 		const el = scrollRef.current;
-		if (!el) return;
+		if (!el || settlingRef.current) return;
 		if (stickyRef.current) {
 			el.scrollTop = el.scrollHeight;
 		}
-	}, [messages, toolCalls, queuedPrompts]);
+	}, [messages, toolCalls, queuedPrompts, start, end]);
 
 	function handleScroll(): void {
 		const el = scrollRef.current;
-		if (!el) return;
-		const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-		stickyRef.current = fromBottom < 100;
-		// A reader who scrolls up keeps the messages above them; new ones
-		// then append below instead of sliding the window.
-		if (!stickyRef.current && anchor === undefined && shown[0]) {
-			setAnchor({ id: shown[0].id, fromEnd: messages.length - start });
+		if (!el || settlingRef.current) return;
+		stickyRef.current = nearBottom(el);
+		if (!stickyRef.current) {
+			// A reader who scrolls up keeps the messages above them; new ones
+			// are then counted below instead of sliding the window.
+			if (anchor?.id === undefined && shown[0]) setAnchor({ id: shown[0].id, fromEnd: messages.length - start, count: end - start });
+		} else if (anchor?.id !== undefined && newer === 0) {
+			// Back at the newest message: follow new ones again, keeping as
+			// many messages mounted as the reader had.
+			setAnchor({ fromEnd: end - start, count: end - start });
 		}
+	}
+
+	function beginRestore(el: HTMLElement): void {
+		const first = el.querySelector("[data-message-id]");
+		stickyRef.current = false;
+		settlingRef.current = true;
+		restoreRef.current = { el: first, top: first ? first.getBoundingClientRect().top : 0, fromBottom: el.scrollHeight - el.scrollTop };
 	}
 
 	async function showEarlier(): Promise<void> {
@@ -87,26 +129,35 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 		if (!el) return;
 		if (start > 0) {
 			const earlier = Math.max(0, start - MESSAGE_PAGE);
-			restoreFromBottomRef.current = el.scrollHeight - el.scrollTop;
-			setAnchor({ id: messages[earlier]!.id, fromEnd: messages.length - earlier });
+			beginRestore(el);
+			setAnchor({ id: messages[earlier]!.id, fromEnd: messages.length - earlier, count: Math.min(end - earlier, MAX_RENDERED) });
 			return;
 		}
 		// Everything loaded is shown; fetch the rest of a read-only
 		// transcript. Its messages are rebuilt, so the window keeps its place
 		// by distance from the newest message.
-		restoreFromBottomRef.current = el.scrollHeight - el.scrollTop;
-		setAnchor({ fromEnd: messages.length + MESSAGE_PAGE });
+		beginRestore(el);
+		const reach = messages.length + MESSAGE_PAGE;
+		setAnchor({ fromEnd: reach, count: reach });
 		setLoadingEarlier(true);
 		try {
 			await loadEarlierTranscript(session.sessionId);
 		} catch (err) {
 			console.error("load earlier messages failed", err);
 		} finally {
-			// Nothing replaced (failed, or resumed meanwhile): don't carry the
-			// restore over to some later, unrelated update.
-			if (useStore.getState().sessionsById[session.sessionId]?.messages === messages) restoreFromBottomRef.current = undefined;
+			// Nothing replaced (failed, or resumed or reopened meanwhile):
+			// drop the restore so no later, unrelated update applies it.
+			if (useStore.getState().sessionsById[session.sessionId]?.messages === messages && restoreRef.current) {
+				restoreRef.current = undefined;
+				settle();
+			}
 			setLoadingEarlier(false);
 		}
+	}
+
+	function jumpToLatest(): void {
+		stickyRef.current = true;
+		setAnchor(undefined);
 	}
 
 	return (
@@ -133,26 +184,21 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 					</button>
 				) : null}
 
-				{shown.map((m) => {
-					switch (m.role) {
-						case "user":
-							return <UserMessage key={m.id} msg={m} />;
-						case "assistant":
-							return <AssistantMessage key={m.id} msg={m} toolCalls={toolCalls} />;
-						case "notice":
-							return <Notice key={m.id} msg={m} />;
-						case "compaction":
-							return <CompactionLine key={m.id} msg={m} />;
-						case "ttsr":
-							return <TtsrLine key={m.id} msg={m} />;
-						case "irc":
-							return <IrcLine key={m.id} msg={m} />;
-						case "mixtureTrace":
-							return <MixtureTraceLine key={m.id} msg={m} />;
-						default:
-							return null;
-					}
-				})}
+				{shown.map((m) => (
+					<div key={m.id} data-message-id={m.id}>
+						<ChatMessageView msg={m} toolCalls={toolCalls} />
+					</div>
+				))}
+
+				{newer > 0 ? (
+					<button
+						type="button"
+						onClick={jumpToLatest}
+						className="btn-ghost self-center font-mono text-2xs uppercase tracking-meta text-accent"
+					>
+						{newer} newer {newer === 1 ? "message" : "messages"} · jump to latest
+					</button>
+				) : null}
 
 				{queuedPrompts.map((q) => (
 					<QueuedMessage key={q.id} msg={q} />
@@ -163,4 +209,25 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 			</div>
 		</div>
 	);
+}
+
+function ChatMessageView({ msg, toolCalls }: { msg: ChatMessage; toolCalls: SessionUi["toolCalls"] }) {
+	switch (msg.role) {
+		case "user":
+			return <UserMessage msg={msg} />;
+		case "assistant":
+			return <AssistantMessage msg={msg} toolCalls={toolCalls} />;
+		case "notice":
+			return <Notice msg={msg} />;
+		case "compaction":
+			return <CompactionLine msg={msg} />;
+		case "ttsr":
+			return <TtsrLine msg={msg} />;
+		case "irc":
+			return <IrcLine msg={msg} />;
+		case "mixtureTrace":
+			return <MixtureTraceLine msg={msg} />;
+		default:
+			return null;
+	}
 }
