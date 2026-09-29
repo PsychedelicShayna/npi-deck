@@ -4,6 +4,7 @@ How to update your install, what changed, what might break, and how to roll back
 
 - [The general upgrade procedure](#the-general-upgrade-procedure)
 - [Per-version notes](#per-version-notes)
+  - [0.7.0-dev — from omp-deck to npi-deck](#070-dev--from-omp-deck-to-npi-deck)
   - [0.6.0 — first-run onboarding, provider clarity, reliability fixes](#060--first-run-onboarding-provider-clarity-reliability-fixes)
   - [0.5.0 — cross-platform CI, Linux container, Mac/Linux launcher](#050--cross-platform-ci-linux-container-maclinux-launcher)
 - [Rolling back](#rolling-back)
@@ -13,18 +14,18 @@ How to update your install, what changed, what might break, and how to roll back
 
 ## The general upgrade procedure
 
-npi-deck never auto-updates, never migrates your data without your explicit say-so, and never replaces user-edited files. Upgrades are an explicit `git pull` you run in your checkout, followed by a deck restart. There is no npm package or Docker image; an `npi-deck` launcher is planned.
+npi-deck never auto-updates, never checks for updates, never migrates your data without your explicit say-so, and never replaces user-edited files. Upgrades are an explicit `git pull` you run in your checkout, followed by a launcher restart. There is no npm package, Docker image, or Windows launcher.
 
 ```sh
 cd /path/to/your/npi-deck/checkout
 git pull
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts   # prepares the NeoPi tree if neopi.pin moved
-# stop the running deck, then:
-bun run dev
+bun scripts/neopi-setup.ts   # prepares and registers the NeoPi tree if neopi.pin moved
+# stop the running launcher (Ctrl-C), then:
+npi-deck
 ```
 
-The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. Re-running `scripts/neopi-setup.ts` is safe. If you're skipping a major version, also run a `bun run --filter '@npi-deck/*' typecheck` once to catch any local divergence before booting.
+The `bun install` step is important after pulling — workspace lockfile changes won't apply without it. Re-running `scripts/neopi-setup.ts` is safe. It registers a newly pinned tree in `~/.npi-deck/config.yml` but does not make it `activeBackend`; switch to it in **Settings → Backend**. The launcher rebuilds the web bundle when its sources changed. If you're skipping a major version, also run a `bun run --filter '@npi-deck/*' typecheck` once to catch any local divergence before booting.
 
 The deck:
 
@@ -44,6 +45,17 @@ curl http://127.0.0.1:1701/api/health
 ---
 
 ## Per-version notes
+
+### 0.7.0-dev — from omp-deck to npi-deck
+
+Unreleased. npi-deck is a hard fork of omp-deck and drops every upstream distribution path. See [CHANGELOG.md](../CHANGELOG.md#unreleased) for the full list.
+
+- **No npm package.** `omp-deck` from npm, its `omp-deck` CLI shim and its in-app "update available" pill are gone. Remove the global `omp-deck` package with the package manager you installed it with, then install from a checkout as in [install.md](./install.md).
+- **No Docker image and no Windows launcher.** `Dockerfile`, `docker-compose.yml`, `Start-OMP-Deck.cmd` and the `scripts/*.ps1` helpers were deleted. The `npi-deck` launcher (systemd user service, or `--no-systemd`) is the only supported way to run the deck.
+- **NeoPi comes from a source tree**, prepared by `bun scripts/neopi-setup.ts` and registered in `~/.npi-deck/config.yml`; the deck no longer depends on `@oh-my-pi/*` packages.
+- **New data dir and env names.** Deck state lives in `~/.npi-deck`, and every `OMP_DECK_*` variable is now `NPI_DECK_*`. Old `~/.omp-deck` data is not read.
+
+---
 
 ### 0.6.0 — first-run onboarding, provider clarity, reliability fixes
 
@@ -78,7 +90,7 @@ Nothing required. But if you want to:
 
 Released 2026-05-28. Two Linux bugs were fixed that affected anyone running on Linux (especially via Docker) prior to this release. Nothing else user-facing changed.
 
-If you were running the deck via the pre-0.5.0 Docker image, **rebuild your image** — `oven/bun:1.3.14-alpine` was switched to `oven/bun:1.3.14` (Debian-slim, glibc) because the SDK's prebuilt `.node` binaries are glibc-linked and fail to load under musl. Your data dir is preserved; only the image needs rebuilding.
+The Docker image this note refers to no longer exists; see the 0.7.0-dev note above.
 
 ---
 
@@ -90,9 +102,13 @@ If a new version breaks something for you, downgrade to the previous one and fil
 git checkout <previous-commit-or-tag>
 bun install --frozen-lockfile --ignore-scripts
 bun scripts/neopi-setup.ts
+# stop the running launcher (Ctrl-C), then:
+npi-deck
 ```
 
-**SQLite migrations are forward-only.** Rolling back the package doesn't roll back the schema. In practice this hasn't caused user-visible problems because every migration we ship is additive (adding columns or tables, never removing or renaming), so an older deck just ignores the newer fields. If you're worried, snapshot `~/.npi-deck/deck.db` before upgrading.
+If the older checkout pins a different NeoPi commit, `neopi-setup` registers (or re-registers) that tree; select it in **Settings → Backend**.
+
+**SQLite migrations are forward-only.** Rolling back the checkout doesn't roll back the schema. In practice this hasn't caused user-visible problems because every migration we ship is additive (adding columns or tables, never removing or renaming), so an older deck just ignores the newer fields. If you're worried, snapshot `~/.npi-deck/deck.db` before upgrading.
 
 For the onboarding flag specifically (introduced in 0.6.0): an older deck will ignore the flag file entirely. Safe to leave in place if you roll back.
 

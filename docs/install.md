@@ -1,44 +1,50 @@
 # Installing npi-deck
 
-npi-deck is the cockpit UI for [`oh-my-pi`](https://github.com/can1357/oh-my-pi)
-(`omp`).
+npi-deck is the web cockpit for NeoPi, a fork of
+[`oh-my-pi`](https://github.com/can1357/oh-my-pi) (`omp`).
 
-The deck runs from a git checkout. There is no npm package, Docker image, or
-Windows launcher.
+There is one supported way to install and run it: a git checkout of the deck,
+a NeoPi source tree prepared by `scripts/neopi-setup.ts` and registered in
+`~/.npi-deck/config.yml`, and the `npi-deck` launcher. There is no npm
+package, Docker image, or Windows launcher, and the deck does not check for or
+install updates.
 
 ```sh
 git clone https://github.com/PsychedelicShayna/npi-deck.git
 cd npi-deck
 bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts                        # prepare the pinned NeoPi tree (see below)
+bun scripts/neopi-setup.ts                        # prepare the pinned NeoPi tree, register it in config.yml
 ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck   # once
 npi-deck                                          # http://127.0.0.1:1701
 ```
 
-For development, `bun run dev` runs the server on :1701 and the Vite app with
-hot reload on :5173 (open the latter). Two flavors depending on whether you
-already use omp on this machine:
-
-- [Path A — You already have omp installed and authenticated](#path-a--existing-omp-user)
-- [Path B — Fresh install (no omp yet)](#path-b--fresh-install)
+- [Prerequisites](#prerequisites)
+- [NeoPi backend tree](#neopi-backend-tree)
+- [config.yml](#configyml)
 - [The npi-deck launcher](#the-npi-deck-launcher)
+- [Sign in to a provider](#sign-in-to-a-provider)
 - [Verifying the install](#verifying-the-install)
 - [Where state lives](#where-state-lives)
+- [Development servers](#development-servers)
 - [Uninstall / clean slate](#uninstall--clean-slate)
+- [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
 | Tool | Version | Why |
 |---|---|---|
-| [Bun](https://bun.sh) | ≥ 1.3.14 | Runtime for both the deck server and the web bundler. |
-| Git | any recent | To clone the repo. |
-| A modern browser | Chrome / Edge / Firefox / Safari, recent | Renders the deck. WebSocket support is required. |
+| [Bun](https://bun.sh) | ≥ 1.3.14 | Runs the deck, the launcher, `neopi-setup` and the web build. |
+| Git | any recent | Clones the deck and adds the NeoPi worktree. |
+| A NeoPi checkout | contains the commit in `neopi.pin` | `neopi-setup` adds its backend tree from it. |
+| A prebuilt `pi_natives` addon | matching the tree's `packages/natives` version | Or pass `--build-native` to build one. |
+| A systemd user manager | — | The launcher runs the server as a user service. Without one, pass `--no-systemd`; `setpriv` (util-linux) is then used when present. |
+| A modern browser | recent Chrome / Edge / Firefox / Safari | Renders the deck. WebSocket support is required. |
 
 You do **not** need Node.js — Bun runs everything.
 
 ## NeoPi backend tree
 
-The deck no longer installs `@oh-my-pi/*` from npm. It loads NeoPi from a
+The deck does not install `@oh-my-pi/*` packages. It loads NeoPi from a
 source tree pinned in `neopi.pin`. Prepare that tree once per pin:
 
 ```bash
@@ -65,28 +71,47 @@ The script:
    instead of symlinking it. If no addon matches, it prints the
    `build:native` command and exits. `--build-native` runs that build.
 4. Registers the tree under `backends` in `~/.npi-deck/config.yml`, and sets
-   `activeBackend` if it isn't set yet.
+   `activeBackend` if it isn't set yet (see [config.yml](#configyml)).
 5. For the pinned commit (or with `--tsconfig`), writes the gitignored
    `tsconfig.neopi.json`. `apps/server` extends it, so typechecking the server
    needs this step first.
 
-The server imports NeoPi from the selected tree at startup; `NPI_DECK_BACKEND`
-(a backend id from `config.yml`, or an absolute tree path) overrides
-`activeBackend`. To check a tree against everything the deck uses:
+`NPI_DECK_HOME` overrides `~/.npi-deck`. Re-running the script is safe. To
+check a tree against everything the deck uses:
 
 ```bash
 bun apps/server/src/backend/contract.ts   # isolated; no provider requests
 ```
 
-`NPI_DECK_HOME` overrides `~/.npi-deck`. Re-running the script is safe.
+## config.yml
 
-If no backend is configured, the deck still starts: kanban, inbox, routine
-editing and settings remain available. Agent-backed endpoints return HTTP 503
-with `backend_unavailable`. Open **Settings → Backend** to choose a prepared
-source tree. The picker runs an isolated preflight (dependencies, native addon
+`~/.npi-deck/config.yml` lists the prepared backend trees and names the one the
+deck loads. `neopi-setup` writes it; you rarely edit it by hand:
+
+```yaml
+backends:
+  - id: 7290c5ab68       # 10-character short commit; neopi-setup uses it as the id
+    kind: source
+    path: /home/you/.npi-deck/neopi/7290c5ab683243072805db0aa6bdbdbb4988a887
+activeBackend: 7290c5ab68
+```
+
+- `kind: source` is the only kind the deck loads; `kind: gateway` is reserved
+  and cannot be selected.
+- `activeBackend` is set by the first `neopi-setup` run and changed by
+  **Settings → Backend**. A later `neopi-setup` run registers its tree without
+  switching to it.
+- `NPI_DECK_BACKEND` (a backend id from `config.yml`, or an absolute tree
+  path) overrides `activeBackend` for the whole launch, including the source
+  shown in Settings; remove it and restart the launcher to switch from the UI.
+
+The server imports NeoPi from the selected tree at startup. If no backend is
+configured, the deck still starts: kanban, inbox, routine editing and settings
+remain available. Agent-backed endpoints return HTTP 503 with
+`backend_unavailable`. Open **Settings → Backend** to choose a prepared source
+tree. The picker runs an isolated preflight (dependencies, native addon
 version sentinel and required SDK exports) before switching. It reports the
-tree's commit, version and whether it matches `neopi.pin`; unsupported
-`kind: gateway` entries cannot be selected.
+tree's commit, version and whether it matches `neopi.pin`.
 
 A normal switch refuses while work is active, listing live sessions and
 prompts without changing the running backend. **Force —
@@ -94,107 +119,14 @@ abort all work** stops them before restarting the worker through the launcher.
 The worker rolls back to the previous backend if the candidate cannot start;
 if the previous backend also fails, it starts without a backend. Browser tabs
 reconnect to the new worker generation without replaying prompts queued while
-offline. Existing transcripts remain available for explicit resume.
-
-`NPI_DECK_BACKEND` pins the entire launch, including the source shown in
-Settings; remove the override and restart the launcher to switch from the UI.
-The backend picker requires the `npi-deck` launcher, not a directly started
+offline. Existing transcripts remain available for explicit resume. The
+backend picker requires the `npi-deck` launcher, not a directly started
 server process.
-
----
-
-## Path A — Existing omp user
-
-If `omp` already works in a terminal on this machine, your `~/.omp/agent`
-directory is already authenticated and populated with sessions. The deck will
-pick it up automatically — no re-auth needed.
-
-```sh
-git clone https://github.com/PsychedelicShayna/npi-deck.git
-cd npi-deck
-bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts
-bun run dev
-```
-
-Open <http://127.0.0.1:5173>. Your existing sessions appear in the sidebar.
-Pick a workspace, create a session, send a prompt.
-
-That's it.
-
-### Optional: custom data dir
-
-The deck keeps its SQLite database, managed env file, uploads, bridge state,
-backend trees and run state in one directory, `~/.npi-deck`. To use another
-one, set `NPI_DECK_HOME` in the environment that starts the deck. It is not
-read from the managed `.env`, which lives inside it.
-
-Nothing is read from the old `~/.omp-deck` or `~/.config/omp-deck` dirs.
-
----
-
-## Path B — Fresh install
-
-You don't have omp on this machine. We'll install the agent globally, then
-clone and run the deck.
-
-### 1. Install Bun
-
-Follow <https://bun.sh>. The one-liner is:
-
-```sh
-curl -fsSL https://bun.sh/install | bash      # macOS / Linux
-powershell -c "irm bun.sh/install.ps1 | iex"  # Windows
-```
-
-Confirm with `bun --version`.
-
-### 2. Install the omp CLI
-
-```sh
-bun add -g @oh-my-pi/pi-coding-agent
-```
-
-This installs the `omp` binary. npi-deck embeds the SDK in-process, so the
-global CLI is optional for running the deck — but installing it gives you the
-terminal experience too, and the auth flow is friendlier from a TTY.
-
-### 3. Authenticate
-
-Run `omp` once in any terminal. The first launch prompts you to pick a
-provider:
-
-- **Subscription / OAuth** (Claude / GPT) — opens a browser tab.
-- **API key** — paste it directly.
-
-The credentials are written to `~/.omp/agent/auth.db`. The deck reads from the
-same file.
-
-If you'd rather skip the CLI and configure keys via the deck itself, you can
-proceed to step 4 — then go to Settings → Env in the deck UI and paste your
-provider API key(s) there. The deck will write them to its managed `.env`.
-
-### 4. Clone and run the deck
-
-```sh
-git clone https://github.com/PsychedelicShayna/npi-deck.git
-cd npi-deck
-bun install --frozen-lockfile --ignore-scripts
-bun scripts/neopi-setup.ts
-bun run dev
-```
-
-Open <http://127.0.0.1:5173>.
-
-You'll see a single "Welcome to npi-deck" task in the kanban. Read it for a
-quick tour of the deck.
-
----
 
 ## The npi-deck launcher
 
-`bin/npi-deck` is the everyday way to run the deck. Link it into your `PATH`
-once; the link resolves back to the checkout, so it works from any cwd:
+`bin/npi-deck` is how the deck runs. Link it into your `PATH` once; the link
+resolves back to the checkout, so it works from any cwd:
 
 ```sh
 ln -s "$PWD/bin/npi-deck" ~/.local/bin/npi-deck
@@ -244,61 +176,88 @@ remains the fallback for descendants that leave their original group.
 Status and logs: `systemctl --user status npi-deck`,
 `journalctl --user -u npi-deck`, `systemd-cgls --user-unit npi-deck.service`.
 
+At launch the deck copies any missing starter skills and extensions into the
+NeoPi agent dir. **Settings → Starters** (or `NPI_DECK_INSTALL_STARTER_SKILLS`
+/ `NPI_DECK_INSTALL_STARTER_EXTENSIONS` set to `0`) turns that off.
+
+## Sign in to a provider
+
+NeoPi keeps sessions and credentials in `~/.omp/agent/`. If you already use
+`omp` or NeoPi in a terminal on this machine, the deck picks that directory up
+and needs no new sign-in; your existing sessions appear in the sidebar.
+
+Otherwise, sign in from the deck:
+
+- **Subscription / OAuth** (Claude Pro / Max, ChatGPT Plus / Pro, …) —
+  Settings → Providers → *Sign in*. The token is written to
+  `~/.omp/agent/auth.db`.
+- **API key** (Anthropic / OpenAI / OpenRouter / Google / …) — Settings → Env,
+  paste the key. It is saved to the deck's managed `.env`.
+
+On a fresh machine you'll see a single "Welcome to NPI deck" task in the
+kanban. Read it for a quick tour of the deck.
+
 ## Verifying the install
 
-A quick smoke list after either path:
+A quick smoke list:
 
 1. **Health endpoint**: `curl http://127.0.0.1:1701/api/health` returns `{"ok":true,...}`.
-2. **Web bundle**: opening <http://127.0.0.1:5173> shows the chat view (or
+2. **Web bundle**: opening <http://127.0.0.1:1701> shows the chat view (or
    the kanban — there's no auth, so any route works).
-3. **First session**: click "+ new session" in the sidebar, send any prompt.
+3. **Backend**: Settings → Backend shows the tree from `config.yml` as active,
+   matching `neopi.pin`.
+4. **First session**: click "+ new session" in the sidebar, send any prompt.
    You should see streaming text within a couple of seconds.
-4. **Settings**: navigate to `/settings`. The Env section lists
+5. **Settings**: navigate to `/settings`. The Env section lists
    `NPI_DECK_HOST`, `NPI_DECK_PORT`, `OMP_MODEL`, provider keys (masked), etc.
 
 If any of those fail, see [troubleshooting](#troubleshooting) below.
 
----
-
 ## Where state lives
 
-Deck state lives in `~/.npi-deck` (`NPI_DECK_HOME` overrides):
+Deck state lives in `~/.npi-deck` (`NPI_DECK_HOME` overrides; it is read from
+the environment that starts the deck, not from the managed `.env` inside it):
 
+- **Backend trees and selection**: `neopi/<sha>/` and `config.yml`.
 - **Kanban, routines, inbox**: `deck.db` (`NPI_DECK_DB_PATH` overrides), with
   pasted images under `uploads/`.
 - **Managed env file and audit log**: `.env` and `env-audit.log`.
 - **Telegram bridge mapping DB**: `telegram-bridge.db` (only created when the
   bridge runs).
-- **Backend trees and selection**: `neopi/<sha>/` and `config.yml`.
 - **Run state**: `run/` (launcher lock, generation and owned-process
   journals).
 
+Nothing is read from the old `~/.omp-deck` or `~/.config/omp-deck` dirs.
+
 Elsewhere:
 
-- **omp session/auth data**: `~/.omp/agent/` (NeoPi's `getAgentDir()`; `PI_CODING_AGENT_DIR` overrides).
+- **NeoPi session/auth data**: `~/.omp/agent/` (NeoPi's `getAgentDir()`; `PI_CODING_AGENT_DIR` overrides).
 - **Marketplace state**: `~/.omp/plugins/installed_plugins.json` and
   `~/.omp/plugins/marketplaces.json` (managed by the SDK).
 
----
+## Development servers
+
+`bun run dev` runs the server on :1701 with `bun --hot` and the Vite app with
+hot reload on :5173 (open the latter). It is for working on the deck, not for
+running it: nothing supervises that server, so Settings → Restart and the
+backend picker's switch do not work, and processes it spawns are not confined
+to a cgroup. It loads the same `config.yml` backend. See
+[CONTRIBUTING.md](../CONTRIBUTING.md) for running a dev deck beside your
+everyday one.
 
 ## Uninstall / clean slate
 
-To wipe deck state while preserving omp's own data:
+To wipe deck state while preserving NeoPi's own data:
 
 ```sh
-# Stop the deck first (Ctrl+C in the launcher's terminal)
+# Stop the deck first (Ctrl-C in the launcher's terminal)
+rm ~/.local/bin/npi-deck                    # the launcher link
 rm -rf ~/.npi-deck/                         # all deck state, including backend trees
+git -C /path/to/neopi worktree prune        # forget the removed backend worktrees
 ```
 
-To also drop omp:
-
-```sh
-bun pm ls -g | grep oh-my-pi
-bun remove -g @oh-my-pi/pi-coding-agent
-rm -rf ~/.omp/                              # sessions + auth
-```
-
----
+`rm -rf ~/.omp/` additionally drops every NeoPi session and credential, for
+the deck and any NeoPi CLI on the machine alike.
 
 ## Troubleshooting
 
@@ -306,12 +265,20 @@ rm -rf ~/.omp/                              # sessions + auth
 retry usually succeeds. If you're behind a corporate proxy, set
 `BUN_INSTALL_CACHE_DIR` and `HTTPS_PROXY`.
 
+**`neopi-setup` says the commit is not in the source.** Fetch the NeoPi
+checkout, or point `--source` / `NPI_DECK_NEOPI_SOURCE` at one that has the
+commit in `neopi.pin`.
+
 **Port 1701 is already in use.** Pass `npi-deck --port 1702` (or any free
-port), or set `NPI_DECK_PORT` before `bun run dev`; the Vite proxy follows it.
+port).
+
+**`no systemd user manager is reachable`.** The launcher found no systemd
+user manager to run the service under. `npi-deck --no-systemd` runs the
+server as a direct child instead, without cgroup containment.
 
 **No models appear in the model picker.** Open Settings → Env and confirm
 at least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / etc. is set. If you
-authenticated via `omp` CLI, the provider entries surface via the SDK's auth
+signed in through OAuth, the provider entries surface via the SDK's auth
 store rather than env vars — switching to the deck-managed env doesn't break
 that.
 

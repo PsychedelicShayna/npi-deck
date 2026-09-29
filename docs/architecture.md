@@ -176,16 +176,19 @@ Chat is fully store-driven because it needs cross-session state.
 
 - `apps/web/dist/` — production static bundle. Served by the deck server
   when `NPI_DECK_WEB_DIST` resolves to it (auto-detected).
-- `apps/server/dist/` — bundled server (`bun build --target=bun`):
-  `index.js` plus `structured-output-worker.js`, the worker thread that
-  validates routine structured output, which must stay beside `index.js`.
-  Dev mode (`bun run dev` with `bun --hot`) is the supported workflow during
-  iteration; production deployments run the bundle via `bun start`.
+- `apps/server/dist/` — `bun run build` also bundles the server
+  (`bun build --target=bun`): `index.js` plus `structured-output-worker.js`,
+  the worker thread that validates routine structured output, which must
+  stay beside `index.js`. Nothing runs that bundle: the `npi-deck`
+  launcher, `bun run start` and `bun run dev` all run
+  `apps/server/src/index.ts` from source.
 
 ## Where omp lives
 
-The SDK package is `@oh-my-pi/pi-coding-agent`, pinned in
-`apps/server/package.json`. The deck reads from:
+The deck loads NeoPi (`@oh-my-pi/pi-coding-agent` and its sibling packages)
+at runtime from the source tree named by `activeBackend` in
+`~/.npi-deck/config.yml`, pinned in `neopi.pin`; it is not a package
+dependency. The deck reads from:
 
 - NeoPi's agent dir (`getAgentDir()`, default `~/.omp/agent/`; `PI_CODING_AGENT_DIR` overrides) — sessions JSONL, auth.db,
   marketplaces.json, installed_plugins.json.

@@ -139,8 +139,9 @@ is.
 
 ## Filing issues
 
-If you hit a bug, a minimal repro plus your `bun --version`, OS, and
-`@oh-my-pi/pi-coding-agent` version is all we need.
+If you hit a bug, a minimal repro plus your `bun --version`, OS, deck commit
+(`git rev-parse --short HEAD`) and NeoPi backend commit (Settings → Backend)
+is all we need.
 
 ## License
 

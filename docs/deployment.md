@@ -5,6 +5,11 @@ loopback-only with network access gated by something else — Tailscale, an SSH
 tunnel, or a reverse proxy with its own auth. Do not bind it to a public
 interface without one of these.
 
+Every pattern here runs the deck the one supported way: a checkout with a
+backend tree prepared by `scripts/neopi-setup.ts` and registered in
+`~/.npi-deck/config.yml`, started by the `npi-deck` launcher. See
+[install.md](./install.md). There is no npm package or container image.
+
 ## Patterns
 
 - [Tailscale-gated (recommended)](#tailscale-gated-recommended)
@@ -79,7 +84,7 @@ Before exposing the deck on a network anyone else can reach:
 - [ ] Front it with Tailscale Serve, an SSH tunnel, or a reverse proxy that
       enforces auth. Never bind `0.0.0.0` without one.
 - [ ] Provider API keys live in env vars (via shell profile or the deck's
-      managed `.env`) — never committed in the repo or shipped in an image.
+      managed `.env`) — never committed in the repo.
 - [ ] The data dir (`NPI_DECK_HOME`, default `~/.npi-deck`) is user-only
       readable: `chmod 700`.
 - [ ] The audit log (`env-audit.log`) is rotated or archived if the deck runs
@@ -91,12 +96,15 @@ Before exposing the deck on a network anyone else can reach:
 
 ## Updating
 
-The deck embeds the omp SDK as a workspace dep. To pull a newer SDK:
-
 ```sh
-bun update @oh-my-pi/pi-coding-agent
-bun run typecheck
-bun run build
+cd /path/to/npi-deck
+git pull
+bun install --frozen-lockfile --ignore-scripts
+bun scripts/neopi-setup.ts   # prepares and registers the tree if neopi.pin moved
 ```
 
-Then restart the deck (Settings → Env → Restart, or kill+respawn).
+Then stop the launcher (Ctrl-C) and start `npi-deck` again; it rebuilds the
+web bundle when its sources changed. `neopi-setup` registers a new tree in
+`config.yml` but leaves `activeBackend` on the old one, so after a pin change
+select the new tree in **Settings → Backend**. See
+[upgrading.md](./upgrading.md) for per-version notes and rolling back.

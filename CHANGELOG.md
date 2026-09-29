@@ -31,6 +31,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 - **Server typecheck uses the tree's `tsgo`.** `bun run --filter '@npi-deck/server' typecheck` runs the import check, then the pinned tree's `tsgo` (`scripts/tsgo.ts`).
 - **Plan mode now uses NeoPi's `xd://propose` flow** (#45). The deck preserves its plan artifact, shows approval and revision requests over WebSocket, and restores the mode when a session resumes. The backend contract fixture verifies every plan-mode and advisor export against the pinned tree.
 - The model picker and the new-chat and switch-model guards re-resolve and re-validate a mixture under the target chat's own settings, as NeoPi does at run start, so a mixture those settings invalidate (for example `limits.max_hops` above `moa.hard_max_hops`) is neither listed nor accepted (#80).
+- **One documented install path** (#51). `docs/install.md`, `docs/deployment.md`, `docs/upgrading.md` and the README quickstart describe only a checkout prepared by `scripts/neopi-setup.ts`, the backend list in `~/.npi-deck/config.yml` (with an example), and the `npi-deck` launcher. `bun run dev` is documented as a development server, not a way to run the deck. Gone from the docs: installing the upstream `omp` CLI from the package registry, the Windows Bun one-liner, the "existing omp user" and "fresh install" paths that ended in `bun run dev`, and `bun update @oh-my-pi/pi-coding-agent` as the update step. Updating and rolling back now say that `neopi-setup` registers a newly pinned tree without making it active, so it has to be selected in Settings → Backend. `docs/architecture.md` no longer says production runs the `apps/server/dist` bundle, which nothing runs, or that the SDK is pinned in `apps/server/package.json`.
 
 ### Fixed
 
@@ -64,10 +65,10 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 ### Removed
 
 - **Session orientation** (#50). A new deck session is a plain empty thread. The server no longer prepends a prelude to the system prompt or fires `NPI_DECK_AUTO_START` (`/start`) on subscribe. The prelude and `/start` editors in Settings, the `/api/orientation/*` routes, the onboarding "Session greeting" step that wrote `~/.omp/agent/commands/start.md`, the four `kb://system/*.md` stubs onboarding wrote (deck-orientation, working-voice, projects-hub, org-system-hub), and `docs/start-command-template.md` are gone. Files a previous version wrote are left on disk. The maintenance-gate card moved to **Settings → Starters**, served at `/api/starters/maintenance-gate`.
-- **npm distribution.** `bin/omp-deck.mjs`, the `prepack` / `postpack` scripts, and the `bin` / `files` / `bundledDependencies` fields are gone; the root package is `private`. npi-deck runs from a checkout (`bun scripts/neopi-setup.ts`, then the `npi-deck` launcher).
-- **In-app update check.** The daily `registry.npmjs.org/omp-deck` poll, `GET /api/version`, the `VersionInfo` protocol type, the StatusBar update pill, and `OMP_DECK_DISABLE_UPDATE_CHECK`. It could only advertise upstream omp-deck releases. A stale `<dataDir>/update-check.json` is harmless and can be deleted.
-- **Docker.** `Dockerfile`, `docker-compose.yml`, and the CI container smoke job.
-- **Windows launchers.** `Start-OMP-Deck.cmd` and every `scripts/*.ps1` helper, plus the task-seed JSON files only `create-v1-tasks.ps1` read. `Start-OMP-Deck.sh` was replaced by `bin/npi-deck`.
+- **npm distribution** (#51). `bin/omp-deck.mjs`, the `prepack` / `postpack` scripts, and the `bin` / `files` / `bundledDependencies` fields are gone; the root package is `private`. npi-deck runs from a checkout (`bun scripts/neopi-setup.ts`, then the `npi-deck` launcher).
+- **In-app update check** (#51). The daily `registry.npmjs.org/omp-deck` poll, `GET /api/version`, the `VersionInfo` protocol type, the StatusBar update pill, and `OMP_DECK_DISABLE_UPDATE_CHECK`. It could only advertise upstream omp-deck releases. A stale `<dataDir>/update-check.json` is harmless and can be deleted.
+- **Docker** (#51). `Dockerfile`, `docker-compose.yml`, and the CI container smoke job.
+- **Windows launchers** (#51). `Start-OMP-Deck.cmd` and every `scripts/*.ps1` helper, plus the task-seed JSON files only `create-v1-tasks.ps1` read. `Start-OMP-Deck.sh` was replaced by `bin/npi-deck`.
 
 ## [0.6.1] — 2026-05-29 — In-app update notification
 
