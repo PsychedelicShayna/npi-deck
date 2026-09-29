@@ -41,9 +41,10 @@ export const api = {
 		const q = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
 		return request<ListSessionsResponse>(`/sessions${q}`);
 	},
-	/** Read-only transcript of a persisted session; creates no SDK session. */
-	getTranscript(path: string): Promise<SessionTranscriptResponse> {
-		return request<SessionTranscriptResponse>(`/sessions/transcript?path=${encodeURIComponent(path)}`);
+	/** Read-only transcript of a persisted session; creates no SDK session. `limit` keeps the newest messages. */
+	getTranscript(path: string, limit?: number): Promise<SessionTranscriptResponse> {
+		const q = limit === undefined ? "" : `&limit=${limit}`;
+		return request<SessionTranscriptResponse>(`/sessions/transcript?path=${encodeURIComponent(path)}${q}`);
 	},
 	createSession(body: CreateSessionRequest): Promise<CreateSessionResponse> {
 		return request<CreateSessionResponse>("/sessions", {

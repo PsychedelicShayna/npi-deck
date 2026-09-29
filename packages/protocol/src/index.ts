@@ -1159,16 +1159,23 @@ export interface SelectOptionWire {
 }
 
 /**
- * `GET /api/sessions/transcript?path=…`: a persisted session read straight
- * from its file. No SDK session is created and nothing is spawned; the
- * sidebar renders it read-only until the user resumes or sends.
+ * `GET /api/sessions/transcript?path=…[&limit=N]`: a persisted session read
+ * straight from its file. No SDK session is created and nothing is spawned;
+ * the sidebar renders it read-only until the user resumes or sends.
  */
 export interface SessionTranscriptResponse {
 	sessionId: string;
 	path: string;
 	cwd: string;
 	title?: string;
+	/** The newest `limit` messages, or every message when the request set no limit. */
 	messages: AgentMessageJson[];
+	/**
+	 * What a `limit`ed read left out: how many older messages, and the `usage`
+	 * of each omitted assistant message so the session's cost still covers the
+	 * whole transcript. Absent when nothing was left out.
+	 */
+	omitted?: { count: number; usage: unknown[] };
 	backendLastRan?: { path: string; commit: string | null; version: string | null };
 }
 

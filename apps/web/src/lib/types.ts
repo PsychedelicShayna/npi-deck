@@ -223,8 +223,9 @@ export interface SessionUi {
 	 * A persisted session opened from the sidebar without starting an SDK
 	 * session: the transcript is shown read-only until the user resumes or
 	 * sends. `sessionId` is the file's session id; nothing is subscribed.
+	 * `earlier` counts older messages not loaded yet (only a tail was read).
 	 */
-	readOnly?: { path: string };
+	readOnly?: { path: string; earlier?: number };
 	/** Previous worker exited; transcript is retained, but its live handle is gone. */
 	endedByRestart?: boolean;
 	backendLastRan?: { path: string; commit: string | null };

@@ -10,6 +10,7 @@ import type {
 	PendingPlanApprovalWire,
 	PlanModeContextWire,
 	SessionSummary,
+	SessionTranscriptResponse,
 	ServerFrame,
 	SubagentNode,
 	WorkspaceEntry,
@@ -39,6 +40,7 @@ const MAX_NOTIFICATIONS = 50;
 
 import { api } from "./api";
 import { applyEvent, initSession } from "./reducer";
+import { TRANSCRIPT_TAIL } from "./transcript-window";
 import type { SessionUi } from "./types";
 import { WsClient, type WsStatus } from "./ws";
 
@@ -63,6 +65,25 @@ function isDesktopViewport(): boolean {
 function readChromeOpen(key: string, desktopFallback: boolean): boolean {
 	if (!isDesktopViewport()) return false;
 	return readBool(key, desktopFallback);
+}
+
+/** UI state for a read-only transcript; `earlier` records what a tail read left out. */
+function readOnlySession(t: SessionTranscriptResponse): SessionUi {
+	const ui = initSession(
+		{
+			sessionId: t.sessionId,
+			sessionFile: t.path,
+			...(t.title ? { sessionName: t.title } : {}),
+			cwd: t.cwd,
+			isStreaming: false,
+			messages: t.messages,
+			todoPhases: [],
+		},
+		t.omitted?.usage,
+	);
+	ui.readOnly = t.omitted ? { path: t.path, earlier: t.omitted.count } : { path: t.path };
+	ui.backendLastRan = t.backendLastRan;
+	return ui;
 }
 
 interface StoreState {
@@ -171,6 +192,8 @@ interface StoreState {
 	 * first send.
 	 */
 	openTranscript(path: string): Promise<void>;
+	/** Load the older messages a read-only transcript left out when it opened. */
+	loadEarlierTranscript(id: string): Promise<void>;
 	/** Turn the active read-only transcript into a live session. */
 	resumeSession(id: string): Promise<string>;
 	selectSession(id: string): void;
@@ -311,19 +334,18 @@ export const useStore = create<StoreState>()(
 				get().selectSession(live.sessionId);
 				return;
 			}
-			const t = await api.getTranscript(path);
-			const ui = initSession({
-				sessionId: t.sessionId,
-				sessionFile: t.path,
-				...(t.title ? { sessionName: t.title } : {}),
-				cwd: t.cwd,
-				isStreaming: false,
-				messages: t.messages,
-				todoPhases: [],
-			});
-			ui.readOnly = { path: t.path };
-			ui.backendLastRan = t.backendLastRan;
+			const t = await api.getTranscript(path, TRANSCRIPT_TAIL);
+			const ui = readOnlySession(t);
 			set((s) => ({ sessionsById: { ...s.sessionsById, [t.sessionId]: ui }, activeId: t.sessionId }));
+		},
+
+		async loadEarlierTranscript(id) {
+			const ro = get().sessionsById[id]?.readOnly;
+			if (!ro?.earlier) return;
+			const t = await api.getTranscript(ro.path);
+			// Resumed or closed while loading: the live snapshot, or nothing, wins.
+			if (get().sessionsById[id]?.readOnly?.path !== ro.path) return;
+			set((s) => ({ sessionsById: { ...s.sessionsById, [id]: readOnlySession(t) } }));
 		},
 
 		async resumeSession(id) {

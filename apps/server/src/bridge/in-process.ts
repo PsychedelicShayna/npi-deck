@@ -40,6 +40,7 @@ import { isLiteralAllowlistName } from "../literal-allowlist-name.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import { SubagentTree } from "./subagent-tree.ts";
+import { transcriptTail } from "./transcript-tail.ts";
 import { McpAllowlistError } from "./types.ts";
 import type {
 	AgentBridge,
@@ -406,23 +407,22 @@ export class InProcessAgentBridge implements AgentBridge {
 		return raw.filter(r => !cwd || path.resolve(r.cwd) === cwd).map(r => summarize(r));
 	}
 
-	async readTranscript(sessionPath: string): Promise<SessionTranscriptResponse | undefined> {
+	async readTranscript(sessionPath: string, opts: { limit?: number } = {}): Promise<SessionTranscriptResponse | undefined> {
 		const resolved = path.resolve(sessionPath);
 		const known = (await sdk().SessionManager.listAll()).find((s) => path.resolve(s.path) === resolved);
 		if (!known) return undefined;
-		// A read-only open: no breadcrumb write, and a missing or empty file
-		// throws instead of being materialized as a fresh session. Nothing is
-		// appended, so NeoPi's deferred migration rewrite never runs.
-		const manager = await sdk().SessionManager.open(resolved, undefined, undefined, {
-			suppressBreadcrumb: true,
-			throwIfMissing: true,
-		});
+		// Read-only: one file read into memory, no lease, writer or breadcrumb.
+		// `open` read the file twice and kept the lease for the deck's lifetime,
+		// so the CLI could not resume a session the sidebar had only shown.
+		const manager = await sdk().SessionManager.openReadOnly(resolved);
+		const { messages, omitted } = transcriptTail(manager.buildSessionContext({ transcript: true }).messages, opts.limit);
 		return {
 			sessionId: manager.getSessionId(),
 			path: resolved,
 			cwd: known.cwd,
 			...(known.title ? { title: known.title } : {}),
-			messages: manager.buildSessionContext({ transcript: true }).messages as unknown as AgentMessageJson[],
+			messages: messages as unknown as AgentMessageJson[],
+			...(omitted ? { omitted } : {}),
 		};
 	}
 

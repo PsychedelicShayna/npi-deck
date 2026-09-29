@@ -29,9 +29,10 @@ export interface AgentBridge {
 	listSessions(opts: { cwd?: string }): Promise<SessionSummary[]>;
 	/**
 	 * A persisted session's transcript, read from its file without creating
-	 * an SDK session. Undefined when `sessionPath` is not a listed session.
+	 * an SDK session. `limit` keeps only the newest messages. Undefined when
+	 * `sessionPath` is not a listed session.
 	 */
-	readTranscript(sessionPath: string): Promise<SessionTranscriptResponse | undefined>;
+	readTranscript(sessionPath: string, opts?: { limit?: number }): Promise<SessionTranscriptResponse | undefined>;
 	/** Subagents belong to one live root generation; never accept a transcript file path from clients. */
 	subagentSnapshot(sessionId: string): SubagentNode[];
 	subscribeSubagents(sessionId: string, listener: (nodes: SubagentNode[]) => void): () => void;

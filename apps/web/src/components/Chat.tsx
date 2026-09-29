@@ -1,5 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore, selectActiveSession } from "@/lib/store";
+import { MESSAGE_PAGE, windowStart, type WindowAnchor } from "@/lib/transcript-window";
+import type { SessionUi } from "@/lib/types";
 import { ChatHeader } from "./chat/ChatHeader";
 import { SessionPicker } from "./chat/SessionPicker";
 import { SubagentTreePanel } from "./chat/SubagentTreePanel";
@@ -15,27 +17,6 @@ import { PlanApproval } from "./messages/PlanApproval";
 
 export function Chat() {
 	const session = useStore(selectActiveSession);
-	const scrollRef = useRef<HTMLDivElement>(null);
-	const stickyRef = useRef(true);
-
-	const messages = session?.messages ?? [];
-	const toolCalls = session?.toolCalls ?? {};
-	const queuedPrompts = session?.queuedPrompts ?? [];
-
-	useEffect(() => {
-		const el = scrollRef.current;
-		if (!el) return;
-		if (stickyRef.current) {
-			el.scrollTop = el.scrollHeight;
-		}
-	}, [messages, toolCalls, queuedPrompts]);
-
-	function handleScroll(): void {
-		const el = scrollRef.current;
-		if (!el) return;
-		const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-		stickyRef.current = fromBottom < 100;
-	}
 
 	// No active session — show the picker as the main pane instead of a
 	// dead-end "go to sidebar" message.
@@ -53,42 +34,132 @@ export function Chat() {
 				</div>
 			) : null}
 			{!session.readOnly ? <SubagentTreePanel sessionId={session.sessionId} /> : null}
-			<div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
-				<div className="mx-auto flex max-w-[760px] flex-col gap-7 px-6 py-10">
-					{messages.length === 0 ? (
-						<div className="text-center font-mono text-2xs uppercase tracking-meta text-ink-3">
-							Empty session — send a prompt below.
-						</div>
-					) : null}
+			{/* Keyed so each session starts at its newest messages, scrolled to the bottom. */}
+			<ChatTranscript key={session.sessionId} session={session} />
+		</div>
+	);
+}
 
-					{messages.map((m) => {
-						switch (m.role) {
-							case "user":
-								return <UserMessage key={m.id} msg={m} />;
-							case "assistant":
-								return <AssistantMessage key={m.id} msg={m} toolCalls={toolCalls} />;
-							case "notice":
-								return <Notice key={m.id} msg={m} />;
-							case "compaction":
-								return <CompactionLine key={m.id} msg={m} />;
-							case "ttsr":
-								return <TtsrLine key={m.id} msg={m} />;
-							case "irc":
-								return <IrcLine key={m.id} msg={m} />;
-							case "mixtureTrace":
-								return <MixtureTraceLine key={m.id} msg={m} />;
-							default:
-								return null;
-						}
-					})}
+function ChatTranscript({ session }: { session: SessionUi }) {
+	const loadEarlierTranscript = useStore((s) => s.loadEarlierTranscript);
+	const scrollRef = useRef<HTMLDivElement>(null);
+	const stickyRef = useRef(true);
+	/** Distance from the bottom to restore after earlier messages mount above the view. */
+	const restoreFromBottomRef = useRef<number | undefined>(undefined);
+	const [anchor, setAnchor] = useState<WindowAnchor | undefined>(undefined);
+	const [loadingEarlier, setLoadingEarlier] = useState(false);
 
-					{queuedPrompts.map((q) => (
-						<QueuedMessage key={q.id} msg={q} />
-					))}
-					{session.pendingPlanApproval ? (
-						<PlanApproval session={session} />
-					) : null}
-				</div>
+	const { messages, toolCalls, queuedPrompts } = session;
+	const start = windowStart(messages, anchor);
+	const shown = useMemo(() => (start > 0 ? messages.slice(start) : messages), [messages, start]);
+	const notLoaded = session.readOnly?.earlier ?? 0;
+
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		const fromBottom = restoreFromBottomRef.current;
+		if (!el || fromBottom === undefined) return;
+		restoreFromBottomRef.current = undefined;
+		el.scrollTop = el.scrollHeight - fromBottom;
+	}, [start, messages]);
+
+	useEffect(() => {
+		const el = scrollRef.current;
+		if (!el) return;
+		if (stickyRef.current) {
+			el.scrollTop = el.scrollHeight;
+		}
+	}, [messages, toolCalls, queuedPrompts]);
+
+	function handleScroll(): void {
+		const el = scrollRef.current;
+		if (!el) return;
+		const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+		stickyRef.current = fromBottom < 100;
+		// A reader who scrolls up keeps the messages above them; new ones
+		// then append below instead of sliding the window.
+		if (!stickyRef.current && anchor === undefined && shown[0]) {
+			setAnchor({ id: shown[0].id, fromEnd: messages.length - start });
+		}
+	}
+
+	async function showEarlier(): Promise<void> {
+		const el = scrollRef.current;
+		if (!el) return;
+		if (start > 0) {
+			const earlier = Math.max(0, start - MESSAGE_PAGE);
+			restoreFromBottomRef.current = el.scrollHeight - el.scrollTop;
+			setAnchor({ id: messages[earlier]!.id, fromEnd: messages.length - earlier });
+			return;
+		}
+		// Everything loaded is shown; fetch the rest of a read-only
+		// transcript. Its messages are rebuilt, so the window keeps its place
+		// by distance from the newest message.
+		restoreFromBottomRef.current = el.scrollHeight - el.scrollTop;
+		setAnchor({ fromEnd: messages.length + MESSAGE_PAGE });
+		setLoadingEarlier(true);
+		try {
+			await loadEarlierTranscript(session.sessionId);
+		} catch (err) {
+			console.error("load earlier messages failed", err);
+		} finally {
+			// Nothing replaced (failed, or resumed meanwhile): don't carry the
+			// restore over to some later, unrelated update.
+			if (useStore.getState().sessionsById[session.sessionId]?.messages === messages) restoreFromBottomRef.current = undefined;
+			setLoadingEarlier(false);
+		}
+	}
+
+	return (
+		<div ref={scrollRef} onScroll={handleScroll} className="flex-1 overflow-y-auto">
+			<div className="mx-auto flex max-w-[760px] flex-col gap-7 px-6 py-10">
+				{messages.length === 0 ? (
+					<div className="text-center font-mono text-2xs uppercase tracking-meta text-ink-3">
+						Empty session — send a prompt below.
+					</div>
+				) : null}
+
+				{start > 0 || notLoaded > 0 ? (
+					<button
+						type="button"
+						onClick={() => void showEarlier()}
+						disabled={loadingEarlier}
+						className="btn-ghost self-center font-mono text-2xs uppercase tracking-meta text-ink-3"
+					>
+						{start > 0
+							? `Show ${Math.min(MESSAGE_PAGE, start)} earlier · ${start} hidden`
+							: loadingEarlier
+								? "Loading earlier messages…"
+								: "Load earlier messages"}
+					</button>
+				) : null}
+
+				{shown.map((m) => {
+					switch (m.role) {
+						case "user":
+							return <UserMessage key={m.id} msg={m} />;
+						case "assistant":
+							return <AssistantMessage key={m.id} msg={m} toolCalls={toolCalls} />;
+						case "notice":
+							return <Notice key={m.id} msg={m} />;
+						case "compaction":
+							return <CompactionLine key={m.id} msg={m} />;
+						case "ttsr":
+							return <TtsrLine key={m.id} msg={m} />;
+						case "irc":
+							return <IrcLine key={m.id} msg={m} />;
+						case "mixtureTrace":
+							return <MixtureTraceLine key={m.id} msg={m} />;
+						default:
+							return null;
+					}
+				})}
+
+				{queuedPrompts.map((q) => (
+					<QueuedMessage key={q.id} msg={q} />
+				))}
+				{session.pendingPlanApproval ? (
+					<PlanApproval session={session} />
+				) : null}
 			</div>
 		</div>
 	);

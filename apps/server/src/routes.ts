@@ -116,12 +116,18 @@ export function buildRouter(
 	// Read-only transcript of a persisted session. Never creates or resumes an
 	// SDK session and spawns nothing: browsing the sidebar must not start MCP
 	// or LSP servers (no-orphans guarantee). 404 unless `path` is a session
-	// NeoPi lists, so this can't read arbitrary files.
+	// NeoPi lists, so this can't read arbitrary files. `limit` sends only the
+	// newest messages; a long session is otherwise tens of megabytes.
 	app.get("/sessions/transcript", async (c) => {
 		const sessionPath = c.req.query("path");
 		if (!sessionPath) return c.json({ error: "path is required" }, 400);
+		const rawLimit = c.req.query("limit");
+		const limit = rawLimit === undefined ? undefined : Number(rawLimit);
+		if (limit !== undefined && !(Number.isSafeInteger(limit) && limit > 0)) {
+			return c.json({ error: "limit must be a positive integer" }, 400);
+		}
 		try {
-			const transcript = await bridge.readTranscript(sessionPath);
+			const transcript = await bridge.readTranscript(sessionPath, { limit });
 			if (!transcript) return c.json({ error: "unknown session" }, 404);
 			const backendLastRan = sessionBackend(sessionPath);
 			return c.json(backendLastRan ? { ...transcript, backendLastRan } : transcript);

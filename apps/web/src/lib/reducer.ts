@@ -38,7 +38,11 @@ const EMPTY_USAGE: UsageRollup = {
 	cost: 0,
 };
 
-export function initSession(snapshot: SessionSnapshot): SessionUi {
+/**
+ * `priorUsage` holds the `usage` of assistant messages older than
+ * `snapshot.messages` (a transcript tail), so the cost rollup still covers them.
+ */
+export function initSession(snapshot: SessionSnapshot, priorUsage: readonly unknown[] = []): SessionUi {
 	const state: SessionUi = {
 		sessionId: snapshot.sessionId,
 		...(snapshot.backgroundJobsUnavailable ? { backgroundJobsUnavailable: true } : {}),
@@ -59,6 +63,9 @@ export function initSession(snapshot: SessionSnapshot): SessionUi {
 		planMode: snapshot.planMode,
 		pendingPlanApproval: snapshot.pendingPlanApproval,
 	};
+	for (const u of priorUsage) {
+		rollupUsage(state, u);
+	}
 	for (const m of snapshot.messages) {
 		ingestMessage(state, m);
 	}
