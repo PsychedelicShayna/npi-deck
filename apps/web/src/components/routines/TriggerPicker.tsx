@@ -199,8 +199,9 @@ function WebhookEditor({
 				/>
 			</Field>
 			<div className="font-mono text-2xs text-ink-3">
-				Once saved, use the "Rotate secret" button on the Settings tab to mint a server-side secret. Senders sign
-				the request body with <code>X-Routine-Signature: sha256=...</code>.
+				Once saved, use the "Rotate secret" button on the Settings tab to mint a server-side secret. Senders send{" "}
+				<code>X-Routine-Timestamp: &lt;unix seconds&gt;</code> and{" "}
+				<code>X-Routine-Signature: sha256=&lt;HMAC-SHA256(secret, "&lt;timestamp&gt;.&lt;raw body&gt;")&gt;</code>.
 			</div>
 		</div>
 	);

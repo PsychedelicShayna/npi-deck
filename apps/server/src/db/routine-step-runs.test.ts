@@ -47,40 +47,40 @@ describe("routine webhook secrets", () => {
 		insertRoutine("r_one");
 		insertRoutine("r_two");
 
-		expect(upsertWebhookSecret({ routineId: "r_one", path: "/hooks/shared", secretHash: "h1" })).toBe(true);
-		expect(upsertWebhookSecret({ routineId: "r_two", path: "/hooks/shared", secretHash: "h2" })).toBe(false);
+		expect(upsertWebhookSecret({ routineId: "r_one", path: "/hooks/shared", secret: "h1" })).toBe(true);
+		expect(upsertWebhookSecret({ routineId: "r_two", path: "/hooks/shared", secret: "h2" })).toBe(false);
 
 		expect(getWebhookSecretByPath("/hooks/shared")?.routine_id).toBe("r_one");
-		expect(getWebhookSecretByPath("/hooks/shared")?.secret_hash).toBe("h1");
+		expect(getWebhookSecretByPath("/hooks/shared")?.signing_key).toBe("h1");
 	});
 
 	test("ensure is idempotent on save and does not rotate existing secrets", () => {
 		bootDb();
 		insertRoutine("r_one");
 
-		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/one", secretHash: "initial" })).toBe(true);
-		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/one", secretHash: "new-save-secret" })).toBe(true);
+		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/one", secret: "initial" })).toBe(true);
+		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/one", secret: "new-save-secret" })).toBe(true);
 
-		expect(getWebhookSecretByPath("/hooks/one")?.secret_hash).toBe("initial");
+		expect(getWebhookSecretByPath("/hooks/one")?.signing_key).toBe("initial");
 	});
 
 	test("ensure moves a routine registration to a new free path without changing the secret", () => {
 		bootDb();
 		insertRoutine("r_one");
 
-		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/old", secretHash: "initial" })).toBe(true);
-		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/new", secretHash: "ignored" })).toBe(true);
+		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/old", secret: "initial" })).toBe(true);
+		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/new", secret: "ignored" })).toBe(true);
 
 		expect(getWebhookSecretByPath("/hooks/old")).toBeUndefined();
 		expect(getWebhookSecretByPath("/hooks/new")?.routine_id).toBe("r_one");
-		expect(getWebhookSecretByPath("/hooks/new")?.secret_hash).toBe("initial");
+		expect(getWebhookSecretByPath("/hooks/new")?.signing_key).toBe("initial");
 	});
 
 	test("delete removes stale registrations when a routine no longer has a webhook trigger", () => {
 		bootDb();
 		insertRoutine("r_one");
 
-		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/one", secretHash: "initial" })).toBe(true);
+		expect(ensureWebhookSecret({ routineId: "r_one", path: "/hooks/one", secret: "initial" })).toBe(true);
 		deleteWebhookSecret("r_one");
 
 		expect(getWebhookSecretByPath("/hooks/one")).toBeUndefined();

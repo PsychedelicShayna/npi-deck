@@ -7,7 +7,6 @@
  * Invalid YAML disables form view with an inline parse-error explanation.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, RefreshCcw } from "lucide-react";
 
 import {
 	validateRoutineSpec,
@@ -31,6 +30,7 @@ import { AddStepPicker } from "./AddStepPicker";
 import { SettingsForm } from "./SettingsForm";
 import { StepCard } from "./StepCard";
 import { TriggerPicker } from "./TriggerPicker";
+import { WebhookSecretPanel } from "./WebhookSecretPanel";
 import {
 	appendStepRenderKey,
 	makeStepRenderKeys,
@@ -107,7 +107,6 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 	const [tab, setTab] = useState<Tab>(() => pickInitialTab(routine, initialSpec));
 	const [busy, setBusy] = useState(false);
 	const [enabled, setEnabled] = useState<boolean>(routine?.enabled ?? false);
-	const [webhookSecret, setWebhookSecret] = useState<string | undefined>();
 	const [runs, setRuns] = useState<RoutineRun[]>([]);
 	const [showRuns, setShowRuns] = useState(false);
 	// T-70: pre-save diff preview state. When non-null, the SavePreviewDialog is
@@ -287,16 +286,6 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 		}
 	}
 
-	async function rotateWebhook(): Promise<void> {
-		if (!routine) return;
-		try {
-			const res = await routinesApi.rotateWebhookSecret(routine.id);
-			setWebhookSecret(res.secret);
-		} catch (e) {
-			onError(String(e));
-		}
-	}
-
 	// ─── Step helpers ───────────────────────────────────────────────────────
 
 	const existingStepIds = spec.steps.map((s) => s.id);
@@ -398,39 +387,7 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 					<div className="space-y-3">
 						<SettingsForm spec={spec} onChange={updateSpec} />
 						{routine ? (
-							<div className="space-y-2 rounded border border-line bg-paper-2/40 p-2">
-								<div className="meta">Webhook secret</div>
-								<button
-									type="button"
-									onClick={() => void rotateWebhook()}
-									className="btn-ghost h-7 text-2xs"
-								>
-									<RefreshCcw className="h-3 w-3" />
-									Rotate secret
-								</button>
-								{webhookSecret ? (
-									<div className="space-y-1">
-										<div className="font-mono text-2xs text-warn">
-											Copy now — the secret is shown ONCE.
-										</div>
-										<div className="flex items-center gap-1">
-											<code className="flex-1 truncate rounded border border-line bg-paper-code px-2 py-1 font-mono text-2xs">
-												{webhookSecret}
-											</code>
-											<button
-												type="button"
-												onClick={() => {
-													void navigator.clipboard.writeText(webhookSecret);
-												}}
-												className="btn-ghost h-7 w-7 p-0"
-												aria-label="Copy"
-											>
-												<Copy className="h-3.5 w-3.5" />
-											</button>
-										</div>
-									</div>
-								) : null}
-							</div>
+							<WebhookSecretPanel routineId={routine.id} refreshKey={routine.updatedAt} onError={onError} />
 						) : null}
 					</div>
 				) : null}

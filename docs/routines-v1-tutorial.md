@@ -114,14 +114,43 @@ Set `timezone:` on the spec to evaluate against an IANA zone like
 `America/Chicago`.
 
 For webhook triggers, click **Rotate secret** in the routine's Settings tab
-to mint a fresh server-side secret. The plaintext is shown **once** —
-the server only persists a hash. Callers must sign the request body with:
+to mint a fresh secret. The plaintext is shown **once**; the deck keeps it
+in `deck.db` to verify signatures and never sends it back. Every delivery
+carries two headers:
 
 ```
+X-Routine-Timestamp: <unix seconds>
 X-Routine-Signature: sha256=<hex>
 ```
 
-where `<hex>` is `HMAC-SHA256(secret, body)`.
+where `<hex>` is `HMAC-SHA256(secret, "<timestamp>.<raw body>")`: the
+timestamp header's value, a `.`, then the exact request body bytes. The deck
+recomputes the MAC over the bytes it received and compares in constant time,
+so a signature does not carry over to another body. A timestamp more than
+five minutes from the deck's clock is refused, which bounds how long a
+captured delivery can be replayed. Refused deliveries answer `401` and are
+recorded as runs aborted with `signature_invalid`.
+
+```sh
+ts=$(date +%s)
+body='{"hello":"world"}'
+sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$REFRESH_SECRET" -hex | sed 's/^.* //')
+curl -X POST http://127.0.0.1:1701/api/hooks/refresh \
+  -H 'content-type: application/json' \
+  -H "X-Routine-Timestamp: $ts" \
+  -H "X-Routine-Signature: sha256=$sig" \
+  --data-raw "$body"
+```
+
+Webhooks registered before signed deliveries existed sent the bare secret as
+`X-Routine-Signature`. Those registrations keep accepting it, and the
+Settings tab shows a deprecation warning with the last such delivery. The
+first bare-secret delivery also lets the deck store that secret, so the same
+sender can switch to signing with the secret it already has; then click
+**Stop accepting the bare secret** (or
+`PATCH /api/routines/:id/webhook {"acceptBareSecret": false}`). Rotating the
+secret also ends bare-secret deliveries. New registrations never accept the
+bare secret.
 
 ## Concurrency
 

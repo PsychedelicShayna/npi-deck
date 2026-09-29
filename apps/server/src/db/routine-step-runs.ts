@@ -6,6 +6,8 @@
  * tables flow through here.
  */
 
+import { createHash } from "node:crypto";
+
 import type { RoutineStepRun, RoutineStepStatus } from "@npi-deck/protocol";
 
 import { getDb, id, nowIso } from "./index.ts";
@@ -171,40 +173,64 @@ export function listStepRuns(runId: string): RoutineStepRun[] {
 }
 
 // ─── routine_webhook_secrets ──────────────────────────────────────────────
+//
+// `signing_key` is the webhook secret itself: the HMAC key that verifies
+// X-Routine-Signature. `secret_hash` (sha256 of the same secret) verifies the
+// bare-secret signatures that registrations from before signed deliveries
+// still accept while `accept_bare_secret` is set. Neither ever leaves the
+// server; `routes-routines.ts` exposes only the booleans and timestamps.
 
-interface WebhookSecretRow {
+export interface WebhookSecretRow {
 	routine_id: string;
 	path: string;
 	secret_hash: string;
+	/** Null only for a pre-upgrade registration that has not yet seen its bare secret. */
+	signing_key: string | null;
+	accept_bare_secret: 0 | 1;
 	created_at: string;
 	last_used_at: string | null;
+	last_bare_secret_at: string | null;
 }
 
+const WEBHOOK_COLUMNS =
+	"routine_id, path, secret_hash, signing_key, accept_bare_secret, created_at, last_used_at, last_bare_secret_at";
+
+export function hashSecretForStorage(plain: string): string {
+	return createHash("sha256").update(plain).digest("hex");
+}
+
+/**
+ * Register `secret` for the routine's webhook, replacing any previous one.
+ * A fresh secret has never been sent bare, so the bare secret is refused.
+ */
 export function upsertWebhookSecret(input: {
 	routineId: string;
 	path: string;
-	secretHash: string;
+	secret: string;
 }): boolean {
 	if (isWebhookPathClaimedByAnotherRoutine(input.path, input.routineId)) return false;
 
 	const now = nowIso();
 	getDb()
-		.prepare<unknown, [string, string, string, string]>(
-			`INSERT INTO routine_webhook_secrets (routine_id, path, secret_hash, created_at)
-			 VALUES (?, ?, ?, ?)
+		.prepare<unknown, [string, string, string, string, string]>(
+			`INSERT INTO routine_webhook_secrets (routine_id, path, secret_hash, signing_key, accept_bare_secret, created_at)
+			 VALUES (?, ?, ?, ?, 0, ?)
 			 ON CONFLICT(routine_id) DO UPDATE SET
 			   path = excluded.path,
 			   secret_hash = excluded.secret_hash,
+			   signing_key = excluded.signing_key,
+			   accept_bare_secret = 0,
+			   last_bare_secret_at = NULL,
 			   created_at = excluded.created_at`,
 		)
-		.run(input.routineId, input.path, input.secretHash, now);
+		.run(input.routineId, input.path, hashSecretForStorage(input.secret), input.secret, now);
 	return true;
 }
 
 export function ensureWebhookSecret(input: {
 	routineId: string;
 	path: string;
-	secretHash: string;
+	secret: string;
 }): boolean {
 	if (isWebhookPathClaimedByAnotherRoutine(input.path, input.routineId)) return false;
 
@@ -222,11 +248,11 @@ export function ensureWebhookSecret(input: {
 
 	const now = nowIso();
 	getDb()
-		.prepare<unknown, [string, string, string, string]>(
-			`INSERT INTO routine_webhook_secrets (routine_id, path, secret_hash, created_at)
-			 VALUES (?, ?, ?, ?)`,
+		.prepare<unknown, [string, string, string, string, string]>(
+			`INSERT INTO routine_webhook_secrets (routine_id, path, secret_hash, signing_key, accept_bare_secret, created_at)
+			 VALUES (?, ?, ?, ?, 0, ?)`,
 		)
-		.run(input.routineId, input.path, input.secretHash, now);
+		.run(input.routineId, input.path, hashSecretForStorage(input.secret), input.secret, now);
 	return true;
 }
 
@@ -239,16 +265,16 @@ export function deleteWebhookSecret(routineId: string): void {
 export function getWebhookSecretByPath(path: string): WebhookSecretRow | undefined {
 	const row = getDb()
 		.query<WebhookSecretRow, [string]>(
-			"SELECT routine_id, path, secret_hash, created_at, last_used_at FROM routine_webhook_secrets WHERE path = ?",
+			`SELECT ${WEBHOOK_COLUMNS} FROM routine_webhook_secrets WHERE path = ?`,
 		)
 		.get(path) as WebhookSecretRow | null;
 	return row ?? undefined;
 }
 
-function getWebhookSecretByRoutine(routineId: string): WebhookSecretRow | undefined {
+export function getWebhookSecretByRoutine(routineId: string): WebhookSecretRow | undefined {
 	const row = getDb()
 		.query<WebhookSecretRow, [string]>(
-			"SELECT routine_id, path, secret_hash, created_at, last_used_at FROM routine_webhook_secrets WHERE routine_id = ?",
+			`SELECT ${WEBHOOK_COLUMNS} FROM routine_webhook_secrets WHERE routine_id = ?`,
 		)
 		.get(routineId) as WebhookSecretRow | null;
 	return row ?? undefined;
@@ -259,12 +285,39 @@ function isWebhookPathClaimedByAnotherRoutine(path: string, routineId: string): 
 	return owner !== undefined && owner.routine_id !== routineId;
 }
 
-export function touchWebhookSecret(routineId: string): void {
-	getDb()
-		.prepare<unknown, [string, string]>(
-			"UPDATE routine_webhook_secrets SET last_used_at = ? WHERE routine_id = ?",
+/** Turn bare-secret signatures on or off. False when the routine has no webhook registration. */
+export function setWebhookAcceptBareSecret(routineId: string, accept: boolean): boolean {
+	const result = getDb()
+		.prepare<unknown, [number, string]>(
+			"UPDATE routine_webhook_secrets SET accept_bare_secret = ? WHERE routine_id = ?",
 		)
-		.run(nowIso(), routineId);
+		.run(accept ? 1 : 0, routineId);
+	return result.changes > 0;
+}
+
+/**
+ * Record an accepted delivery. `bareSecret` is the hash-verified secret a
+ * bare-secret delivery presented: it is kept as the signing key when the
+ * registration has none yet, so the same sender can move to signed
+ * deliveries without rotating.
+ */
+export function recordWebhookDelivery(routineId: string, bareSecret?: string): void {
+	const now = nowIso();
+	if (bareSecret === undefined) {
+		getDb()
+			.prepare<unknown, [string, string]>(
+				"UPDATE routine_webhook_secrets SET last_used_at = ? WHERE routine_id = ?",
+			)
+			.run(now, routineId);
+		return;
+	}
+	getDb()
+		.prepare<unknown, [string, string, string, string]>(
+			`UPDATE routine_webhook_secrets
+			 SET last_used_at = ?, last_bare_secret_at = ?, signing_key = COALESCE(signing_key, ?)
+			 WHERE routine_id = ?`,
+		)
+		.run(now, now, bareSecret, routineId);
 }
 
 // ─── routine_runs aggregates (V1 columns) ─────────────────────────────────

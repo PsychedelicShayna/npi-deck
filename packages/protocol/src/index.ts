@@ -1837,6 +1837,30 @@ export interface ListRoutineRunsResponse {
 	runs: RoutineRun[];
 }
 
+/**
+ * `GET /api/routines/:id/webhook`: how the routine's webhook authenticates
+ * deliveries. Never carries the secret or its hash.
+ */
+export interface RoutineWebhookStatus {
+	path: string;
+	/**
+	 * The bare secret is accepted as `X-Routine-Signature` (deprecated). Set on
+	 * registrations made before signed deliveries; cleared by rotation or
+	 * `PATCH /api/routines/:id/webhook { acceptBareSecret: false }`.
+	 */
+	acceptsBareSecret: boolean;
+	/**
+	 * The deck holds the secret and can verify signed deliveries. False only
+	 * for a pre-upgrade registration that has not yet received its bare
+	 * secret; rotating the secret sets it.
+	 */
+	signingKeyStored: boolean;
+	createdAt: string;
+	lastUsedAt: string | null;
+	/** Last delivery authenticated by the bare secret. */
+	lastBareSecretAt: string | null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Slash commands (discovered from ~/.omp/agent/commands/ + project overrides)
 // ─────────────────────────────────────────────────────────────────────────────

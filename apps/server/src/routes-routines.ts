@@ -9,6 +9,7 @@ import type {
 	ListRoutineStepRunsResponse,
 	ListRoutinesResponse,
 	RoutineSpec,
+	RoutineWebhookStatus,
 	UpdateRoutineRequest,
 } from "@npi-deck/protocol";
 import { validateRoutineSpec } from "@npi-deck/protocol";
@@ -27,14 +28,29 @@ import {
 import {
 	deleteWebhookSecret,
 	ensureWebhookSecret,
+	getWebhookSecretByRoutine,
 	listStepRuns,
+	setWebhookAcceptBareSecret,
 	upsertWebhookSecret,
 } from "./db/routine-step-runs.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
-import { hashSecretForStorage } from "./routes-hooks.ts";
 import { listTemplates, loadTemplate } from "./routines/templates.ts";
 
 const log = logger("routes:routines");
+
+/** Everything the UI may know about a webhook registration: no secret, no hash. */
+function webhookStatus(routineId: string): RoutineWebhookStatus | undefined {
+	const row = getWebhookSecretByRoutine(routineId);
+	if (!row) return undefined;
+	return {
+		path: row.path,
+		acceptsBareSecret: row.accept_bare_secret === 1,
+		signingKeyStored: row.signing_key !== null,
+		createdAt: row.created_at,
+		lastUsedAt: row.last_used_at,
+		lastBareSecretAt: row.last_bare_secret_at,
+	};
+}
 
 export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 	const app = new Hono();
@@ -192,8 +208,9 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 
 	/**
 	 * Generate (or rotate) the webhook secret for a routine's `webhook`
-	 * trigger. Returns the plaintext secret ONCE — caller must store it
-	 * client-side (the deck only persists the hash).
+	 * trigger. Returns the plaintext secret ONCE; the deck keeps it to verify
+	 * signatures and never returns it again. A rotated secret accepts only
+	 * signed deliveries.
 	 */
 	app.post("/routines/:id/webhook-secret/rotate", (c) => {
 		const id = c.req.param("id");
@@ -210,10 +227,32 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 			return c.json({ error: "routine has no webhook trigger" }, 400);
 		}
 		const secret = randomBytes(32).toString("base64url");
-		const hash = hashSecretForStorage(secret);
-		const registered = upsertWebhookSecret({ routineId: id, path: webhookTrigger.webhook.path, secretHash: hash });
+		const registered = upsertWebhookSecret({ routineId: id, path: webhookTrigger.webhook.path, secret });
 		if (!registered) return c.json({ error: "webhook path already in use" }, 409);
 		return c.json({ ok: true, secret, path: webhookTrigger.webhook.path });
+	});
+
+	app.get("/routines/:id/webhook", (c) => {
+		const status = webhookStatus(c.req.param("id"));
+		return status ? c.json(status) : c.json({ error: "routine has no webhook registration" }, 404);
+	});
+
+	/** `{ acceptBareSecret: boolean }`: the deprecated bare-secret signature, per routine. */
+	app.patch("/routines/:id/webhook", async (c) => {
+		const id = c.req.param("id");
+		let body: { acceptBareSecret?: unknown };
+		try {
+			body = (await c.req.json()) as { acceptBareSecret?: unknown };
+		} catch {
+			return c.json({ error: "invalid JSON" }, 400);
+		}
+		if (typeof body.acceptBareSecret !== "boolean") {
+			return c.json({ error: "acceptBareSecret must be a boolean" }, 400);
+		}
+		if (!setWebhookAcceptBareSecret(id, body.acceptBareSecret)) {
+			return c.json({ error: "routine has no webhook registration" }, 404);
+		}
+		return c.json(webhookStatus(id));
 	});
 
 	// ─── Templates ────────────────────────────────────────────────────────
@@ -300,18 +339,17 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 function registerWebhookTriggers(spec: RoutineSpec, routineId: string): void {
 	// Keep the registration table in sync with the authored spec. Registering a
 	// trigger should be idempotent on save; only the explicit rotate endpoint
-	// replaces the stored secret hash.
+	// replaces the stored secret.
 	const webhookTrigger = spec.trigger.find((t) => "webhook" in t) as { webhook: { path: string } } | undefined;
 	if (!webhookTrigger) {
 		deleteWebhookSecret(routineId);
 		return;
 	}
 
-	const secret = randomBytes(32).toString("base64url");
 	const registered = ensureWebhookSecret({
 		routineId,
 		path: webhookTrigger.webhook.path,
-		secretHash: hashSecretForStorage(secret),
+		secret: randomBytes(32).toString("base64url"),
 	});
 	if (!registered) {
 		log.warn(`webhook path ${webhookTrigger.webhook.path} already in use; skipping registration for ${routineId}`);

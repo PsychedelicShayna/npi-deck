@@ -4,6 +4,7 @@ import type {
 	ListRoutineStepRunsResponse,
 	ListRoutinesResponse,
 	Routine,
+	RoutineWebhookStatus,
 	UpdateRoutineRequest,
 } from "@npi-deck/protocol";
 
@@ -88,5 +89,18 @@ export const routinesApi = {
 	},
 	rotateWebhookSecret(id: string): Promise<{ ok: boolean; secret: string; path: string }> {
 		return req(`/routines/${encodeURIComponent(id)}/webhook-secret/rotate`, { method: "POST" });
+	},
+	/** Null when the routine has no webhook registration. */
+	async webhookStatus(id: string): Promise<RoutineWebhookStatus | null> {
+		const res = await fetch(`${BASE}/routines/${encodeURIComponent(id)}/webhook`);
+		if (res.status === 404) return null;
+		if (!res.ok) throw new Error(`HTTP ${res.status} /routines/${id}/webhook: ${await res.text().catch(() => "")}`);
+		return (await res.json()) as RoutineWebhookStatus;
+	},
+	setWebhookAcceptBareSecret(id: string, acceptBareSecret: boolean): Promise<RoutineWebhookStatus> {
+		return req<RoutineWebhookStatus>(`/routines/${encodeURIComponent(id)}/webhook`, {
+			method: "PATCH",
+			body: JSON.stringify({ acceptBareSecret }),
+		});
 	},
 };

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://npi-deck.app/schemas/trigger-webhook.json",
   "title": "RoutineTrigger — webhook",
-  "description": "HMAC-verified webhook trigger. Mounted at /hooks/<path> on the deck server.",
+  "description": "HMAC-verified webhook trigger. Mounted at /hooks/<path> on the deck server. Each delivery carries X-Routine-Timestamp: <unix seconds> and X-Routine-Signature: sha256=<hex HMAC-SHA256(secret, \"<timestamp>.<raw body>\")>; the MAC is checked over the exact request bytes in constant time, and a timestamp more than 300 seconds from the deck's clock is refused as a replay. Registrations made before signed deliveries also accept the bare secret as X-Routine-Signature (deprecated) until that is turned off or the secret is rotated.",
   "type": "object",
   "required": ["webhook"],
   "properties": {
@@ -18,7 +18,7 @@
         "secret_env": {
           "type": "string",
           "minLength": 1,
-          "description": "Env var name holding the HMAC secret. Argon2id-hashed copy lives in routine_webhook_secrets; rotation via POST /api/routines/:id/webhook-secret/rotate."
+          "description": "Env var name, on the sender's side, holding the webhook secret (the HMAC key). The deck keeps the secret in routine_webhook_secrets to verify signatures and shows it only once, when POST /api/routines/:id/webhook-secret/rotate mints it."
         }
       },
       "additionalProperties": false
