@@ -1,12 +1,14 @@
 #!/usr/bin/env bun
 /** One-time, non-destructive migration of omp-deck's local state. Dry-run by default. */
 import { Database } from "bun:sqlite";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { readManagedEnvFile, writeManagedEnvUpdates } from "../apps/server/src/env-store.ts";
 
 const MARKER = ".omp-deck-migration.json";
+/** Where `--force` moves deck-home files that differ from the legacy copy it installs. */
+const REPLACED = ".omp-deck-migration-replaced";
 const DROPPED = new Set(["AUTO_START", "DISABLE_UPDATE_CHECK", "INSTALL_STARTER_SKILLS", "INSTALL_STARTER_EXTENSIONS", "DATA_DIR", "DB", "DB_PATH", "WEB_DIST", "ORG_ROOT", "STARTER_SKILLS_DIR", "STARTER_EXTENSIONS_DIR", "AGENT_DIR"]);
 const SKIP_FILES = new Set(["update-check.json"]);
 
@@ -92,7 +94,32 @@ function backup(source: string, dest: string): void {
 	if (proc.exitCode !== 0) throw new Error(`SQLite backup failed for ${source}: ${proc.stderr.toString()}`);
 }
 
-export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.env): Promise<void> {
+/** Existing entries at `relatives` under `root`, directories expanded to what they hold; symlinks and other non-directories count as themselves. */
+function existingFiles(root: string, relatives: string[]): string[] {
+	const found = new Set<string>();
+	for (const relative of relatives) {
+		let stat;
+		try { stat = lstatSync(path.join(root, relative)); } catch (error) {
+			if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) continue;
+			throw error;
+		}
+		if (!stat.isDirectory()) { found.add(relative); continue; }
+		for (const entry of readdirSync(path.join(root, relative), { recursive: true, withFileTypes: true })) {
+			if (!entry.isDirectory()) found.add(path.relative(root, path.join(entry.parentPath, entry.name)));
+		}
+	}
+	return [...found].sort();
+}
+
+function sameFile(a: string, b: string): boolean {
+	const target = lstatSync(b);
+	return target.isFile() && target.size === statSync(a).size && readFileSync(a).equals(readFileSync(b));
+}
+
+/** Test seam: `afterInstall` runs after each migrated file lands in the deck home, so a test can stop the run there like a crash. */
+export type MigrateHooks = { afterInstall?: (relative: string) => void };
+
+export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.env, hooks: MigrateHooks = {}): Promise<void> {
 	let from: string | undefined;
 	let apply = false;
 	let force = false;
@@ -175,63 +202,101 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 	];
 	const stageIdentity = JSON.stringify({ source: source.home, target, transfer });
 	if (partial && readFileSync(stageMarker, "utf8") !== stageIdentity) throw new Error(`Staging directory belongs to another migration: ${stage}`);
-	const statePaths = ["deck.db", "deck.db-wal", "deck.db-shm", "telegram-bridge.db", "telegram-bridge.db-wal", "telegram-bridge.db-shm", "uploads", "routine-runs", ".env", "onboarding.json"];
-	const conflicts = [...new Set([...transfer, ...statePaths].filter((file) => existsSync(path.join(target, file))))];
+	const sidecars = new Set(dbJobs.flatMap(([, filename]) => [`${filename}-wal`, `${filename}-shm`, `${filename}-journal`]));
+	const statePaths = [...new Set(["deck.db", "deck.db-wal", "deck.db-shm", "telegram-bridge.db", "telegram-bridge.db-wal", "telegram-bridge.db-shm", "uploads", "routine-runs", ".env", "onboarding.json", ...transfer, ...sidecars])];
+	const conflicts = existingFiles(target, statePaths);
 	console.log(`${apply ? "Apply" : "Dry run"}: ${source.data} + ${source.config} -> ${target}`);
 	console.log(`SQLite backups: ${dbJobs.map(([file, dest]) => `${file} -> ${dest}`).join(", ") || "none"} (WAL included by backup API)`);
 	console.log(`Data files: ${otherFiles.length + uploadFiles.length}; config files: ${configFiles.length}; env keys: ${Object.keys(settings).length}; dropped legacy keys: ${dropped.join(", ") || "none"}`);
 	console.log(`Rewrites: absolute references under ${source.data}, ${source.config}${externalUploads ? `, ${externalUploads}` : ""}; external paths (including KB root) remain external.`);
-	if (already) { console.log(`Already migrated (${marker}); no changes.`); return; }
+	if (already && !apply) { console.log(`Already migrated (${marker}); no changes.`); return; }
+	if (already && !force) throw new Error(`Already migrated (${marker}); refusing to rerun (pass --force to re-check the deck home against the legacy source)`);
+	if (already) console.log(`Already migrated (${marker}); --force re-checks every migrated file against the legacy source.`);
 	if (!dbJobs.length && !otherFiles.length && !uploadFiles.length && !configFiles.length && !existsSync(envFile)) throw new Error("No legacy state found");
-	if (conflicts.length) console.log(`Existing deck state: ${conflicts.join(", ")}${partial ? " (partial migration can resume)" : " (apply refused)"}`);
+	if (conflicts.length) console.log(`Existing deck state: ${conflicts.join(", ")} (apply skips files identical to the migrated copy; anything else ${force ? "that the migration writes is moved aside first" : "refuses apply without --force"})`);
 	if (!apply) { console.log("No files changed (pass --apply to migrate)."); return; }
-	if (conflicts.length && !partial) throw new Error(`Destination contains existing deck state: ${conflicts.join(", ")}; refusing to overwrite${force ? " even with --force" : ""}`);
 	if (existsSync(stage)) {
 		if (!partial) throw new Error(`Unrecognized staging directory: ${stage}`);
 		rmSync(stage, { recursive: true, force: true });
 	}
 	mkdirSync(stage, { recursive: true });
 	writeFileSync(stageMarker, stageIdentity);
-	try {
-		let rewritten = 0;
-		for (const [file, filename] of dbJobs) {
-			const dest = path.join(stage, filename);
-			if (existsSync(dest)) throw new Error(`Duplicate destination database: ${dest}`);
-			backup(file, dest);
-			rewritten += rewriteDatabase(dest, source, target);
-		}
-		for (const file of otherFiles) {
-			const dest = path.join(stage, path.relative(source.data, file));
-			mkdirSync(path.dirname(dest), { recursive: true });
-			cpSync(file, dest);
-		}
-		for (const file of uploadFiles) {
-			const dest = path.join(stage, "uploads", path.relative(externalUploads!, file));
-			if (existsSync(dest)) throw new Error(`Upload destination collision: ${dest}`);
-			mkdirSync(path.dirname(dest), { recursive: true });
-			cpSync(file, dest);
-		}
-		for (const file of configFiles) {
-			const dest = path.join(stage, path.relative(source.config, file));
-			if (existsSync(dest)) throw new Error(`Config/data collision: ${dest}`);
-			mkdirSync(path.dirname(dest), { recursive: true });
-			cpSync(file, dest);
-		}
-		await writeManagedEnvUpdates(settings, path.join(stage, ".env"));
-		// Install only migration-owned state, preserving config.yml, neopi/, run/
-		// and any other backend/launcher files already present in the deck home.
-		mkdirSync(target, { recursive: true });
-		for (const relative of transfer) {
-			const staged = path.join(stage, relative);
-			const destination = path.join(target, relative);
-			if (existsSync(destination) && !partial) throw new Error(`Destination became populated during migration: ${destination}`);
-			mkdirSync(path.dirname(destination), { recursive: true });
-			renameSync(staged, destination);
-		}
-		writeFileSync(marker, `${JSON.stringify({ from: source.home, at: new Date().toISOString(), rewrittenFields: rewritten }, null, 2)}\n`);
+	let rewritten = 0;
+	for (const [file, filename] of dbJobs) {
+		const dest = path.join(stage, filename);
+		if (existsSync(dest)) throw new Error(`Duplicate destination database: ${dest}`);
+		backup(file, dest);
+		rewritten += rewriteDatabase(dest, source, target);
+	}
+	for (const file of otherFiles) {
+		const dest = path.join(stage, path.relative(source.data, file));
+		mkdirSync(path.dirname(dest), { recursive: true });
+		cpSync(file, dest);
+	}
+	for (const file of uploadFiles) {
+		const dest = path.join(stage, "uploads", path.relative(externalUploads!, file));
+		if (existsSync(dest)) throw new Error(`Upload destination collision: ${dest}`);
+		mkdirSync(path.dirname(dest), { recursive: true });
+		cpSync(file, dest);
+	}
+	for (const file of configFiles) {
+		const dest = path.join(stage, path.relative(source.config, file));
+		if (existsSync(dest)) throw new Error(`Config/data collision: ${dest}`);
+		mkdirSync(path.dirname(dest), { recursive: true });
+		cpSync(file, dest);
+	}
+	await writeManagedEnvUpdates(settings, path.join(stage, ".env"));
+	// A retry after a crash finds the files the first attempt installed. Skip
+	// only those still byte-identical to the fresh staged copy; anything the
+	// deck (or anyone) changed in between is never silently replaced.
+	const transferSet = new Set(transfer);
+	// Opening a migrated database, even read-only, leaves a shared-memory index
+	// and an empty WAL beside it; neither holds data of its own.
+	const inert = (relative: string) => sidecars.has(relative) && (relative.endsWith("-shm") || lstatSync(path.join(target, relative)).size === 0);
+	const identical = new Set(conflicts.filter((relative) => transferSet.has(relative) && sameFile(path.join(stage, relative), path.join(target, relative))));
+	const differing = conflicts.filter((relative) => !identical.has(relative) && !inert(relative));
+	if (differing.length && !force) {
 		rmSync(stage, { recursive: true, force: true });
-		console.log(`Migrated ${dbJobs.length} database(s), ${otherFiles.length + uploadFiles.length + configFiles.length} files; rewrote ${rewritten} database fields.`);
-	} catch (error) { throw error; }
+		throw new Error(`Destination holds deck state that differs from the legacy source: ${differing.join(", ")}; refusing to overwrite (pass --force to move it aside and install the legacy copy)`);
+	}
+	const owned = (relative: string) => sidecars.has(relative) || transfer.some((file) => file === relative || relative.startsWith(`${file}/`) || file.startsWith(`${relative}/`));
+	const displaced = new Set(differing.filter(owned));
+	// A database moves aside together with its journal files, whichever of them differed.
+	for (const [, filename] of dbJobs) {
+		const family = [filename, `${filename}-wal`, `${filename}-shm`, `${filename}-journal`].filter((relative) => conflicts.includes(relative));
+		if (!family.some((relative) => displaced.has(relative))) continue;
+		for (const relative of family) { identical.delete(relative); displaced.add(relative); }
+	}
+	const kept = differing.filter((relative) => !displaced.has(relative));
+	// Install only migration-owned state, preserving config.yml, neopi/, run/
+	// and any other backend/launcher files already present in the deck home.
+	mkdirSync(target, { recursive: true });
+	const aside = path.join(target, REPLACED, new Date().toISOString().replaceAll(":", "-"));
+	for (const relative of [...displaced].sort()) {
+		mkdirSync(path.dirname(path.join(aside, relative)), { recursive: true });
+		renameSync(path.join(target, relative), path.join(aside, relative));
+	}
+	let installed = 0;
+	for (const relative of transfer) {
+		if (identical.has(relative)) continue;
+		const destination = path.join(target, relative);
+		mkdirSync(path.dirname(destination), { recursive: true });
+		// link() never replaces an existing entry, unlike rename().
+		try { linkSync(path.join(stage, relative), destination); } catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`Destination became populated during migration: ${destination}`);
+			throw error;
+		}
+		installed++;
+		hooks.afterInstall?.(relative);
+	}
+	if (!already || installed || displaced.size) {
+		writeFileSync(marker, `${JSON.stringify({ from: source.home, at: new Date().toISOString(), rewrittenFields: rewritten, ...(displaced.size ? { movedAside: aside } : {}) }, null, 2)}\n`);
+	}
+	rmSync(stage, { recursive: true, force: true });
+	if (displaced.size) console.log(`Moved aside (differing from the legacy source): ${[...displaced].sort().join(", ")} -> ${aside}`);
+	if (kept.length) console.log(`Left in place (not written by the migration): ${kept.join(", ")}`);
+	if (!installed && !displaced.size) console.log("Deck home already matches the legacy source; no changes.");
+	else console.log(`Migrated ${dbJobs.length} database(s), ${otherFiles.length + uploadFiles.length + configFiles.length} files; installed ${installed}, skipped ${identical.size} identical; rewrote ${rewritten} database fields.`);
 }
 
 if (import.meta.main) {
