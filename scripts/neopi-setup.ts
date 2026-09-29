@@ -45,9 +45,9 @@ import { parseArgs } from "node:util";
 import { parseDocument, YAMLSeq, isMap, isSeq } from "yaml";
 import {
 	addonProvenance,
+	addonTarget,
 	bunEngineProblem,
 	containsSentinel,
-	NATIVE_INPUTS,
 	NATIVE_RECORD,
 	nativeInputsFingerprint,
 	nativeRecordMismatches,
@@ -55,6 +55,7 @@ import {
 	sha256,
 	versionSentinel,
 	writeNativeRecord,
+	type Evidence,
 	type NativeExpectation,
 	type NativeRecord,
 } from "../apps/server/src/backend/native-addon.ts";
@@ -191,7 +192,7 @@ const want: NativeExpectation = {
 	packageVersion,
 };
 step(
-	`native addon: need sentinel ${sentinel}, native inputs ${treeInputs.slice(0, 12)} (${NATIVE_INPUTS.join(", ")}), ` +
+	`native addon: need sentinel ${sentinel}, native inputs ${treeInputs.slice(0, 12)}, ` +
 		`${ctx.platformTag}${ctx.selectedVariant ? ` ${ctx.selectedVariant}` : ""}; loader tries ${ctx.addonFilenames.join(", ")}`,
 );
 const ownRecord = readNativeRecord(tree);
@@ -201,34 +202,62 @@ function effectiveAddon(): string | null {
 	return ctx.candidates.find(candidate => existsSync(candidate)) ?? null;
 }
 
+interface Assessment {
+	record: NativeRecord | null;
+	evidence: Evidence | null;
+	bytesSha: string;
+	problems: string[];
+}
+
 /**
  * Whether `file`, loaded under `loadName`, may serve this tree, and on what evidence: this
- * tree's record for these exact bytes, else the record or native inputs of the checkout
- * holding the file.
+ * tree's record for these exact bytes, else the record of the other checkout holding the
+ * file, else (with `allowDerived`) that checkout's native inputs.
  */
-function assess(file: string, loadName: string): { record: NativeRecord | null; problems: string[] } {
+function assess(file: string, loadName: string, allowDerived: boolean): Assessment {
 	const bytes = readFileSync(file);
-	if (!containsSentinel(bytes, sentinel)) return { record: null, problems: [`lacks ${sentinel}`] };
 	const bytesSha = sha256(bytes);
-	const record = ownRecord?.sha256 === bytesSha ? ownRecord : addonProvenance(file, bytesSha);
-	if (typeof record === "string") return { record: null, problems: [record] };
-	return { record, problems: nativeRecordMismatches(record, loadName, bytesSha, want) };
+	if (!containsSentinel(bytes, sentinel)) return { record: null, evidence: null, bytesSha, problems: [`lacks ${sentinel}`] };
+	if (ownRecord?.sha256 === bytesSha) {
+		const problems = nativeRecordMismatches(ownRecord, loadName, bytesSha, want);
+		if (problems.length === 0) return { record: ownRecord, evidence: "own-record", bytesSha, problems };
+		// The same bytes may still be current by the donor checkout's evidence, e.g. after the
+		// fingerprint gained inputs; the tree's own sources are never asked (addonProvenance).
+		const found = addonProvenance(file, bytesSha, tree, allowDerived);
+		if (typeof found !== "string") {
+			const donorProblems = nativeRecordMismatches(found.record, loadName, bytesSha, want);
+			if (donorProblems.length === 0) return { ...found, bytesSha, problems: donorProblems };
+		}
+		return { record: ownRecord, evidence: "own-record", bytesSha, problems };
+	}
+	const found = addonProvenance(file, bytesSha, tree, allowDerived);
+	if (typeof found === "string") {
+		const changed = ownRecord ? [`the recorded addon is sha256 ${ownRecord.sha256.slice(0, 12)}, this file is ${bytesSha.slice(0, 12)}`] : [];
+		return { record: null, evidence: null, bytesSha, problems: [...changed, found] };
+	}
+	return { ...found, bytesSha, problems: nativeRecordMismatches(found.record, loadName, bytesSha, want) };
 }
 
-function evidence(record: NativeRecord): string {
+function describe(record: NativeRecord, evidence: Evidence): string {
+	if (evidence === "derived") {
+		return `derived (unverified): ${record.source} sits in another checkout whose native inputs equal this tree's; its build was not observed`;
+	}
+	const where = evidence === "own-record" ? "this tree's record" : `the record beside ${record.source}`;
 	return record.provenance === "built"
-		? `built by neopi-setup from native inputs ${record.inputs.slice(0, 12)} (${record.source})`
-		: `derived: ${record.source} sits in a checkout whose native inputs equal this tree's; its build was not observed`;
+		? `built by neopi-setup from native inputs ${record.inputs.slice(0, 12)} (${where})`
+		: `derived (unverified) from ${record.source}, per ${where}; its build was not observed`;
 }
 
-let verified: { file: string; record: NativeRecord } | null = null;
+let verified: { file: string; record: NativeRecord; evidence: Evidence } | null = null;
 /** An addon in the tree's native dir that no longer matches; replaced once a match is in hand. */
 let stale: string | null = null;
+/** Once the tree's recorded addon has been replaced by other bytes, only recorded evidence may replace it. */
+let allowDerived = true;
 const current = effectiveAddon();
 if (current) {
-	const { record, problems } = assess(current, path.basename(current));
-	if (record && problems.length === 0) {
-		verified = { file: current, record };
+	const { record, evidence, bytesSha, problems } = assess(current, path.basename(current), true);
+	if (record && evidence && problems.length === 0) {
+		verified = { file: current, record, evidence };
 		step(`addon already in place: ${current}`);
 	} else {
 		console.log(`    stale    ${current}: ${problems.join("; ")}`);
@@ -236,28 +265,28 @@ if (current) {
 			die(`the loader would load ${current}, which does not match this tree. Remove or replace it, then re-run this script.`);
 		}
 		stale = current;
+		if (ownRecord && bytesSha !== ownRecord.sha256) allowDerived = false;
 	}
 }
 if (!verified) {
 	const envDirs = process.env.NPI_DECK_NATIVE_DIRS?.split(":").filter(Boolean);
 	const searchDirs = opts["native-dir"] ?? envDirs ?? DEFAULT_NATIVE_DIRS;
-	let found: { file: string; name: string } | null = null;
+	let found: { file: string; name: string; record: NativeRecord; evidence: Evidence; bytesSha: string } | null = null;
 	search: for (const name of ctx.addonFilenames) {
 		for (const dir of searchDirs) {
 			for (const candidateDir of [dir, path.join(dir, "packages/natives/native")]) {
 				const file = path.join(candidateDir, name);
 				if (!existsSync(file)) continue;
-				const { problems } = assess(file, name);
+				const { record, evidence, bytesSha, problems } = assess(file, name, allowDerived);
 				console.log(problems.length === 0 ? `    match    ${file}` : `    mismatch ${file}: ${problems.join("; ")}`);
-				if (problems.length === 0) {
-					found = { file: realpathSync(file), name };
+				if (record && evidence && problems.length === 0) {
+					found = { file: realpathSync(file), name, record, evidence, bytesSha };
 					break search;
 				}
 			}
 		}
 	}
 	const buildCmd = ["bun", "run", "build:native"];
-	let builtSince: number | null = null;
 	if (found) {
 		if (stale) unlinkSync(stale);
 		const dest = path.join(ctx.nativeDir, found.name);
@@ -269,11 +298,33 @@ if (!verified) {
 			step(`linking ${dest} -> ${found.file}`);
 			symlinkSync(found.file, dest);
 		}
+		// The evidence was established for the donor's file; the loader must now reach those bytes.
+		const file = effectiveAddon() ?? die(`the loader still finds no addon among ${ctx.candidates.join(", ")}`);
+		const bytesSha = sha256(readFileSync(file));
+		const problems = bytesSha === found.bytesSha
+			? nativeRecordMismatches(found.record, path.basename(file), bytesSha, want)
+			: [`it is not the file just installed (sha256 ${bytesSha.slice(0, 12)})`];
+		if (problems.length > 0) die(`the loader would load ${file}, which does not match this tree: ${problems.join("; ")}`);
+		verified = { file, record: found.record, evidence: found.evidence };
 	} else if (opts["build-native"]) {
 		step(`no addon matches this tree's native inputs; building it`);
 		if (stale) unlinkSync(stale);
-		builtSince = Date.now();
+		const builtSince = Date.now();
 		run(buildCmd, tree);
+		const file = builtAddon(builtSince);
+		const bytes = readFileSync(file);
+		if (!containsSentinel(bytes, sentinel)) die(`build:native wrote ${file}, which lacks ${sentinel}`);
+		// Same fingerprint, computed the same way, before and after: the build must not move its own inputs.
+		const after = nativeInputsFingerprint(tree);
+		if (after !== treeInputs) {
+			die(`build:native changed the tree's native inputs (${treeInputs.slice(0, 12)} → ${after?.slice(0, 12) ?? "unreadable"}); not recording the addon`);
+		}
+		const target = addonTarget(path.basename(file)) ?? die(`cannot tell the platform of ${file} from its filename`);
+		const bytesSha = sha256(bytes);
+		const record: NativeRecord = { inputs: treeInputs, ...target, sha256: bytesSha, packageVersion, provenance: "built", source: file };
+		const problems = nativeRecordMismatches(record, path.basename(file), bytesSha, want);
+		if (problems.length > 0) die(`build:native wrote ${file}, which does not match this tree: ${problems.join("; ")}`);
+		verified = { file, record, evidence: "own-record" };
 	} else {
 		die(
 			`no pi_natives addon matching this tree (${sentinel}, native inputs ${treeInputs.slice(0, 12)}) in: ${searchDirs.join(", ") || "(no --native-dir)"}\n` +
@@ -281,20 +332,19 @@ if (!verified) {
 				"or re-run with --build-native, or point --native-dir at a matching build.",
 		);
 	}
-	const file = effectiveAddon() ?? die(`the loader still finds no addon among ${ctx.candidates.join(", ")}`);
-	const { record, problems } = assess(file, path.basename(file));
-	if (!record || problems.length > 0) die(`the loader would load ${file}, which does not match this tree: ${problems.join("; ")}`);
-	if (builtSince === null) verified = { file, record };
-	else {
-		const stat = lstatSync(file);
-		if (path.resolve(path.dirname(file)) !== path.resolve(ctx.nativeDir) || !stat.isFile() || stat.mtimeMs < builtSince - 1000) {
-			die(`the loader would load ${file}, not the addon build:native just wrote to ${ctx.nativeDir}`);
-		}
-		verified = { file, record: { ...record, provenance: "built", source: file } };
-	}
 }
 writeNativeRecord(tree, verified.record);
-step(`addon verified: ${verified.file} — ${evidence(verified.record)}; recorded in ${path.join(tree, NATIVE_RECORD)}`);
+step(`addon verified: ${verified.file} — ${describe(verified.record, verified.evidence)}; recorded in ${path.join(tree, NATIVE_RECORD)}`);
+
+/** The addon the loader will now load, which must be the file build:native just wrote. */
+function builtAddon(since: number): string {
+	const file = effectiveAddon() ?? die(`build:native left no addon among ${ctx.candidates.join(", ")}`);
+	const stat = lstatSync(file);
+	if (path.resolve(path.dirname(file)) !== path.resolve(ctx.nativeDir) || !stat.isFile() || stat.mtimeMs < since - 1000) {
+		die(`the loader would load ${file}, not the addon build:native just wrote to ${ctx.nativeDir}`);
+	}
+	return file;
+}
 
 function isDanglingLink(file: string): boolean {
 	try {

@@ -9,6 +9,7 @@ import { resolveManifest, formatDiagnostic, type BackendIdentity, type FeatureSt
 import {
 	bunEngineProblem,
 	containsSentinel,
+	loadedAddonProblem,
 	NATIVE_RECORD,
 	nativeInputsFingerprint,
 	nativeRecordMismatches,
@@ -46,7 +47,8 @@ async function inspect(tree: string): Promise<ProbeResult> {
 	if (!record) throw new Error(`native addon ${candidate} has no fingerprint record (${NATIVE_RECORD}); ${fix}`);
 	const inputs = nativeInputsFingerprint(tree);
 	if (!inputs) throw new Error(`cannot fingerprint the native inputs of ${tree}: not a git work tree root`);
-	const problems = nativeRecordMismatches(record, path.basename(candidate), sha256(bytes), {
+	const candidateSha = sha256(bytes);
+	const problems = nativeRecordMismatches(record, path.basename(candidate), candidateSha, {
 		inputs,
 		platformTag: ctx.platformTag,
 		addonFilenames: ctx.addonFilenames,
@@ -59,6 +61,9 @@ async function inspect(tree: string): Promise<ProbeResult> {
 	const { features, values } = await resolveManifest(tree, MANIFEST);
 	const failed = Object.values(features).flatMap(f => f.tier === "required" ? f.diagnostics : []);
 	if (failed.length) throw new Error(`missing required SDK surface: ${failed.map(formatDiagnostic).join("; ")}`);
+	// The loader falls back through its candidates; check the file it actually loaded.
+	const loaded = await loadedAddonProblem(tree, record, { file: candidate, sha256: candidateSha });
+	if (loaded) throw new Error(`native addon does not match this tree: ${loaded}; ${fix}`);
 	let dirty: boolean | null = null;
 	if (features["build-identity"].available) {
 		const info = values.get("build-identity")?.BUILD_INFO as { version?: unknown; gitSha?: unknown; dirty?: unknown } | undefined;

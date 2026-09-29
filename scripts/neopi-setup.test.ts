@@ -74,6 +74,24 @@ describe.skipIf(process.platform === "win32")("neopi-setup native addon provenan
 		expect(record(target)).toMatchObject({ provenance: "derived", source: path.join(donor, MODERN) });
 	});
 
+	test("a linked donor addon recorded under older inputs is re-derived when donor and tree still agree", () => {
+		const root = scratch();
+		const donor = tree(root, "donor");
+		writeFileSync(path.join(donor, MODERN), fakeAddon("prebuilt elsewhere"));
+		const target = tree(root, "target");
+		expect(setup(root, target, "--native-dir", donor).code).toBe(0);
+		const before = record(target);
+		// Both checkouts move to the same new native inputs (as when the fingerprint gains inputs).
+		for (const checkout of [donor, target]) {
+			writeFileSync(path.join(checkout, "BUILD.bazel"), "# natives targets, revised\n");
+			commitAll(checkout, "revise build");
+		}
+		const result = setup(root, target);
+		expect(result.code).toBe(0);
+		expect(record(target)).toMatchObject({ provenance: "derived", sha256: before.sha256 });
+		expect(record(target).inputs).not.toBe(before.inputs);
+	});
+
 	test("refuses an addon with the same version sentinel when a native input differs, and rebuilds on request", () => {
 		const root = scratch();
 		const donor = builtDonor(root, { crate: "pub fn natives() { /* older */ }\n" });
@@ -109,6 +127,43 @@ describe.skipIf(process.platform === "win32")("neopi-setup native addon provenan
 		const rebuilt = setup(root, target, "--build-native");
 		expect(rebuilt.code).toBe(0);
 		expect(readFileSync(path.join(target, MODERN))).not.toEqual(before);
+	});
+
+	test("an addon replaced after it was recorded is not re-derived from the tree's own sources", () => {
+		const root = scratch();
+		const target = tree(root, "target");
+		expect(setup(root, target, "--build-native").code).toBe(0);
+		const recorded = record(target);
+		writeFileSync(path.join(target, MODERN), fakeAddon("swapped in"));
+
+		const refused = setup(root, target);
+		expect(refused.code).not.toBe(0);
+		expect(refused.out).toContain("the recorded addon is sha256");
+		expect(record(target)).toEqual(recorded);
+
+		// An unrecorded donor with equal sources is not evidence enough to replace it.
+		const unrecorded = tree(root, "unrecorded");
+		writeFileSync(path.join(unrecorded, MODERN), fakeAddon("prebuilt elsewhere"));
+		const stillRefused = setup(root, target, "--native-dir", unrecorded);
+		expect(stillRefused.code).not.toBe(0);
+		expect(record(target)).toEqual(recorded);
+
+		// A donor whose own record covers its bytes is.
+		const donor = builtDonor(root);
+		const replaced = setup(root, target, "--native-dir", donor);
+		expect(replaced.code).toBe(0);
+		expect(readlinkSync(path.join(target, MODERN))).toBe(path.join(donor, MODERN));
+		expect(record(target).sha256).toBe(record(donor).sha256);
+	});
+
+	test("an unrecorded addon inside the tree is not derived from the tree's own sources", () => {
+		const root = scratch();
+		const target = tree(root, "target");
+		writeFileSync(path.join(target, MODERN), fakeAddon("copied in by hand"));
+		const result = setup(root, target);
+		expect(result.code).not.toBe(0);
+		expect(result.out).toContain("inside this tree");
+		expect(existsSync(path.join(target, RECORD))).toBe(false);
 	});
 
 	test("refuses an addon recorded for another CPU variant even under the right filename", () => {

@@ -99,20 +99,37 @@ The script:
    `--skip-install` was passed, then runs `gen:tool-views` inside the tree.
 4. Provides the `pi_natives` addon. The version sentinel is not enough: every
    commit of a release carries the same one. The script fingerprints the
-   tree's native inputs (`packages/natives`, `crates`, `Cargo.toml`,
-   `Cargo.lock`, `rust-toolchain.toml`, `.cargo`; tracked and untracked
-   non-ignored files, as they are on disk) and reuses an addon only when it
-   was built from the same fingerprint, for this platform and CPU variant.
+   tree's native inputs and reuses an addon only when it was built from the
+   same fingerprint, for this platform and CPU variant. The inputs are the
+   sources (`packages/natives`, `crates`, `Cargo.toml`, `Cargo.lock`,
+   `rust-toolchain.toml`, `.cargo`) and the build recipe
+   (`scripts/bazel-natives.ts`, `scripts/host-detect*`, `BUILD.bazel`,
+   `MODULE.bazel`, `MODULE.bazel.lock`, `bazel/`, `.bazelrc`, `.bazelversion`,
+   `.bazelignore`, and the root `build:native` script). The fingerprint takes
+   tracked and untracked non-ignored files as they are on disk. It leaves out
+   `packages/natives/native/index.js` and `index.d.ts`, which the build
+   regenerates.
+
    Evidence for a candidate is, in order: this tree's record for those exact
-   bytes, the record in the checkout holding the file, or that checkout's own
-   native inputs (reported as `derived`: the sources match, the build itself
-   was not observed). It searches `--native-dir` (repeatable) or
-   `NPI_DECK_NATIVE_DIRS` (`:`-separated); `--copy` copies the file instead of
-   symlinking it. If nothing matches, including an addon already in the tree
-   that was built from other sources, it prints the `build:native` command and
-   exits; `--build-native` runs that build. The accepted addon's fingerprint,
-   platform, CPU variant and file sha256 are written to
+   bytes, a record in the other checkout that holds the file, or that other
+   checkout's own native inputs. The last kind is reported as
+   `derived (unverified)`: the sources match, but nobody watched the build. An
+   addon inside the tree itself is never vouched for by the tree's own
+   sources. Once an addon recorded for a tree is replaced by other bytes, only
+   a recorded donor addon or `--build-native` can replace it.
+
+   The script searches `--native-dir` (repeatable) or `NPI_DECK_NATIVE_DIRS`
+   (`:`-separated); `--copy` copies the file instead of symlinking it. If
+   nothing matches, including an addon already in the tree that was built
+   from other sources, it prints the `build:native` command and exits.
+   `--build-native` runs that build and checks that the fingerprint is the
+   same afterwards. The accepted addon's fingerprint, platform, CPU variant
+   and file sha256 are written to
    `<tree>/node_modules/.npi-deck/native-addon.json`.
+
+   The record is local bookkeeping, not authentication. Anyone who can write
+   the tree can write a record, so it catches stale and swapped addons, not
+   forged ones.
 5. Registers the tree under `backends` in `~/.npi-deck/config.yml`, and sets
    `activeBackend` if it isn't set yet (see [config.yml](#configyml)).
 6. For the pinned commit (or with `--tsconfig`), writes the gitignored
@@ -153,11 +170,12 @@ configured, the deck still starts: kanban, inbox, routine editing and settings
 remain available. Agent-backed endpoints return HTTP 503 with
 `backend_unavailable`. Open **Settings → Backend** to choose a prepared source
 tree. The picker runs an isolated preflight (Bun engine, dependencies, native
-addon version sentinel and recorded fingerprint, required SDK exports) before
-switching. It reports the tree's commit, version and whether it matches
-`neopi.pin`. A tree prepared before the fingerprint record existed, or whose
-native sources changed since, fails preflight until `neopi-setup` is re-run
-for it.
+addon version sentinel and recorded fingerprint, required SDK exports, and the
+sha256 of the addon the native loader actually loaded, which can be a
+fallback candidate) before switching. It reports the tree's commit, version
+and whether it matches `neopi.pin`. A tree prepared before the fingerprint
+record existed, or whose native sources changed since, fails preflight until
+`neopi-setup` is re-run for it.
 
 A normal switch refuses while work is active, listing live sessions and
 prompts without changing the running backend. **Force —

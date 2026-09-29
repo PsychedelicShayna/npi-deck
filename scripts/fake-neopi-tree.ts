@@ -1,7 +1,9 @@
 /**
  * Test fixture: a small committed git tree shaped like a NeoPi checkout, enough for
  * scripts/neopi-setup.ts and the backend probe to reach their native-addon checks.
- * `build:native` writes a fake addon carrying the version sentinel; no Rust is built.
+ * `build:native` (scripts/bazel-natives.ts) writes a fake addon carrying the version sentinel
+ * and regenerates the tracked bindings (index.js, index.d.ts), as the real host build does.
+ * No Rust is built.
  */
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
@@ -18,6 +20,8 @@ export interface FakeTreeOptions {
 	bunEngine?: string;
 	/** Contents of crates/pi-natives/src/lib.rs, a native input. */
 	crate?: string;
+	/** Addon filenames the fake loader fails to load, falling back to the next candidate. */
+	failLoad?: string[];
 }
 
 const GIT_ENV = {
@@ -55,6 +59,10 @@ export function fakeAddon(label: string): string {
 	return `\0${FAKE_SENTINEL}\0${label}\0`;
 }
 
+function bindingsJs(stamp: string): string {
+	return `import { loadNative } from "./loader-state.js";\nexport const bindings = loadNative();\n// generated: ${stamp}\n`;
+}
+
 export function fakeNeoPiTree(root: string, options: FakeTreeOptions = {}): string {
 	const variant = options.variant ?? "modern";
 	const names =
@@ -69,7 +77,7 @@ export function fakeNeoPiTree(root: string, options: FakeTreeOptions = {}): stri
 		JSON.stringify({
 			name: "fake-neopi",
 			private: true,
-			scripts: { "gen:tool-views": "echo tool-views generated", "build:native": "bun scripts/fake-build.ts" },
+			scripts: { "gen:tool-views": "echo tool-views generated", "build:native": "bun scripts/bazel-natives.ts" },
 		}),
 	);
 	put(root, "packages/coding-agent/package.json", JSON.stringify({ name: "@oh-my-pi/pi-coding-agent" }));
@@ -78,21 +86,44 @@ export function fakeNeoPiTree(root: string, options: FakeTreeOptions = {}): stri
 	put(
 		root,
 		"packages/natives/native/loader-state.js",
-		`import * as path from "node:path";
+		`import { existsSync } from "node:fs";
+import * as path from "node:path";
 const names = ${JSON.stringify(names)};
+/** Addon filenames the fake dlopen rejects, so the loader falls back to the next candidate. */
+const failLoad = new Set(${JSON.stringify(options.failLoad ?? [])});
+let loaded = null;
 export function initLoaderContext() {
 	const nativeDir = import.meta.dir;
 	return { platformTag: ${JSON.stringify(FAKE_PLATFORM)}, selectedVariant: ${JSON.stringify(variant)}, nativeDir, addonFilenames: names, candidates: names.map(name => path.join(nativeDir, name)) };
 }
+export function loadNative() {
+	const candidate = initLoaderContext().candidates.find(file => existsSync(file) && !failLoad.has(path.basename(file)));
+	if (!candidate) throw new Error("fake loader: no loadable addon");
+	loaded = { path: candidate };
+	return {};
+}
+export function nativeAddonStatus() {
+	return loaded;
+}
 `,
 	);
+	put(root, "packages/natives/native/index.js", bindingsJs("checked in"));
+	put(root, "packages/natives/native/index.d.ts", "// generated: checked in\n");
+	// Mirrors the real host build: it writes the addon and regenerates the tracked bindings.
 	put(
 		root,
-		"scripts/fake-build.ts",
+		"scripts/bazel-natives.ts",
 		`import * as path from "node:path";
-await Bun.write(path.join(import.meta.dir, "../packages/natives/native/${names[0]}"), ${JSON.stringify(fakeAddon("built"))} + Date.now());
+const native = path.join(import.meta.dir, "../packages/natives/native");
+const stamp = String(Date.now());
+await Bun.write(path.join(native, "${names[0]}"), ${JSON.stringify(fakeAddon("built"))} + stamp);
+await Bun.write(path.join(native, "index.js"), ${JSON.stringify(bindingsJs("STAMP"))}.replace("STAMP", stamp));
+await Bun.write(path.join(native, "index.d.ts"), "// generated: " + stamp + "\\n");
 `,
 	);
+	put(root, "scripts/host-detect.ts", "export const avx2 = true;\n");
+	put(root, "BUILD.bazel", "# natives targets\n");
+	put(root, ".bazelversion", "8.0.0\n");
 	put(root, "crates/pi-natives/src/lib.rs", options.crate ?? "pub fn natives() {}\n");
 	put(root, "Cargo.toml", "[workspace]\nmembers = [\"crates/*\"]\n");
 	put(root, "Cargo.lock", "version = 4\n");
