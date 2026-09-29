@@ -95,7 +95,7 @@ function readOnlySession(t: SessionTranscriptResponse): SessionUi {
 /** A live chat the server no longer runs, kept on screen read-only from its file. */
 function endLive(session: SessionUi, path: string): SessionUi {
 	return {
-		...session, status: "idle", readOnly: { ...session.readOnly, path }, queuedPrompts: [], pendingPlanApproval: undefined,
+		...session, status: "idle", readOnly: { ...session.readOnly, path }, queuedPrompts: [], pendingPlanApproval: undefined, streamingReplyId: undefined,
 		messages: session.messages.map(m => m.role === "assistant" ? { ...m, isStreaming: false } : m),
 	};
 }

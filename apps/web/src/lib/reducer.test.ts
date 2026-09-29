@@ -362,4 +362,35 @@ describe("a reply already streaming when the chat subscribes", () => {
 		s = applyEvent(s, { type: "message_end", message: assistant("answer", 5) } as never);
 		expect(textOf(s)).toEqual(["/help", "help text", "question", "answer"]);
 	});
+
+	test("a slash command answered while a reply streams leaves one reply, finalized", () => {
+		const synthetic = (role: "user" | "assistant", text: string) => role === "user"
+			? { role, content: text, synthetic: true, timestamp: 3 }
+			: { ...assistant(text, 0), synthetic: true };
+		let s = initSession({ sessionId: "s1", cwd: "/tmp", isStreaming: false, todoPhases: [], messages: [{ role: "user", content: "q", timestamp: 1 }] as never });
+		s = applyEvent(s, { type: "message_start", message: assistant("", 0) } as never);
+		s = applyEvent(s, { type: "message_update", message: assistant("par", 0) } as never);
+		// `/task add` sent mid-reply: the bridge answers it at once.
+		s = applyEvent(s, { type: "message_start", message: synthetic("user", "/task add") } as never);
+		s = applyEvent(s, { type: "message_start", message: synthetic("assistant", "Usage: /task add <title>") } as never);
+		s = applyEvent(s, { type: "message_end", message: synthetic("assistant", "Usage: /task add <title>") } as never);
+		s = applyEvent(s, { type: "message_update", message: assistant("partial rep", 0) } as never);
+		s = applyEvent(s, { type: "message_end", message: assistant("partial reply", 5) } as never);
+		expect(textOf(s)).toEqual(["q", "partial reply", "/task add", "Usage: /task add <title>"]);
+		expect(s.messages.filter((m) => m.role === "assistant" && m.isStreaming)).toEqual([]);
+		expect(s.usage.totalTokens).toBe(5);
+	});
+
+	test("a run that ends without its reply's message_end leaves nothing streaming", () => {
+		let s = initSession({ sessionId: "s1", cwd: "/tmp", isStreaming: false, todoPhases: [], messages: [{ role: "user", content: "q", timestamp: 1 }] as never });
+		s = applyEvent(s, { type: "agent_start" } as never);
+		s = applyEvent(s, { type: "message_start", message: assistant("", 0) } as never);
+		s = applyEvent(s, { type: "message_update", message: assistant("cut sh", 0) } as never);
+		s = applyEvent(s, { type: "agent_end", isTerminal: true } as never);
+		expect(s.messages.filter((m) => m.role === "assistant" && m.isStreaming)).toEqual([]);
+		// The next turn's reply starts fresh instead of continuing the cut one.
+		s = applyEvent(s, { type: "message_start", message: { role: "user", content: "again", timestamp: 2 } } as never);
+		s = applyEvent(s, { type: "message_update", message: assistant("second", 0) } as never);
+		expect(textOf(s)).toEqual(["q", "cut sh", "again", "second"]);
+	});
 });

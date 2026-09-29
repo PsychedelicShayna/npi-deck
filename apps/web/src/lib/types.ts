@@ -239,6 +239,12 @@ export interface SessionUi {
 	configWarnings?: string[];
 
 	messages: ChatMessage[];
+	/**
+	 * Id of the model reply in flight. Updates and its message_end go to
+	 * this message only, never to a slash-command reply the bridge
+	 * interleaved or to an earlier turn's reply.
+	 */
+	streamingReplyId?: string;
 	/** Tool calls keyed by toolCallId for richer per-call rendering. */
 	toolCalls: Record<string, ToolCallStream>;
 	todoPhases: TodoPhase[];

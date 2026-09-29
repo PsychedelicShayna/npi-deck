@@ -84,7 +84,9 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 		// `isTerminal: false` when queued input or an async delivery will
 		// resume the session, so the chat must stay busy through it.
 		case "agent_end":
-			return (event as { isTerminal?: boolean }).isTerminal === false ? state : { ...state, status: "idle" };
+			// Terminal: nothing streams any more, even a reply whose
+			// message_end never came (an abort, a provider error).
+			return (event as { isTerminal?: boolean }).isTerminal === false ? state : { ...settleStreaming(state), status: "idle" };
 
 		// ─── Turn lifecycle ────────────────────────────────────────────────
 		case "turn_start":
@@ -127,22 +129,30 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 		case "message_start": {
 			const msg = (event as any).message;
 			if (!msg) return state;
-			const next = { ...state, messages: state.messages.slice() };
+			// A real prompt starts a new turn, and an assistant start a new
+			// reply: a reply still tracked missed its end.
+			const opensReply = msg.role === "assistant" && !msg.synthetic;
+			const base = (opensReply || (msg.role === "user" && !msg.synthetic)) ? settleStreaming(state) : state;
+			const next = { ...base, messages: base.messages.slice() };
 			ingestMessage(next, msg);
-			// A reply streams until its message_end; updates and the end target it.
+			// The model's reply streams until its message_end. A slash-command
+			// reply the bridge sends (`synthetic`) is complete as it lands.
 			const last = next.messages.at(-1);
-			if (msg.role === "assistant" && last?.role === "assistant") next.messages[next.messages.length - 1] = { ...last, isStreaming: true };
+			if (opensReply && last?.role === "assistant") {
+				next.messages[next.messages.length - 1] = { ...last, isStreaming: true };
+				next.streamingReplyId = last.id;
+			}
 			return next;
 		}
 		case "message_update": {
 			const msg = (event as any).message;
-			if (!msg || msg.role !== "assistant") return state;
+			if (!msg || msg.role !== "assistant" || msg.synthetic) return state;
 			return updateAssistantMessage(state, msg);
 		}
 		case "message_end": {
 			const msg = (event as any).message;
 			if (!msg) return state;
-			const next = finalizeMessage(state, msg);
+			const next = msg.synthetic ? state : finalizeMessage(state, msg);
 			return msg.role === "custom" && msg.customType === "advisor" ? bumpAdvisorActivity(next) : next;
 		}
 
@@ -544,24 +554,28 @@ function ingestMessage(state: SessionUi, msg: any): void {
 	}
 }
 
-/**
- * The reply in flight: the newest assistant message of the current turn
- * (after the latest prompt), if it is still streaming. A chat that
- * subscribed mid-reply never saw its message_start, so the newest assistant
- * message is an earlier, finished one, or belongs to an earlier turn.
- */
-function streamingAssistantIndex(messages: SessionUi["messages"]): number {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m?.role === "user") return -1;
-		if (m?.role === "assistant") return m.isStreaming ? i : -1;
+/** Index of the tracked reply in flight, or -1. */
+function streamingReplyIndex(state: SessionUi): number {
+	if (!state.streamingReplyId) return -1;
+	for (let i = state.messages.length - 1; i >= 0; i--) {
+		if (state.messages[i]?.id === state.streamingReplyId) return i;
 	}
 	return -1;
 }
 
+/** Nothing streams: the tracked reply, and any other reply left marked. */
+function settleStreaming(state: SessionUi): SessionUi {
+	if (!state.streamingReplyId && !state.messages.some((m) => m.role === "assistant" && m.isStreaming)) return state;
+	return {
+		...state,
+		streamingReplyId: undefined,
+		messages: state.messages.map((m) => m.role === "assistant" && m.isStreaming ? { ...m, isStreaming: false } : m),
+	};
+}
+
 function updateAssistantMessage(state: SessionUi, msg: any): SessionUi {
 	const messages = state.messages.slice();
-	const i = streamingAssistantIndex(messages);
+	const i = streamingReplyIndex(state);
 	const m = messages[i];
 	if (m?.role === "assistant") {
 		messages[i] = {
@@ -574,22 +588,23 @@ function updateAssistantMessage(state: SessionUi, msg: any): SessionUi {
 		return { ...state, messages };
 	}
 	// Its message_start came before this chat subscribed: start it here.
+	const id = nextId("asst");
 	messages.push({
-		id: nextId("asst"),
+		id,
 		role: "assistant",
 		blocks: extractAssistantBlocks(msg.content),
 		isStreaming: true,
 		model: typeof msg.model === "string" ? msg.model : undefined,
 		provider: typeof msg.provider === "string" ? msg.provider : undefined,
 	});
-	return { ...state, messages };
+	return { ...state, messages, streamingReplyId: id };
 }
 
 function finalizeMessage(state: SessionUi, msg: any): SessionUi {
 	if (!msg || typeof msg !== "object") return state;
 	if (msg.role !== "assistant") return state;
 	const messages = state.messages.slice();
-	const i = streamingAssistantIndex(messages);
+	const i = streamingReplyIndex(state);
 	const m = messages[i];
 	if (m?.role !== "assistant") {
 		// Its start and updates came before this chat subscribed.
@@ -610,7 +625,7 @@ function finalizeMessage(state: SessionUi, msg: any): SessionUi {
 		durationMs: typeof msg.duration === "number" ? msg.duration : m.durationMs,
 		ttft: typeof msg.ttft === "number" ? msg.ttft : m.ttft,
 	};
-	const next = { ...state, messages };
+	const next = { ...state, messages, streamingReplyId: undefined };
 	if (msg.usage) {
 		rollupUsage(next, msg.usage);
 	}
