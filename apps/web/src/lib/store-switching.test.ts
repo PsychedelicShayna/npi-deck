@@ -197,9 +197,17 @@ test("a chat reopened read-only after closing keeps its view when the slow close
 	expect(pending.filter(transcriptOf("alpha"))).toEqual([]);
 });
 
-test("closing a live chat ends this connection's stream at once; a resume before the reply stays subscribed", async () => {
+test("closing a live chat ends this connection's stream at once; a resume starts clean and stays subscribed", async () => {
 	useStore.getState().selectSession("alpha");
-	sockets.at(-1)!.emit("message", { type: "subscribed", sessionId: "alpha", snapshot: snapshot("alpha") });
+	const socket = sockets.at(-1)!;
+	socket.emit("message", { type: "subscribed", sessionId: "alpha", snapshot: snapshot("alpha") });
+	// An ask dialog and a subagent tree are outstanding in alpha, and in bravo.
+	const dialog = (sessionId: string) => ({ type: "ext_ui_dialog_open", sessionId, dialogId: `${sessionId}-ask`, kind: "confirm", prompt: "go on?" });
+	const tree = (sessionId: string) => ({ type: "subagents_snapshot", sessionId, nodes: [{ id: `${sessionId}-child`, parentId: sessionId, name: "child", status: "running", createdAt: 1 }] });
+	for (const id of ["alpha", "bravo"]) {
+		socket.emit("message", dialog(id));
+		socket.emit("message", tree(id));
+	}
 	// Unsubscribed before the slow close starts, so the server's session_disposed
 	// for this generation never reaches a resume that finishes ahead of it.
 	const closing = useStore.getState().disposeSession("alpha");
@@ -212,8 +220,16 @@ test("closing a live chat ends this connection's stream at once; a resume before
 	await settle();
 	answer(resumeOf("alpha"), { sessionId: "alpha", sessionFile: "/s/alpha.jsonl", cwd: "/tmp" });
 	await Bun.sleep(5);
-	expect(useStore.getState().subscribed.has("alpha")).toBe(true);
+	socket.emit("message", { type: "subscribed", sessionId: "alpha", snapshot: snapshot("alpha") });
+	let state = useStore.getState();
+	expect(state.subscribed.has("alpha")).toBe(true);
+	// The reopened chat shows neither the closed chat's dialog nor its tree; bravo keeps both.
+	expect(state.pendingDialogs.alpha).toBeUndefined();
+	expect(state.subagentsBySession.alpha).toBeUndefined();
+	expect(state.pendingDialogs.bravo?.dialogId).toBe("bravo-ask");
+	expect(state.subagentsBySession.bravo?.[0]?.id).toBe("bravo-child");
 	// The reply to the close's unsubscribe arrives late: the resumed chat keeps its subscription.
-	sockets.at(-1)!.emit("message", { type: "unsubscribed", sessionId: "alpha" });
-	expect(useStore.getState().subscribed.has("alpha")).toBe(true);
+	socket.emit("message", { type: "unsubscribed", sessionId: "alpha" });
+	state = useStore.getState();
+	expect(state.subscribed.has("alpha")).toBe(true);
 });

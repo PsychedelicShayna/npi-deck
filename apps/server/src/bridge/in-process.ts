@@ -30,6 +30,7 @@ import type {
 	SubagentTranscriptResponse,
 } from "@npi-deck/protocol";
 
+import { realpath } from "node:fs/promises";
 import * as path from "node:path";
 
 import { logger } from "../log.ts";
@@ -44,7 +45,7 @@ import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import { SubagentTree } from "./subagent-tree.ts";
 import { transcriptTail } from "./transcript-tail.ts";
 import { latestErrorTerminal, mixtureSnapshotTraces } from "./mixture-snapshot.ts";
-import { McpAllowlistError, SessionClosedError } from "./types.ts";
+import { McpAllowlistError, SessionClosedError, SessionInUseError } from "./types.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
@@ -177,7 +178,7 @@ export class InProcessAgentBridge implements AgentBridge {
 	 * applied when the open finishes: the session never becomes live.
 	 */
 	private opening = new Set<OpenReservation>();
-	/** Tail of each session file's resume queue, keyed by absolute path. */
+	/** Tail of each session file's resume queue, keyed by its real path. */
 	private resumes = new Map<string, Promise<void>>();
 	private disposed = false;
 	private reaperTimer: ReturnType<typeof setInterval> | null = null;
@@ -212,10 +213,11 @@ export class InProcessAgentBridge implements AgentBridge {
 		} finally { release(); }
 	}
 
-	resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
+	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
 		// One resume of a file at a time, so concurrent requests reuse the first
 		// one's session instead of each opening the file (also across a close).
-		const key = path.resolve(opts.sessionPath);
+		// Keyed by the real path, so a symlink queues with the file it names.
+		const key = await realpath(opts.sessionPath).catch(() => path.resolve(opts.sessionPath));
 		const run = (this.resumes.get(key) ?? Promise.resolve()).then(() => this.resumeLocked(key, opts));
 		const settled = run.then(() => {}, () => {});
 		this.resumes.set(key, settled);
@@ -228,23 +230,40 @@ export class InProcessAgentBridge implements AgentBridge {
 	private async resumeLocked(key: string, opts: ResumeSessionOpts): Promise<SessionHandle> {
 		const release = workRegistry.admit("session", `resume:${crypto.randomUUID()}`);
 		try {
-			const sameFile = (file: string | undefined) => file !== undefined && path.resolve(file) === key;
-			// A close of this file still holds its session lease; open it once that ends.
-			for (const c of this.closing.values()) {
-				if (sameFile(c.sessionFile)) await c.done;
+			// Another file, such as a copy, can hold the same session: the id in
+			// its header names the chat as much as the file does.
+			const id = await sessionFileId(opts.sessionPath);
+			const sameChat = (sessionId: string | undefined, file: string | undefined) =>
+				(id !== undefined && sessionId === id) || (file !== undefined && path.resolve(file) === key);
+			// A close of this chat still holds its session lease, and an open of it
+			// from another file is about to publish it: go on once those end.
+			for (;;) {
+				const pending: Promise<void>[] = [];
+				for (const [sessionId, c] of this.closing) if (sameChat(sessionId, c.sessionFile)) pending.push(c.done);
+				for (const r of this.opening) if (id !== undefined && r.sessionId === id) pending.push(r.done);
+				if (pending.length === 0) break;
+				await Promise.all(pending);
 			}
-			// A live session is reused rather than opening the same file twice.
-			for (const a of this.active.values()) {
-				if (sameFile(a.handle.sessionFile)) return a.handle;
+			// A live session is reused rather than opening the chat twice.
+			for (const [sessionId, a] of this.active) {
+				if (sameChat(sessionId, a.handle.sessionFile)) return a.handle;
 			}
 			// Reserve the id from the file's header before the full read, so a
-			// close of this chat sent while its file loads already finds it.
-			const reservation = this.reserveOpen(await sessionFileId(opts.sessionPath));
+			// close of this chat sent while its file loads already finds it, and
+			// a resume of another copy waits for this one.
+			const reservation = this.reserveOpen(id);
 			try {
 				const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
 				if (reservation.closeRequested || this.disposed) {
 					await sessionManager.close();
 					throw this.closedWhileOpening(sessionManager.getSessionId());
+				}
+				// A header the quick read could not parse may still name a live chat.
+				const opened = sessionManager.getSessionId();
+				const live = opened === id ? undefined : this.active.get(opened)?.handle;
+				if (live) {
+					await sessionManager.close();
+					return live;
 				}
 				// Absolute, like createSession: the SDK session and the deck's mixture
 				// lease must probe the same MIXTURES.toml search path even when an
@@ -283,12 +302,20 @@ export class InProcessAgentBridge implements AgentBridge {
 	/**
 	 * Start an SDK session and make it live. A close requested while it opens,
 	 * or shutdown, wins: the new session is disposed without ever becoming live.
+	 * A session already live, closing or opening elsewhere is refused before
+	 * start, and the reservation holds its id until publish, so a live entry is
+	 * never replaced.
 	 */
 	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed?: string[], fresh = false, reserved?: OpenReservation): Promise<InProcessSessionHandle> {
 		const sessionId = sessionManager.getSessionId();
 		const reservation = reserved ?? this.reserveOpen(sessionId);
 		reservation.sessionId = sessionId;
 		try {
+			const elsewhere = Array.from(this.opening).some((r) => r !== reservation && r.sessionId === sessionId);
+			if (this.active.has(sessionId) || this.closing.has(sessionId) || elsewhere) {
+				await sessionManager.close();
+				throw new SessionInUseError(`session ${sessionId} is already open from another file`);
+			}
 			const { handle, entry } = await this.start(cwd, sessionManager, model, mcpServersAllowed, fresh);
 			if (reservation.closeRequested || this.disposed) {
 				this.beginClose(sessionId, handle);

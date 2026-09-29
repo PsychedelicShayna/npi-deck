@@ -8,7 +8,7 @@
  * that resubscribes after a close and resume streams the reopened chat (#11).
  */
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ServerFrame } from "@npi-deck/protocol";
@@ -78,7 +78,7 @@ if (!fixtureRoot) {
 			const output = `${child.stdout.toString()}${child.stderr.toString()}`;
 			if (child.exitCode !== 0) console.error(output);
 			expect(child.exitCode).toBe(0);
-			expect(output).toContain("5 pass");
+			expect(output).toContain("6 pass");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -227,6 +227,42 @@ if (!fixtureRoot) {
 			expect(sessionStarts() - before).toBe(1);
 
 			// One stream: both tabs see the same events for a prompt from either.
+			const [seenByA, seenByB] = await prompt(tabA, [tabA, tabB]);
+			expect(seenByA!.length).toBe(3);
+			expect(seenByB).toEqual(seenByA!);
+		} finally {
+			await close();
+		}
+	}, 90_000);
+
+	test("a symlink and a copy of a chat's file resumed at once open one session with one stream", async () => {
+		const id = "01a0ea00-0000-7000-8000-000000000202";
+		const { file, bridge, hub, request, connect, prompt, close } = await fixture(id);
+		const aliases = path.join(fixtureRoot!, `aliases-${id}`);
+		mkdirSync(aliases, { recursive: true });
+		const link = path.join(aliases, "link.jsonl");
+		const copy = path.join(aliases, "copy.jsonl");
+		symlinkSync(file, link);
+		copyFileSync(file, copy);
+		try {
+			const before = sessionStarts();
+			const resume = (from: string) => request("POST", "/sessions", { resumeFromPath: from });
+			const answers = await Promise.all([resume(file), resume(link), resume(copy), resume(link), resume(copy)]);
+			expect(answers.map((r) => r.status)).toEqual([200, 200, 200, 200, 200]);
+			expect(sessionStarts() - before).toBe(1);
+			const live = bridge.getSession(id)!;
+
+			// Two tabs watch it; resuming either alias again reuses what they watch.
+			const tabA = connect();
+			const tabB = connect();
+			await hub.onMessage(tabA.ws, JSON.stringify({ type: "subscribe", sessionId: id }));
+			await hub.onMessage(tabB.ws, JSON.stringify({ type: "subscribe", sessionId: id }));
+			expect(await bridge.resumeSession({ sessionPath: link })).toBe(live);
+			expect(await bridge.resumeSession({ sessionPath: copy })).toBe(live);
+			expect(bridge.getSession(id)).toBe(live);
+			expect(sessionStarts() - before).toBe(1);
+			expect(tabA.disposed()).toEqual([]);
+
 			const [seenByA, seenByB] = await prompt(tabA, [tabA, tabB]);
 			expect(seenByA!.length).toBe(3);
 			expect(seenByB).toEqual(seenByA!);

@@ -476,11 +476,19 @@ export const useStore = create<StoreState>()(
 			// Closing the chat on screen is a navigation: an open still in
 			// flight must not bring a chat back afterwards.
 			if (get().activeId === id) ++navigation;
+			// Unsubscribed, this tab gets neither the dialog cancel nor the
+			// session_disposed that would clear the rest: a reopened chat starts clean.
 			set((s) => {
 				const next = { ...s.sessionsById };
 				delete next[id];
+				const pendingDialogs = { ...s.pendingDialogs };
+				delete pendingDialogs[id];
+				const subagentsBySession = { ...s.subagentsBySession };
+				delete subagentsBySession[id];
 				return {
 					sessionsById: next,
+					pendingDialogs,
+					subagentsBySession,
 					activeId: s.activeId === id ? undefined : s.activeId,
 				};
 			});

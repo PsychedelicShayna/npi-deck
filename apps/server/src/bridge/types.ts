@@ -171,6 +171,11 @@ export class SessionClosedError extends Error {
 	override name = "SessionClosedError";
 }
 
+/** Another file of the same session is open, opening or closing; one session never runs twice. */
+export class SessionInUseError extends Error {
+	override name = "SessionInUseError";
+}
+
 export interface CreateSessionOpts {
 	cwd: string;
 	model?: ModelRef;
