@@ -142,7 +142,8 @@ test("a placeholder outside a credential position is refused before validation a
 		["model name", raw!.replace("- id: beta-small", `- id: beta-small\n        name: "${placeholder}"`)],
 		["model id", raw!.replace("- id: gamma-mini", `- id: "${placeholder}"`)],
 		["provider key", raw!.replace("  gamma:\n", `  "${placeholder}":\n`)],
-		["baseUrl", raw!.replace("https://beta.test/v1", `https://beta.test/v1?key=${placeholder}`)],
+		["inside a baseUrl", raw!.replace("https://beta.test/v1", `https://beta.test/v1?key=${placeholder}`)],
+		["an apiKey as a whole baseUrl", raw!.replace("baseUrl: https://beta.test/v1", `baseUrl: "${placeholder}"`)],
 		["api", raw!.replace("api: openai-completions", `api: "${placeholder}"`)],
 		["comment", raw!.replace(COMMENT_ANYWHERE, `# ${placeholder}`)],
 		["alias into a name", raw!.replace(`apiKey: "${placeholder}"`, `apiKey: &k "${placeholder}"`).replace("- id: beta-small", "- id: beta-small\n        name: *k")],
@@ -169,14 +170,70 @@ test("a short credential that also appears elsewhere withholds the document; a l
 	expect(short.providers).toEqual([]);
 	expect(JSON.stringify([short.raw, short.providers, short.error])).not.toContain("zq9");
 
-	await writeFile(modelsFile, FIXTURE.replace("https://beta.test/v1", "https://beta.test/v1?key=sk-acme-live-77aa0b"));
+	await writeFile(modelsFile, FIXTURE.replace("- id: beta-small", "- id: beta-small\n        name: backup of sk-acme-live-77aa0b"));
 	const response = await request("/models-config");
 	expectNoSecret(await response.clone().text());
 	const long = await response.json() as ModelsConfigResponse;
-	expect(long.providers.find(p => p.name === "beta")!.baseUrl).toMatch(PLACEHOLDER);
-	// That placeholder sits in baseUrl, where it cannot be restored: saving it unchanged is refused.
+	expect(long.providers.find(p => p.name === "beta")!.models[0]!.name).toMatch(PLACEHOLDER);
+	// That placeholder sits in a model name, where it cannot be restored: saving it unchanged is refused.
 	const resave = await send("PUT", "/models-config", { raw: long.raw!, revision: long.revision });
 	expect(resave.status).toBe(400);
+});
+
+test("a baseUrl with userinfo, a query, a fragment or encoded delimiters is masked whole, redacted in the summary, and round-trips", async () => {
+	const urls = {
+		query: "https://gateway.test/v1?token=sk-query-live-1111",
+		userinfo: "https://svc-user:pw%2Duserinfo%2D2222@userinfo.test:8443/v1",
+		fragment: "https://frag.test/v1#sk-fragment-live-3333",
+		encoded: "https://pct.test/v1%3Ftoken%3Dsk-pct-live-4444",
+		model: "https://model.test/v2?key=sk-model-live-5555",
+	};
+	const provider = (name: string, baseUrl: string, model = "") =>
+		`  ${name}:\n    baseUrl: "${baseUrl}"\n    api: openai-completions\n    auth: none\n    models:\n      - id: ${name}-model\n${model}`;
+	const file = `providers:\n${[
+		provider("gw", urls.query, `        baseUrl: "${urls.model}"\n`),
+		provider("ui", urls.userinfo),
+		provider("fr", urls.fragment),
+		provider("pc", urls.encoded),
+		provider("plain", "https://plain.test/v1"),
+	].join("")}`;
+	await writeFile(modelsFile, file);
+	const leaked = [
+		...Object.values(urls), "sk-query-live-1111", "svc-user", "pw%2Duserinfo%2D2222", "pw-userinfo-2222",
+		"sk-fragment-live-3333", "sk-pct-live-4444", "%3Dsk-pct", "sk-model-live-5555",
+	];
+	const response = await request("/models-config");
+	expectNoSecret(await response.clone().text(), leaked);
+	const body = await response.json() as ModelsConfigResponse;
+	expect(body.raw!.match(/baseUrl: "<npi-deck-masked:[0-9a-f]{16}>"/g)).toHaveLength(5);
+	expect(body.raw).toContain('baseUrl: "https://plain.test/v1"');
+	const expected = {
+		gw: "https://gateway.test/v1?••••••",
+		ui: "https://••••••@userinfo.test:8443/v1",
+		fr: "https://frag.test/v1#••••••",
+		pc: "https://pct.test/••••••",
+		plain: "https://plain.test/v1",
+	};
+	const shown = (providers: ModelsConfigResponse["providers"]) => Object.fromEntries(providers.map(p => [p.name, p.baseUrl]));
+	expect(shown(body.providers)).toEqual(expected);
+	expect(body.providers.find(p => p.name === "gw")!.models[0]!.baseUrl).toBe("https://model.test/v2?••••••");
+
+	const validated = await send("POST", "/models-config/validate", { raw: body.raw! });
+	const validatedText = await validated.text();
+	expectNoSecret(validatedText, leaked);
+	expect(shown((JSON.parse(validatedText) as { providers: ModelsConfigResponse["providers"] }).providers)).toEqual(expected);
+
+	const edited = body.raw!.replace("- id: plain-model", "- id: plain-model\n      - id: plain-extra");
+	const saved = await send("PUT", "/models-config", { raw: edited, revision: body.revision });
+	expect(saved.status).toBe(200);
+	expectNoSecret(await saved.text(), leaked);
+	const onDisk = parseYaml(await readFile(modelsFile, "utf8")) as { providers: Record<string, { baseUrl: string; models: Array<{ id: string; baseUrl?: string }> }> };
+	expect(onDisk.providers.gw!.baseUrl).toBe(urls.query);
+	expect(onDisk.providers.gw!.models[0]!.baseUrl).toBe(urls.model);
+	expect(onDisk.providers.ui!.baseUrl).toBe(urls.userinfo);
+	expect(onDisk.providers.fr!.baseUrl).toBe(urls.fragment);
+	expect(onDisk.providers.pc!.baseUrl).toBe(urls.encoded);
+	expect(onDisk.providers.plain!.models.map(m => m.id)).toEqual(["plain-model", "plain-extra"]);
 });
 
 test("no comment text is shown; unchanged comment placeholders restore verbatim, edited and new comments are kept as typed", async () => {

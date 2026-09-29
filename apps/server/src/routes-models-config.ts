@@ -43,6 +43,7 @@ import { getDeckModelRegistry } from "./auth-singleton.ts";
 import { feature, sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
 import {
+	displayUrl,
 	leaksSecret,
 	maskModelsYaml,
 	PlaceholderError,
@@ -103,11 +104,15 @@ function validateWithNeoPi(text: string): Validation {
 	}
 }
 
-/** Summary of a masked document's config: credentials are at most placeholders, and only their presence is reported. */
-function summarize(config: ModelsConfig): ModelsConfigProviderSummary[] {
+/**
+ * Summary of a masked document's config: credentials are at most placeholders,
+ * and only their presence is reported; a baseUrl that can carry a credential is
+ * shown as `scheme://host[:port]/path` with its other components redacted.
+ */
+function summarize(config: ModelsConfig, secrets: Map<string, Secret>): ModelsConfigProviderSummary[] {
 	return Object.entries(config.providers ?? {}).map(([name, provider]) => ({
 		name,
-		baseUrl: provider.baseUrl,
+		baseUrl: displayUrl(provider.baseUrl, secrets),
 		api: provider.api,
 		auth: provider.auth ?? "apiKey",
 		apiKeySet: provider.apiKey !== undefined,
@@ -118,7 +123,7 @@ function summarize(config: ModelsConfig): ModelsConfigProviderSummary[] {
 			id: model.id,
 			name: model.name,
 			api: model.api,
-			baseUrl: model.baseUrl,
+			baseUrl: displayUrl(model.baseUrl, secrets),
 			contextWindow: model.contextWindow,
 			maxTokens: model.maxTokens,
 			reasoning: model.reasoning,
@@ -152,7 +157,7 @@ function describe(file: string, text: string | null): { response: ModelsConfigRe
 	}
 	const shown = validateWithNeoPi(mask.masked);
 	const error = disk.ok ? undefined : safeMessage(shown.ok ? WITHHELD_MESSAGE : shown.message, mask.known);
-	const providers = disk.ok && shown.ok ? summarize(shown.config) : [];
+	const providers = disk.ok && shown.ok ? summarize(shown.config, mask.secrets) : [];
 	if (leaksSecret({ providers, error }, mask.known)) return { response: withheld(disk.ok ? undefined : WITHHELD_MESSAGE), known: mask.known };
 	return {
 		response: {
@@ -173,7 +178,7 @@ function describe(file: string, text: string | null): { response: ModelsConfigRe
  * is returned; a rejection that appears only once credentials are restored is
  * withheld, since it could quote one.
  */
-function prepare(raw: string, diskText: string | null): { text: string; config: ModelsConfig } {
+function prepare(raw: string, diskText: string | null): { text: string; config: ModelsConfig; secrets: Map<string, Secret> } {
 	const disk = diskText === null ? undefined : maskModelsYaml(diskText);
 	const secrets: Map<string, Secret> = disk?.ok ? disk.secrets : new Map();
 	const commentSources: Map<string, string> = disk?.ok ? disk.comments : new Map();
@@ -193,7 +198,7 @@ function prepare(raw: string, diskText: string | null): { text: string; config: 
 			throw new RequestError(RESTORED_REJECTED, 400);
 		}
 	}
-	return { text, config: submitted.config };
+	return { text, config: submitted.config, secrets };
 }
 
 /**
@@ -320,8 +325,8 @@ export function buildModelsConfigRouter(): Hono {
 		const body = await documentRequest(c, false);
 		if (typeof body === "string") return c.json({ error: body }, 400);
 		try {
-			const { config } = prepare(body.raw, readModelsFile(modelsFile()));
-			const response: ModelsConfigValidateResponse = { providers: summarize(config) };
+			const { config, secrets } = prepare(body.raw, readModelsFile(modelsFile()));
+			const response: ModelsConfigValidateResponse = { providers: summarize(config, secrets) };
 			return c.json(response);
 		} catch (err) {
 			if (err instanceof RequestError) return c.json({ error: err.message }, err.status);

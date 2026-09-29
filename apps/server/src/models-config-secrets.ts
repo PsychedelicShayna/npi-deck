@@ -7,6 +7,9 @@
  * - every value in a credential position of NeoPi's schema: a provider's
  *   `apiKey`, every header value under any name (provider, model and model
  *   override headers) and every `requestMetadata` value;
+ * - every `baseUrl` (provider, model, model override) with userinfo, a query or
+ *   a fragment (percent-encoded delimiters included), whole; its credential
+ *   pieces join the known credentials;
  * - every value under a credential-like key anywhere else (`token`, `secret`,
  *   `password`, `*key`, …), following aliases and merge keys;
  * - every other occurrence of such a value at least MIN_REPLACE long, in any
@@ -73,6 +76,111 @@ export function isCredentialPath(path: readonly PathKey[]): boolean {
 	return false;
 }
 
+/** `baseUrl` of a provider, a model or a model override. */
+export function isUrlPath(path: readonly PathKey[]): boolean {
+	if (path[0] !== "providers" || path.length < 3) return false;
+	const rest = path.slice(2);
+	if (rest.length === 1) return rest[0] === "baseUrl";
+	if (rest.length === 3) return rest[2] === "baseUrl" && ((rest[0] === "models" && typeof rest[1] === "number") || rest[0] === "modelOverrides");
+	return false;
+}
+
+const REDACTED = "••••••";
+const URL_DELIMITERS = /[?#@]/;
+
+function decoded(text: string): string | undefined {
+	try {
+		return decodeURIComponent(text);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A URL that can carry a credential: userinfo, a query or a fragment, including
+ * their percent-encoded delimiters. Text that does not decode counts as one.
+ */
+export function isSensitiveUrl(value: string): boolean {
+	const plain = decoded(value);
+	return plain === undefined || URL_DELIMITERS.test(value) || URL_DELIMITERS.test(plain);
+}
+
+/** The pieces of a sensitive URL that could be a credential, raw and decoded, for the survival checks. */
+function urlCredentialParts(value: string): string[] {
+	const parts = new Set<string>([value]);
+	const add = (text: string | undefined) => {
+		if (!text) return;
+		parts.add(text);
+		const plain = decoded(text);
+		if (plain) parts.add(plain);
+	};
+	const authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)/.exec(value)?.[1];
+	const at = authority?.lastIndexOf("@") ?? -1;
+	if (authority !== undefined && at >= 0) {
+		const userinfo = authority.slice(0, at);
+		add(userinfo);
+		for (const piece of userinfo.split(":")) add(piece);
+	}
+	const hash = value.indexOf("#");
+	const query = value.indexOf("?");
+	if (hash >= 0) add(value.slice(hash + 1));
+	if (query >= 0 && (hash < 0 || query < hash)) {
+		const search = value.slice(query + 1, hash > query ? hash : undefined);
+		add(search);
+		for (const pair of search.split("&")) { add(pair); add(pair.slice(pair.indexOf("=") + 1)); }
+	}
+	try {
+		const url = new URL(value);
+		add(url.username);
+		add(url.password);
+		add(url.search.slice(1));
+		add(url.hash.slice(1));
+		for (const param of url.searchParams.values()) add(param);
+		if (URL_DELIMITERS.test(decoded(url.pathname) ?? "?")) add(url.pathname);
+	} catch {
+		// The whole value is already listed.
+	}
+	return [...parts];
+}
+
+/** `scheme://host[:port]/path` with `••••••` for each credential-bearing component; `••••••` when it is not such a URL. */
+export function redactUrl(value: string): string {
+	const authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)/.exec(value)?.[1];
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return REDACTED;
+	}
+	if (authority === undefined || url.host === "") return REDACTED;
+	const path = URL_DELIMITERS.test(decoded(url.pathname) ?? "?") ? `/${REDACTED}` : url.pathname;
+	const userinfo = authority.includes("@") ? `${REDACTED}@` : "";
+	const hash = value.indexOf("#");
+	const query = value.indexOf("?");
+	const search = query >= 0 && (hash < 0 || query < hash) ? `?${REDACTED}` : "";
+	return `${url.protocol}//${userinfo}${url.host}${path}${search}${hash >= 0 ? `#${REDACTED}` : ""}`;
+}
+
+/**
+ * A baseUrl as a summary may show it: a placeholder for a masked URL becomes
+ * that URL's redacted form, a typed sensitive URL is redacted, any other text
+ * carrying a placeholder becomes `••••••`.
+ */
+export function displayUrl(value: string | undefined, secrets: Map<string, Secret>): string | undefined {
+	if (value === undefined) return undefined;
+	if (PLACEHOLDER_EXACT.test(value)) {
+		const secret = secrets.get(value);
+		return typeof secret?.value === "string" && isSensitiveUrl(secret.value) ? redactUrl(secret.value) : REDACTED;
+	}
+	if (value.includes(MASK_MARK)) return REDACTED;
+	return isSensitiveUrl(value) ? redactUrl(value) : value;
+}
+
+/** Whether a restored placeholder's credential may stand at `path`: any at a credential position, a sensitive URL at a baseUrl. */
+function restorableAt(path: readonly PathKey[], secret: Secret): boolean {
+	return isCredentialPath(path) || (isUrlPath(path) && typeof secret.value === "string" && isSensitiveUrl(secret.value));
+}
+
 function placeholderFor(text: string): string {
 	return `<${MASK_MARK}:${keyed("credential", text).slice(0, 16)}>`;
 }
@@ -133,10 +241,12 @@ function allScalars(doc: Document): Scalar[] {
 }
 
 interface Reach {
-	/** Scalars reached through a credential position or under a credential-like key: masked. */
+	/** Scalars reached through a credential position, a sensitive baseUrl or under a credential-like key: masked. */
 	masked: Set<Scalar>;
 	/** Scalars reached through a credential position of the schema. */
 	credential: Set<Scalar>;
+	/** Scalars reached through a baseUrl. */
+	url: Set<Scalar>;
 	/** Scalars reached through any other position. */
 	elsewhere: Set<Scalar>;
 }
@@ -147,7 +257,7 @@ interface Reach {
  * document exceeds the walk budget.
  */
 function reach(doc: Document): Reach | undefined {
-	const result: Reach = { masked: new Set(), credential: new Set(), elsewhere: new Set() };
+	const result: Reach = { masked: new Set(), credential: new Set(), url: new Set(), elsewhere: new Set() };
 	const onPath = new Set<unknown>();
 	let visits = 0;
 	const walk = (node: unknown, path: PathKey[], secret: boolean): boolean => {
@@ -162,8 +272,10 @@ function reach(doc: Document): Reach | undefined {
 		}
 		if (isScalar(node)) {
 			const credential = isCredentialPath(path);
-			(credential ? result.credential : result.elsewhere).add(node);
-			if (secret || credential) result.masked.add(node);
+			const url = !credential && isUrlPath(path);
+			(credential ? result.credential : url ? result.url : result.elsewhere).add(node);
+			const sensitiveUrl = url && typeof node.value === "string" && isSensitiveUrl(node.value);
+			if (secret || credential || sensitiveUrl) result.masked.add(node);
 			return true;
 		}
 		if (isMap(node)) {
@@ -238,6 +350,8 @@ export function maskModelsYaml(text: string): MaskResult {
 		const value = String(node.value);
 		if (value === "") continue;
 		knownSet.add(value);
+		// A masked URL's credential pieces must not survive anywhere either.
+		if (reached.url.has(node) && isSensitiveUrl(value)) for (const part of urlCredentialParts(value)) knownSet.add(part);
 		secrets.set(placeholderFor(value), { value: node.value, text: value });
 	}
 	const known = [...knownSet];
@@ -286,9 +400,9 @@ function lineOf(text: string, offset: number): number {
 function sameExceptRestored(submitted: unknown, restored: unknown, path: PathKey[], secrets: Map<string, Secret>): boolean {
 	if (typeof submitted === "string" && submitted.includes(COMMENT_MARK)) return false;
 	if (typeof submitted === "string" && submitted.includes(MASK_MARK)) {
-		if (!isCredentialPath(path) || !PLACEHOLDER_EXACT.test(submitted)) return false;
+		if (!PLACEHOLDER_EXACT.test(submitted)) return false;
 		const secret = secrets.get(submitted);
-		return secret !== undefined && Bun.deepEquals(secret.value, restored);
+		return secret !== undefined && restorableAt(path, secret) && Bun.deepEquals(secret.value, restored);
 	}
 	if (Array.isArray(submitted)) {
 		return Array.isArray(restored) && submitted.length === restored.length
@@ -304,7 +418,7 @@ function sameExceptRestored(submitted: unknown, restored: unknown, path: PathKey
 	return Bun.deepEquals(submitted, restored);
 }
 
-const OUTSIDE_CREDENTIAL = "can only be restored as the whole value of an apiKey, a header or a requestMetadata entry. Replace it with the full value, or remove it.";
+const OUTSIDE_CREDENTIAL = "can only be restored as the whole value of an apiKey, a header or a requestMetadata entry, or a masked URL as a whole baseUrl. Replace it with the full value, or remove it.";
 const OUTSIDE_COMMENT = "a comment placeholder is restored only as a whole, unchanged comment. Leave it exactly as shown, or delete it and write the comment you want.";
 const STALE_PLACEHOLDER = "does not match the file on disk (it changed, or the deck restarted since the editor loaded). Reload, then reapply your edits.";
 
@@ -312,7 +426,7 @@ const STALE_PLACEHOLDER = "does not match the file on disk (it changed, or the d
  * Put the credentials from `secrets` and the comments from `comments` (the
  * on-disk file's masking) back in place of their placeholders. A credential
  * placeholder is restored only where it is the whole value of a credential
- * position; anywhere else (a name, id, key, baseUrl, comment, tag, or an alias
+ * position (a masked URL also as a whole baseUrl); anywhere else (a name, id, key, baseUrl, comment, tag, or an alias
  * reaching another field) the document is refused with 400 before anything is
  * validated or written. A comment placeholder is restored only as a whole,
  * unchanged comment, and refused with 400 anywhere else. An unknown
@@ -328,15 +442,18 @@ export function restoreModelsYaml(raw: string, secrets: Map<string, Secret>, com
 	const edits: Edit[] = [];
 	const ranges: Array<[number, number]> = [];
 	let unknown = false;
-	for (const node of reached.credential) {
+	for (const node of new Set([...reached.credential, ...reached.url])) {
 		if (reached.elsewhere.has(node) || typeof node.value !== "string" || !node.value.includes(MASK_MARK) || !node.range) continue;
 		if (!PLACEHOLDER_EXACT.test(node.value)) {
 			throw new PlaceholderError(`Line ${lineOf(raw, node.range[0])}: a masked credential ${OUTSIDE_CREDENTIAL}`, 400);
 		}
 		ranges.push([node.range[0], node.range[1]]);
 		const secret = secrets.get(node.value);
-		if (secret) edits.push(scalarEdit(node, raw, JSON.stringify(secret.value)));
-		else unknown = true;
+		if (!secret) { unknown = true; continue; }
+		// A baseUrl takes back only a masked URL: any other credential there would be shown on the next read.
+		const urlOk = !reached.url.has(node) || (typeof secret.value === "string" && isSensitiveUrl(secret.value));
+		if (!urlOk) throw new PlaceholderError(`Line ${lineOf(raw, node.range[0])}: a masked credential ${OUTSIDE_CREDENTIAL}`, 400);
+		edits.push(scalarEdit(node, raw, JSON.stringify(secret.value)));
 	}
 	const commentRanges: Array<[number, number]> = [];
 	for (const comment of comments(raw)) {

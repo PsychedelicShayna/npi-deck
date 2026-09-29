@@ -119,10 +119,12 @@ export function ModelsConfigSection() {
 						<div className="space-y-2 p-3">
 							{data.raw === null ? <Alert tone="warn">{data.rawUnavailable}</Alert> : null}
 							<p className="text-xs text-ink-3">
-								Credentials appear as <code className="font-mono text-2xs">&lt;npi-deck-masked:…&gt;</code>. A placeholder that is the
-								whole value of an <code className="font-mono text-2xs">apiKey</code>, a header or a requestMetadata entry keeps the
-								stored value on save (it may be moved or copied between those). Anywhere else, such as a URL, a save is refused:
-								replace it with the full value, a new key, an environment variable name or a{" "}
+								Credentials appear as <code className="font-mono text-2xs">&lt;npi-deck-masked:…&gt;</code>, including any whole{" "}
+								<code className="font-mono text-2xs">baseUrl</code> with a user name, password, query or fragment (the provider list shows
+								its host and path). A placeholder that is the whole value of an <code className="font-mono text-2xs">apiKey</code>, a
+								header or a requestMetadata entry keeps the stored value on save (it may be moved or copied between those), and a
+								masked URL does the same as a whole baseUrl. Anywhere else a save is refused: replace it with the full value, a new
+								key, an environment variable name or a{" "}
 								<code className="font-mono text-2xs">!command</code>, or delete it. Comments are never shown: each appears as{" "}
 								<code className="font-mono text-2xs"># &lt;npi-deck-comment:…&gt;</code> and is saved back verbatim if left exactly as
 								it is. Delete one to remove it; a comment you write, or write in place of one, is saved as typed.
