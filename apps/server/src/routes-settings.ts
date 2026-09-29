@@ -23,20 +23,21 @@ import {
 	readManagedEnvFile,
 } from "./env-store.ts";
 import { setLogLevel } from "./log.ts";
+import { isLoopbackRequest, type RequestPeerEnv } from "./request-peer.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 
 export function buildSettingsRouter(
 	bridge: AgentBridge,
 	config: Config,
 	opts: { restartServer?: () => RestartServerResponse } = {},
-): Hono {
-	const app = new Hono();
+): Hono<RequestPeerEnv> {
+	const app = new Hono<RequestPeerEnv>();
 
 	app.get("/settings/env", (c) => c.json(buildEnvResponse()));
 
 	app.get("/settings/env/:key", async (c) => {
 		if (c.req.query("reveal") !== "1") return c.json({ error: "reveal=1 required" }, 400);
-		if (!isLoopbackRequest(c.req.raw)) return c.json({ error: "secret reveal requires loopback" }, 403);
+		if (!isLoopbackRequest(c.req.raw, c.env)) return c.json({ error: "secret reveal requires loopback" }, 403);
 		const key = c.req.param("key");
 		const entry = ENV_SCHEMA_BY_KEY.get(key);
 		if (!entry) return c.json({ error: "unknown env key" }, 404);
@@ -85,7 +86,7 @@ export function buildSettingsRouter(
 	});
 
 	app.post("/server/restart", (c) => {
-		if (!isLoopbackRequest(c.req.raw)) return c.json({ error: "restart requires loopback" }, 403);
+		if (!isLoopbackRequest(c.req.raw, c.env)) return c.json({ error: "restart requires loopback" }, 403);
 		const resp = opts.restartServer?.() ?? { ok: false, message: "Restart is unavailable" };
 		return c.json(resp);
 	});
@@ -172,9 +173,3 @@ function applyHotUpdates(
 	}
 	return applied;
 }
-
-function isLoopbackRequest(req: Request): boolean {
-	const host = new URL(req.url).hostname.toLowerCase();
-	return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
-}
-

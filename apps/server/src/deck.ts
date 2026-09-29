@@ -324,7 +324,8 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 				}
 				const trimmed = new URL(req.url);
 				trimmed.pathname = endpoint;
-				return router.fetch(new Request(trimmed.toString(), req));
+				// Privileged routes authorize on the TCP peer, never on Host (#79).
+				return router.fetch(new Request(trimmed.toString(), req), { peerAddress: srv.requestIP(req)?.address });
 			}
 
 			// Pasted-image uploads. The uploads route returns URLs rooted at

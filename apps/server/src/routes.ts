@@ -45,6 +45,7 @@ import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
 import type { SkillsService } from "./skills-service.ts";
 import type { KbService } from "./kb-service.ts";
+import type { RequestPeerEnv } from "./request-peer.ts";
 
 export function buildRouter(
 	bridge: AgentBridge,
@@ -55,8 +56,8 @@ export function buildRouter(
 	skills: SkillsService,
 	kb: KbService,
 	opts: { restartServer?: () => RestartServerResponse } = {},
-): Hono {
-	const app = new Hono();
+): Hono<RequestPeerEnv> {
+	const app = new Hono<RequestPeerEnv>();
 
 	app.get("/health", (c) => {
 		const info = getBuildInfo();
