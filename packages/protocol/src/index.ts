@@ -264,15 +264,19 @@ export interface ModelsConfigResponse {
 	/** File NeoPi reads: models.yml, or models.yaml when only that exists. */
 	path: string;
 	exists: boolean;
-	/** Identifies the file contents this response describes; saves must send it back. */
+	/**
+	 * Opaque, server-keyed identifier of the exact file contents (it cannot be checked
+	 * against a guessed credential); saves must send it back. It changes when the deck restarts.
+	 */
 	revision: string;
 	/**
 	 * The document with every credential replaced by a `<npi-deck-masked:…>` placeholder:
-	 * apiKey, every header and requestMetadata value, values under credential-like keys,
-	 * their other occurrences, and comment text from a credential-like word onward. A
-	 * placeholder saved as the whole value of an apiKey, header or requestMetadata entry
-	 * keeps the value on disk; anywhere else the save is refused (400). Null when the
-	 * credentials cannot be masked unambiguously; `rawUnavailable` says why.
+	 * apiKey, every header and requestMetadata value, values under credential-like keys and
+	 * their other occurrences. A placeholder saved as the whole value of an apiKey, header or
+	 * requestMetadata entry keeps the value on disk; anywhere else the save is refused (400).
+	 * Every comment is replaced by `# <npi-deck-comment:…>`, restored verbatim when saved as
+	 * that unchanged whole comment and refused (400) anywhere else. Null when the credentials
+	 * cannot be masked unambiguously; `rawUnavailable` says why.
 	 */
 	raw: string | null;
 	rawUnavailable?: string;

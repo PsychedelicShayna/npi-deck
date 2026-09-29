@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { lstat, mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -30,6 +31,8 @@ const send = (method: "PUT" | "POST", url: string, body: unknown) =>
 	request(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const load = async () => await (await request("/models-config")).json() as ModelsConfigResponse;
 const PLACEHOLDER = /<npi-deck-masked:[0-9a-f]{16}>/;
+const COMMENT = /^# <npi-deck-comment:[0-9a-f]{16}>$/;
+const COMMENT_ANYWHERE = /# <npi-deck-comment:[0-9a-f]{16}>/;
 
 const SECRETS = [
 	"sk-acme-live-77aa0b", "sk-bearer-3c4d1e", "svc-live-9a8b7c6d", "meta-tag-5e6f7a8b",
@@ -90,7 +93,9 @@ test("every header value, requestMetadata value and apiKey is masked in raw and 
 	const body = await response.json() as ModelsConfigResponse;
 	expect(body.path).toBe(modelsFile);
 	expect(body.error).toBeUndefined();
-	expect(body.raw).toContain("# Custom providers for the deck tests");
+	expect(body.raw).not.toContain("Custom providers for the deck tests");
+	expect(body.raw).not.toContain("literal key");
+	expect(body.raw!.split("\n")[0]).toMatch(COMMENT);
 	expect(body.raw).toContain("apiKey: *shared");
 	expect(body.raw).toMatch(/X-Service: "<npi-deck-masked:[0-9a-f]{16}>"/);
 	const acme = body.providers.find(p => p.name === "acme");
@@ -139,7 +144,7 @@ test("a placeholder outside a credential position is refused before validation a
 		["provider key", raw!.replace("  gamma:\n", `  "${placeholder}":\n`)],
 		["baseUrl", raw!.replace("https://beta.test/v1", `https://beta.test/v1?key=${placeholder}`)],
 		["api", raw!.replace("api: openai-completions", `api: "${placeholder}"`)],
-		["comment", raw!.replace("# Custom providers for the deck tests", `# ${placeholder}`)],
+		["comment", raw!.replace(COMMENT_ANYWHERE, `# ${placeholder}`)],
 		["alias into a name", raw!.replace(`apiKey: "${placeholder}"`, `apiKey: &k "${placeholder}"`).replace("- id: beta-small", "- id: beta-small\n        name: *k")],
 		["part of a header value", raw!.replace(/Authorization: "<npi-deck-masked:[0-9a-f]+>"/, `Authorization: "Bearer ${placeholder}"`)],
 	];
@@ -174,27 +179,73 @@ test("a short credential that also appears elsewhere withholds the document; a l
 	expect(resave.status).toBe(400);
 });
 
-test("a comment is masked from any credential-like word, known credential or placeholder-looking text onward", async () => {
-	const comments = [
+test("no comment text is shown; unchanged comment placeholders restore verbatim, edited and new comments are kept as typed", async () => {
+	const header = [
+		"# retired hunter2",
+		"# retired hunter2; password changed",
 		"# apiKey: <npi-deck-masked:0000000000000000> sk-other-live-123",
-		"# rotated sk-acme-live-77aa0b out last week",
-		"# token: hunter2hunter2",
-		"# see https://example.test/opaque/Zx81Qm0Lp2Rt7Yw4Ke9a",
+		"# keep me exactly:  spacing & symbols #1",
 	];
-	await writeFile(modelsFile, `${comments.join("\n")}\n${FIXTURE}`);
+	await writeFile(modelsFile, `${header.join("\n")}\n${FIXTURE}`);
 	const response = await request("/models-config");
-	const text = await response.clone().text();
-	expectNoSecret(text, [...SECRETS, "sk-other-live-123", "hunter2hunter2", "Zx81Qm0Lp2Rt7Yw4Ke9a", "0000000000000000"]);
+	expectNoSecret(await response.clone().text(), [
+		...SECRETS, "hunter2", "password changed", "sk-other-live-123", "0000000000000000", "keep me", "Custom providers", "literal key",
+	]);
 	const body = await response.json() as ModelsConfigResponse;
 	const lines = body.raw!.split("\n");
-	expect(lines[0]).toMatch(/^# apiKey: <npi-deck-masked:[0-9a-f]{16}>$/);
-	expect(lines[1]).toMatch(/^# rotated <npi-deck-masked:[0-9a-f]{16}>$/);
-	expect(lines[2]).toMatch(/^# token: <npi-deck-masked:[0-9a-f]{16}>$/);
-	expect(lines[3]).toMatch(/^# see https:<npi-deck-masked:[0-9a-f]{16}>$/);
-	// A masked comment cannot be restored; the save names its line.
-	const resave = await send("PUT", "/models-config", { raw: body.raw!, revision: body.revision });
-	expect(resave.status).toBe(400);
-	expect(((await resave.json()) as { error: string }).error).toContain("Line 1");
+	for (const line of lines.slice(0, 5)) expect(line).toMatch(COMMENT);
+	expect(body.raw).toMatch(/apiKey: "<npi-deck-masked:[0-9a-f]{16}>" {3}# <npi-deck-comment:[0-9a-f]{16}>/);
+
+	// Keep comments 1 and 4, rewrite 2, delete 3, add one.
+	const edited = [lines[0], "# retired, rotated on 2026-09-01", lines[3], "# added in the deck", ...lines.slice(4)].join("\n");
+	const saved = await send("PUT", "/models-config", { raw: edited, revision: body.revision });
+	expect(saved.status).toBe(200);
+	expectNoSecret(await saved.text(), [...SECRETS, "hunter2", "keep me", "rotated on", "added in the deck"]);
+	const onDisk = await readFile(modelsFile, "utf8");
+	expect(onDisk.split("\n").slice(0, 5)).toEqual([
+		"# retired hunter2",
+		"# retired, rotated on 2026-09-01",
+		"# keep me exactly:  spacing & symbols #1",
+		"# added in the deck",
+		"# Custom providers for the deck tests",
+	]);
+	expect(onDisk).toContain('apiKey: "sk-acme-live-77aa0b"   # literal key');
+	expect(onDisk).not.toContain("sk-other-live-123");
+});
+
+test("a comment placeholder anywhere but a whole unchanged comment is refused; an unknown one is stale", async () => {
+	const { raw, revision } = await load();
+	const comment = /# (<npi-deck-comment:[0-9a-f]{16}>)/.exec(raw!)![1]!;
+	const cases: Array<[string, string]> = [
+		["model name", raw!.replace("- id: beta-small", `- id: beta-small\n        name: "${comment}"`)],
+		["provider key", raw!.replace("  gamma:\n", `  "${comment}":\n`)],
+		["edited comment", raw!.replace(`# ${comment}`, `# ${comment} plus a note`)],
+	];
+	for (const [where, document] of cases) {
+		const response = await send("PUT", "/models-config", { raw: document, revision });
+		expect({ where, status: response.status }).toEqual({ where, status: 400 });
+		expect(((await response.json()) as { error: string }).error).toContain("comment placeholder");
+	}
+	const forged = await send("PUT", "/models-config", { raw: raw!.replace(comment, "<npi-deck-comment:0123456789abcdef>"), revision });
+	expect(forged.status).toBe(409);
+	expect(await readFile(modelsFile, "utf8")).toBe(FIXTURE);
+	expect(await Bun.file(backupFile).exists()).toBe(false);
+});
+
+test("the revision is keyed: a short apiKey cannot be recovered offline from raw and revision", async () => {
+	const file = 'providers:\n  pin:\n    baseUrl: https://pin.test/v1\n    api: openai-completions\n    apiKey: "zz42"\n    models:\n      - id: pin-model\n';
+	await writeFile(modelsFile, file);
+	const body = await load();
+	const reconstruct = (guess: string) => body.raw!.replace(/"<npi-deck-masked:[0-9a-f]{16}>"/, JSON.stringify(guess));
+	const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+	// The masked text plus the right guess is the file, so an unkeyed digest would confirm the guess.
+	expect(reconstruct("zz42")).toBe(file);
+	const candidates = Array.from({ length: 100 }, (_, n) => `zz${String(n).padStart(2, "0")}`);
+	expect(candidates.filter(guess => [sha256(reconstruct(guess)), sha256(guess)].includes(body.revision))).toEqual([]);
+	// It still identifies the file for compare-and-replace.
+	const saved = await send("PUT", "/models-config", { raw: body.raw!.replace("pin-model", "pin-model-2"), revision: body.revision });
+	expect(saved.status).toBe(200);
+	expect(await readFile(modelsFile, "utf8")).toContain('apiKey: "zz42"');
 });
 
 test("the backup replaces a symlinked .bak instead of writing through it, owner-only", async () => {

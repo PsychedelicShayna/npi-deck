@@ -10,7 +10,7 @@
  * no response is built from a document with restored credentials: summaries
  * and messages come from the submitted (masked) document or a re-masked read.
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
 	closeSync,
 	existsSync,
@@ -47,6 +47,7 @@ import {
 	maskModelsYaml,
 	PlaceholderError,
 	restoreModelsYaml,
+	revisionOf,
 	safeMessage,
 	type Secret,
 	WITHHELD_MESSAGE,
@@ -61,7 +62,6 @@ const RESTORED_REJECTED =
 	"NeoPi rejects the document once its masked credentials are restored; the message is withheld because it may quote one. The deck server log has the details.";
 /** Bun's YAML parse errors name no content; anything else about a file the deck cannot mask is withheld. */
 const PARSE_ONLY = /^Failed to load config file models, Unexpected error: YAML Parse error: [A-Za-z ]+$/;
-const ABSENT = "absent";
 
 class RequestError extends Error {
 	constructor(message: string, readonly status: 400 | 409) {
@@ -83,10 +83,6 @@ function readModelsFile(file: string): string | null {
 		if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
 		throw err;
 	}
-}
-
-function revisionOf(text: string | null): string {
-	return text === null ? ABSENT : createHash("sha256").update(text).digest("hex");
 }
 
 /**
@@ -180,9 +176,10 @@ function describe(file: string, text: string | null): { response: ModelsConfigRe
 function prepare(raw: string, diskText: string | null): { text: string; config: ModelsConfig } {
 	const disk = diskText === null ? undefined : maskModelsYaml(diskText);
 	const secrets: Map<string, Secret> = disk?.ok ? disk.secrets : new Map();
+	const commentSources: Map<string, string> = disk?.ok ? disk.comments : new Map();
 	let text: string;
 	try {
-		text = restoreModelsYaml(raw, secrets);
+		text = restoreModelsYaml(raw, secrets, commentSources);
 	} catch (err) {
 		if (err instanceof PlaceholderError) throw new RequestError(err.message, err.status);
 		throw err;

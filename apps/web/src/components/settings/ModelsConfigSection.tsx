@@ -121,9 +121,11 @@ export function ModelsConfigSection() {
 							<p className="text-xs text-ink-3">
 								Credentials appear as <code className="font-mono text-2xs">&lt;npi-deck-masked:…&gt;</code>. A placeholder that is the
 								whole value of an <code className="font-mono text-2xs">apiKey</code>, a header or a requestMetadata entry keeps the
-								stored value on save (it may be moved or copied between those). Anywhere else, including masked comments and
-								URLs, a save is refused: replace it with the full value, a new key, an environment variable name or a{" "}
-								<code className="font-mono text-2xs">!command</code>, or delete it.
+								stored value on save (it may be moved or copied between those). Anywhere else, such as a URL, a save is refused:
+								replace it with the full value, a new key, an environment variable name or a{" "}
+								<code className="font-mono text-2xs">!command</code>, or delete it. Comments are never shown: each appears as{" "}
+								<code className="font-mono text-2xs"># &lt;npi-deck-comment:…&gt;</code> and is saved back verbatim if left exactly as
+								it is. Delete one to remove it; a comment you write, or write in place of one, is saved as typed.
 							</p>
 							<textarea
 								aria-label="models.yml document"

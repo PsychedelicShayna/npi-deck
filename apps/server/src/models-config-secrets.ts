@@ -10,31 +10,44 @@
  * - every value under a credential-like key anywhere else (`token`, `secret`,
  *   `password`, `*key`, …), following aliases and merge keys;
  * - every other occurrence of such a value at least MIN_REPLACE long, in any
- *   scalar or key;
- * - in a comment, everything after a credential-like word, a known credential,
- *   a long token-like string or placeholder-looking text.
+ *   scalar or key.
  * A known credential still present anywhere (a short one, one hidden by an
  * escape) withholds the whole text.
  *
- * ID is an HMAC of the value under a per-process key. Saving restores a
- * placeholder only where it is the whole value of a credential position; a
- * placeholder anywhere else is refused, so a credential can never be moved
- * into a field the deck shows.
+ * No comment text is ever shown: every comment becomes `# <npi-deck-comment:ID>`,
+ * restored verbatim on save only when it stands unchanged as a whole comment.
+ * A comment the user writes or edits is saved as typed.
+ *
+ * IDs are HMACs under a per-process key, as is the file revision, so neither
+ * can be checked against a guessed credential offline. Saving restores a
+ * credential placeholder only where it is the whole value of a credential
+ * position; a placeholder anywhere else is refused, so a credential can never
+ * be moved into a field the deck shows.
  */
 import { createHmac, randomBytes } from "node:crypto";
 import { isAlias, isMap, isScalar, isSeq, parseDocument, Parser, type Document, type Scalar } from "yaml";
 
 export const MASK_MARK = "npi-deck-masked";
+export const COMMENT_MARK = "npi-deck-comment";
 const PLACEHOLDER_EXACT = /^<npi-deck-masked:[0-9a-f]{16}>$/;
+const COMMENT_EXACT = /^# <npi-deck-comment:[0-9a-f]{16}>$/;
 const SECRET_KEY_SUFFIXES = ["key", "authorization", "token", "secret", "password", "cookie", "credential", "credentials"];
 /** Shorter credentials are not substituted inside other text (the match would be ambiguous); their presence withholds the text. */
 const MIN_REPLACE = 8;
-/** Token-like runs in comments that could be a credential nobody labelled. */
-const TOKEN_LIKE = /[A-Za-z0-9_\-+/=.]{20,}/g;
 /** Walk budget: aliases can multiply a document exponentially. */
 const MAX_VISITS = 100_000;
+const ABSENT = "absent";
 
 const hmacKey = randomBytes(32);
+
+function keyed(domain: string, text: string): string {
+	return createHmac("sha256", hmacKey).update(domain).update("\0").update(text).digest("hex");
+}
+
+/** Opaque revision of a file's exact text, keyed per process: it identifies the text without allowing an offline guess at its credentials. */
+export function revisionOf(text: string | null): string {
+	return text === null ? ABSENT : keyed("revision", text);
+}
 
 export function isSecretKey(key: unknown): boolean {
 	if (typeof key !== "string") return false;
@@ -61,7 +74,11 @@ export function isCredentialPath(path: readonly PathKey[]): boolean {
 }
 
 function placeholderFor(text: string): string {
-	return `<${MASK_MARK}:${createHmac("sha256", hmacKey).update(text).digest("hex").slice(0, 16)}>`;
+	return `<${MASK_MARK}:${keyed("credential", text).slice(0, 16)}>`;
+}
+
+function commentPlaceholderFor(source: string): string {
+	return `# <${COMMENT_MARK}:${keyed("comment", source).slice(0, 16)}>`;
 }
 
 /** A masked credential: its scalar value (typed, for exact restores) and its text. */
@@ -76,7 +93,7 @@ function isNamePosition(path: readonly PathKey[]): boolean {
 }
 
 export type MaskResult =
-	| { ok: true; masked: string; secrets: Map<string, Secret>; known: string[] }
+	| { ok: true; masked: string; secrets: Map<string, Secret>; comments: Map<string, string>; known: string[] }
 	/** `known` holds the credentials that could be located, for scrubbing messages. */
 	| { ok: false; known: string[] };
 
@@ -183,27 +200,9 @@ function comments(text: string): Array<{ offset: number; source: string }> {
 	for (const token of new Parser().parse(text)) walk(token);
 	return out;
 }
-
-/** Where a comment stops being safe to show, or undefined when all of it is. */
-function commentCut(source: string, known: readonly string[]): number | undefined {
-	let cut = Number.POSITIVE_INFINITY;
-	for (const word of source.matchAll(/[A-Za-z0-9_-]+/g)) {
-		if (!isSecretKey(word[0])) continue;
-		const end = word.index + word[0].length;
-		cut = end + /^["']?[ \t]*[:=]?[ \t]*/.exec(source.slice(end))![0].length;
-		break;
-	}
-	for (const secret of known) {
-		const at = source.indexOf(secret);
-		if (at >= 0) cut = Math.min(cut, at);
-	}
-	const mark = source.indexOf(MASK_MARK);
-	if (mark >= 0) cut = Math.min(cut, Math.max(0, source.lastIndexOf("<", mark)));
-	for (const token of source.matchAll(TOKEN_LIKE)) {
-		if (/[A-Za-z]/.test(token[0]) && /[0-9]/.test(token[0])) { cut = Math.min(cut, token.index); break; }
-	}
-	// Never before the comment's `#`, which must stay for the line to remain a comment.
-	return Number.isFinite(cut) ? Math.max(1, cut) : undefined;
+/** Whether every comment in `text` is a comment placeholder: no comment text survives. */
+function onlyCommentPlaceholders(text: string): boolean {
+	return comments(text).every(comment => COMMENT_EXACT.test(comment.source));
 }
 
 /** Replacement text for a scalar's source range; a block scalar's range ends with its line break, which must stay. */
@@ -255,24 +254,27 @@ export function maskModelsYaml(text: string): MaskResult {
 			if (value !== node.value) edits.push(scalarEdit(node, text, JSON.stringify(value)));
 		}
 	}
+	// A comment inside a rewritten scalar (a block scalar's header comment) goes with it.
+	const rewritten = [...edits];
+	const commentSources = new Map<string, string>();
 	for (const comment of comments(text)) {
-		const cut = commentCut(comment.source, known);
-		if (cut === undefined) continue;
-		const tail = comment.source.slice(cut).trimEnd();
-		if (tail === "") continue;
-		edits.push({ start: comment.offset + cut, end: comment.offset + cut + tail.length, text: placeholderFor(tail) });
+		if (rewritten.some(edit => comment.offset >= edit.start && comment.offset < edit.end)) continue;
+		const placeholder = commentPlaceholderFor(comment.source);
+		commentSources.set(placeholder, comment.source);
+		edits.push({ start: comment.offset, end: comment.offset + comment.source.length, text: placeholder });
 	}
 	const masked = applyEdits(text, edits);
 	// Nothing known may survive: not in the text, not in a decoded (escaped) scalar, not in what NeoPi's parser reads.
 	if (known.some(secret => masked.includes(secret))) return { ok: false, known };
 	const check = parse(masked);
 	if (!check || known.some(secret => allScalars(check).some(node => String(node.value).includes(secret)))) return { ok: false, known };
+	if (!onlyCommentPlaceholders(masked)) return { ok: false, known };
 	try {
 		if (leaksSecret(Bun.YAML.parse(masked), known)) return { ok: false, known };
 	} catch {
 		return { ok: false, known };
 	}
-	return { ok: true, masked, secrets, known };
+	return { ok: true, masked, secrets, comments: commentSources, known };
 }
 
 /** Line (1-based) of an offset, for messages. */
@@ -282,6 +284,7 @@ function lineOf(text: string, offset: number): number {
 
 /** Walk NeoPi's parse of the submitted and restored documents together; they may differ only where a placeholder was restored. */
 function sameExceptRestored(submitted: unknown, restored: unknown, path: PathKey[], secrets: Map<string, Secret>): boolean {
+	if (typeof submitted === "string" && submitted.includes(COMMENT_MARK)) return false;
 	if (typeof submitted === "string" && submitted.includes(MASK_MARK)) {
 		if (!isCredentialPath(path) || !PLACEHOLDER_EXACT.test(submitted)) return false;
 		const secret = secrets.get(submitted);
@@ -295,31 +298,36 @@ function sameExceptRestored(submitted: unknown, restored: unknown, path: PathKey
 		if (!restored || typeof restored !== "object" || Array.isArray(restored)) return false;
 		const keys = Object.keys(submitted);
 		const other = restored as Record<string, unknown>;
-		if (keys.length !== Object.keys(other).length || keys.some(key => key.includes(MASK_MARK) || !(key in other))) return false;
+		if (keys.length !== Object.keys(other).length || keys.some(key => key.includes(MASK_MARK) || key.includes(COMMENT_MARK) || !(key in other))) return false;
 		return keys.every(key => sameExceptRestored((submitted as Record<string, unknown>)[key], other[key], [...path, key], secrets));
 	}
 	return Bun.deepEquals(submitted, restored);
 }
 
-const OUTSIDE_CREDENTIAL = "can only be restored as the whole value of an apiKey, a header or a requestMetadata entry. Replace it with the full value, or remove it (delete a masked comment).";
+const OUTSIDE_CREDENTIAL = "can only be restored as the whole value of an apiKey, a header or a requestMetadata entry. Replace it with the full value, or remove it.";
+const OUTSIDE_COMMENT = "a comment placeholder is restored only as a whole, unchanged comment. Leave it exactly as shown, or delete it and write the comment you want.";
+const STALE_PLACEHOLDER = "does not match the file on disk (it changed, or the deck restarted since the editor loaded). Reload, then reapply your edits.";
 
 /**
- * Put the credentials from `secrets` (the on-disk file's masking) back in
- * place of their placeholders. A placeholder is restored only where it is the
- * whole value of a credential position; anywhere else (a name, id, key,
- * baseUrl, comment, tag, or an alias reaching another field) the document is
- * refused with 400 before anything is validated or written, and an unknown
- * placeholder with 409.
+ * Put the credentials from `secrets` and the comments from `comments` (the
+ * on-disk file's masking) back in place of their placeholders. A credential
+ * placeholder is restored only where it is the whole value of a credential
+ * position; anywhere else (a name, id, key, baseUrl, comment, tag, or an alias
+ * reaching another field) the document is refused with 400 before anything is
+ * validated or written. A comment placeholder is restored only as a whole,
+ * unchanged comment, and refused with 400 anywhere else. An unknown
+ * placeholder of either kind is refused with 409.
  */
-export function restoreModelsYaml(raw: string, secrets: Map<string, Secret>): string {
-	if (!raw.includes(MASK_MARK)) return raw;
+export function restoreModelsYaml(raw: string, secrets: Map<string, Secret>, commentSources: Map<string, string>): string {
+	if (!raw.includes(MASK_MARK) && !raw.includes(COMMENT_MARK)) return raw;
 	const doc = parse(raw);
 	const reached = doc && reach(doc);
 	if (!doc || !reached) {
-		throw new PlaceholderError("The document holds masked credentials but is not valid YAML, so they cannot be located.", 400);
+		throw new PlaceholderError("The document holds masked credentials or comments but is not valid YAML, so they cannot be located.", 400);
 	}
 	const edits: Edit[] = [];
 	const ranges: Array<[number, number]> = [];
+	let unknown = false;
 	for (const node of reached.credential) {
 		if (reached.elsewhere.has(node) || typeof node.value !== "string" || !node.value.includes(MASK_MARK) || !node.range) continue;
 		if (!PLACEHOLDER_EXACT.test(node.value)) {
@@ -328,15 +336,25 @@ export function restoreModelsYaml(raw: string, secrets: Map<string, Secret>): st
 		ranges.push([node.range[0], node.range[1]]);
 		const secret = secrets.get(node.value);
 		if (secret) edits.push(scalarEdit(node, raw, JSON.stringify(secret.value)));
+		else unknown = true;
 	}
+	const commentRanges: Array<[number, number]> = [];
+	for (const comment of comments(raw)) {
+		if (!comment.source.includes(COMMENT_MARK) || !COMMENT_EXACT.test(comment.source)) continue;
+		const end = comment.offset + comment.source.length;
+		commentRanges.push([comment.offset, end]);
+		const original = commentSources.get(comment.source);
+		if (original !== undefined) edits.push({ start: comment.offset, end, text: original });
+		else unknown = true;
+	}
+	const inside = (at: number, within: Array<[number, number]>) => within.some(([start, end]) => at >= start && at < end);
 	for (let at = raw.indexOf(MASK_MARK); at >= 0; at = raw.indexOf(MASK_MARK, at + 1)) {
-		if (!ranges.some(([start, end]) => at >= start && at < end)) {
-			throw new PlaceholderError(`Line ${lineOf(raw, at)}: a masked credential ${OUTSIDE_CREDENTIAL}`, 400);
-		}
+		if (!inside(at, ranges)) throw new PlaceholderError(`Line ${lineOf(raw, at)}: a masked credential ${OUTSIDE_CREDENTIAL}`, 400);
 	}
-	if (edits.length !== ranges.length) {
-		throw new PlaceholderError("A masked credential does not match one in the file on disk (it changed, or the deck restarted since the editor loaded). Reload, then reapply your edits.", 409);
+	for (let at = raw.indexOf(COMMENT_MARK); at >= 0; at = raw.indexOf(COMMENT_MARK, at + 1)) {
+		if (!inside(at, commentRanges)) throw new PlaceholderError(`Line ${lineOf(raw, at)}: ${OUTSIDE_COMMENT}`, 400);
 	}
+	if (unknown) throw new PlaceholderError(`A masked credential or comment ${STALE_PLACEHOLDER}`, 409);
 	const restored = applyEdits(raw, edits);
 	// Cross-check with the parser NeoPi uses: only restored credential positions may differ.
 	let submittedData: unknown;
