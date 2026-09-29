@@ -1124,6 +1124,8 @@ export type ServerFrame =
 	 *  deck or SDK handled itself. No agent run follows, so no `agent_end`. */
 	| { type: "prompt_consumed"; sessionId: string; output: string }
 	| { type: "session_event"; sessionId: string; event: AgentSessionEventJson }
+	/** The server stopped running this chat (closed, reaped or shut down) and its
+	 *  teardown finished. Sent to the connections that were subscribed to it. */
 	| { type: "session_disposed"; sessionId: string }
 	| { type: "subagents_snapshot"; sessionId: string; nodes: SubagentNode[] }
 	/** Broadcast frame: any kanban-task mutation occurred. Clients refetch. */

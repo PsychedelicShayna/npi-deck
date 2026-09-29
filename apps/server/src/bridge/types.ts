@@ -26,6 +26,16 @@ export interface AgentBridge {
 	createSession(opts: CreateSessionOpts): Promise<SessionHandle>;
 	resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle>;
 	getSession(sessionId: string): SessionHandle | undefined;
+	/**
+	 * Start closing a live session and return at once. From here the session is
+	 * no longer live: `getSession` misses it and settings, MCP and advisor
+	 * updates skip it. NeoPi's dispose can take tens of seconds (its chronicler
+	 * drains in-flight model work for up to 20 s), so it runs in the background
+	 * and `session_disposed` reaches the session's subscribers when it ends.
+	 * Resuming the same file meanwhile waits for the close. False when no
+	 * session with this id is live or closing.
+	 */
+	closeSession(sessionId: string): boolean;
 	listSessions(opts: { cwd?: string }): Promise<SessionSummary[]>;
 	/**
 	 * A persisted session's transcript, read from its file without creating

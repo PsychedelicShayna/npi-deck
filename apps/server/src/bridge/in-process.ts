@@ -36,6 +36,7 @@ import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
 import { looksLikePlaceholderKey } from "../credential-quality.ts";
 import { notificationService } from "../notifications/index.ts";
+import { broadcastBus } from "../broadcast-bus.ts";
 import { workRegistry } from "../work-registry.ts";
 import { isLiteralAllowlistName } from "../literal-allowlist-name.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
@@ -136,6 +137,8 @@ interface Active {
 
 export class InProcessAgentBridge implements AgentBridge {
 	private active = new Map<string, Active>();
+	/** Sessions whose dispose is still running; no longer live. See {@link closeSession}. */
+	private closing = new Map<string, { sessionFile: string | undefined; done: Promise<void> }>();
 	private disposed = false;
 	private reaperTimer: ReturnType<typeof setInterval> | null = null;
 	private idleTimeoutMs: number;
@@ -172,6 +175,10 @@ export class InProcessAgentBridge implements AgentBridge {
 	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
 		const release = workRegistry.admit("session", `resume:${crypto.randomUUID()}`);
 		try {
+			// A close of this file still holds its session lease; open it once that ends.
+			for (const c of this.closing.values()) {
+				if (c.sessionFile === opts.sessionPath) await c.done;
+			}
 			// A live session is reused rather than opening the same file twice.
 			for (const a of this.active.values()) {
 				if (a.handle.sessionFile === opts.sessionPath) return a.handle;
@@ -310,6 +317,21 @@ export class InProcessAgentBridge implements AgentBridge {
 
 	getSession(sessionId: string): SessionHandle | undefined {
 		return this.active.get(sessionId)?.handle;
+	}
+
+	closeSession(sessionId: string): boolean {
+		if (this.closing.has(sessionId)) return true;
+		const entry = this.active.get(sessionId);
+		if (!entry) return false;
+		this.active.delete(sessionId);
+		const done = entry.handle
+			.dispose()
+			.catch((err) => log.warn(`dispose failed`, err))
+			.finally(() => {
+				if (this.closing.get(sessionId)?.done === done) this.closing.delete(sessionId);
+			});
+		this.closing.set(sessionId, { sessionFile: entry.handle.sessionFile, done });
+		return true;
 	}
 
 	/**
@@ -553,11 +575,11 @@ export class InProcessAgentBridge implements AgentBridge {
 			clearInterval(this.reaperTimer);
 			this.reaperTimer = null;
 		}
-		log.info(`disposing ${this.active.size} active session(s)`);
+		log.info(`disposing ${this.active.size} active session(s), ${this.closing.size} closing`);
 		const disposals = Array.from(this.active.values()).map((a) =>
 			a.handle.dispose().catch((err) => log.warn(`dispose failed`, err)),
 		);
-		await Promise.all(disposals);
+		await Promise.all([...disposals, ...Array.from(this.closing.values(), (c) => c.done)]);
 		this.active.clear();
 	}
 
@@ -746,12 +768,15 @@ export class InProcessAgentBridge implements AgentBridge {
 			getModelRegistry: () => this.ensureModelRegistry(),
 			leaseMixtures: (registry, workspace) => this.leaseMixtures(registry, workspace),
 			planBridge,
+			// Every way a session ends (close, reaper, shutdown) lands here, after
+			// NeoPi's dispose has finished. A closed session already left `active`,
+			// so use this generation's own entry rather than looking it up by id.
 			onDispose: () => {
 				uiBridge.dispose();
-				const entry = this.active.get(sessionId);
 				subagents?.dispose();
-				entry?.releaseWork?.();
-				this.active.delete(sessionId);
+				entry.releaseWork?.();
+				if (this.active.get(sessionId) === entry) this.active.delete(sessionId);
+				broadcastBus.broadcast({ type: "session_disposed", sessionId });
 			},
 		});
 
@@ -841,7 +866,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			}
 		});
 
-		this.active.set(sessionId, {
+		const entry: Active = {
 			handle,
 			session,
 			unsubscribe,
@@ -857,7 +882,8 @@ export class InProcessAgentBridge implements AgentBridge {
 			advisorEvents: [],
 			advisorSelection: [],
 			advisorsRunnable: false,
-		});
+		};
+		this.active.set(sessionId, entry);
 		return handle;
 	}
 
@@ -978,7 +1004,8 @@ export class InProcessSessionHandle implements SessionHandle {
 	private readonly planBridge: PlanModeBridge;
 	private listeners = new Set<EventListener>();
 	private onDisposeCallback: () => void;
-	private disposed = false;
+	/** Shared by every caller, so a close racing the reaper or shutdown waits for the same teardown. */
+	private disposing: Promise<void> | undefined;
 	/**
 	 * Shadow of the SDK's pending-prompt queue. Entries are appended in
 	 * `prompt()` when the SDK confirms a queue (wasStreaming = true) and
@@ -1552,9 +1579,12 @@ export class InProcessSessionHandle implements SessionHandle {
 		return this.planBridge.respond(proposalId, response);
 	}
 
-	async dispose(): Promise<void> {
-		if (this.disposed) return;
-		this.disposed = true;
+	dispose(): Promise<void> {
+		this.disposing ??= this.teardown();
+		return this.disposing;
+	}
+
+	private async teardown(): Promise<void> {
 		// An xd://propose tool may still be awaiting its operator response.
 		// Settle it before SDK disposal waits for the in-flight turn to drain.
 		this.planBridge.dispose();

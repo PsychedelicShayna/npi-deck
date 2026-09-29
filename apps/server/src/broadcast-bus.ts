@@ -25,6 +25,8 @@ export type BroadcastFrame = Extract<
 	| { type: "routine_run_finished" }
 	| { type: "heartbeat" }
 	| { type: "notification" }
+	/** Relayed by the WS hub only to the connections subscribed to that session. */
+	| { type: "session_disposed" }
 >;
 
 type Listener = (frame: BroadcastFrame) => void;

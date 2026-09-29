@@ -257,17 +257,11 @@ export function buildRouter(
 		}
 	});
 
-	app.delete("/sessions/:id", async (c) => {
-		const id = c.req.param("id");
-		const handle = bridge.getSession(id);
-		if (!handle) return c.json({ error: "session not found" }, 404);
-		try {
-			await handle.dispose();
-			return c.json({ ok: true });
-		} catch (err) {
-			log.error(`dispose failed`, err);
-			return c.json({ error: String(err) }, 500);
-		}
+	// 202 at once: NeoPi's dispose can outlast Bun's 10 s idle timeout on a large
+	// resumed session. Subscribers get `session_disposed` when it finishes.
+	app.delete("/sessions/:id", (c) => {
+		if (!bridge.closeSession(c.req.param("id"))) return c.json({ error: "session not found" }, 404);
+		return c.json({ ok: true }, 202);
 	});
 
 	app.route("/", buildTasksRouter());

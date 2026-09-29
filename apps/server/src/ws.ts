@@ -28,7 +28,10 @@ export class WsHub {
 	private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 	constructor(private bridge: AgentBridge, private readonly generation: string) {
-		broadcastBus.subscribe((frame) => this.broadcast(frame));
+		broadcastBus.subscribe((frame) => {
+			if (frame.type === "session_disposed") this.sessionDisposed(frame.sessionId);
+			else this.broadcast(frame);
+		});
 		this.startHeartbeat();
 	}
 
@@ -161,6 +164,27 @@ export class WsHub {
 		}
 	}
 
+	/** Drop every connection's subscription to an ended session and tell those clients. */
+	private sessionDisposed(sessionId: string): void {
+		for (const ws of this.connections) {
+			if (!this.dropSubscription(ws, sessionId)) continue;
+			try {
+				send(ws, { type: "session_disposed", sessionId });
+			} catch (err) {
+				log.warn(`session_disposed send failed`, err);
+			}
+		}
+	}
+
+	private dropSubscription(ws: ServerWebSocket<ConnectionData>, sessionId: string): boolean {
+		const teardown = ws.data.subscriptions.get(sessionId);
+		if (!teardown) return false;
+		ws.data.subscriptions.delete(sessionId);
+		teardown();
+		this.bridge.trackSubscriberRemoved(sessionId, ws.data.connectionId);
+		return true;
+	}
+
 	// ───────────────────────────────────────────────────────────────────────
 
 	private async handleSubscribe(ws: ServerWebSocket<ConnectionData>, sessionId: string): Promise<void> {
@@ -170,8 +194,10 @@ export class WsHub {
 			if (handle) {
 				this.bridge.bumpActivity(sessionId);
 				send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot() });
+				return;
 			}
-			return;
+			// Closing: its teardown has not reported yet. Answer as for any ended session.
+			this.dropSubscription(ws, sessionId);
 		}
 
 		const handle = this.bridge.getSession(sessionId);
@@ -229,12 +255,7 @@ export class WsHub {
 	}
 
 	private handleUnsubscribe(ws: ServerWebSocket<ConnectionData>, sessionId: string): void {
-		const unsub = ws.data.subscriptions.get(sessionId);
-		if (unsub) {
-			unsub();
-			ws.data.subscriptions.delete(sessionId);
-			this.bridge.trackSubscriberRemoved(sessionId, ws.data.connectionId);
-		}
+		this.dropSubscription(ws, sessionId);
 		send(ws, { type: "unsubscribed", sessionId });
 	}
 
