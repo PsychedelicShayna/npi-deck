@@ -27,8 +27,8 @@ exact upstream blob it was sourced from. This file is the index.
 
 1. Pull the latest commit SHA from <https://github.com/mattpocock/skills>.
 2. For each row above, re-fetch the upstream path and diff against the local copy.
-3. Resolve diffs (verbatim files should adopt upstream; the `diagnose` adaptation must be preserved).
-4. Update the per-file footer commit SHA and the "Pinned commit" line above.
+3. Resolve diffs (verbatim files should adopt upstream; the `diagnose` adaptation must be preserved). "Verbatim" excludes one deck addition: each `SKILL.md` frontmatter carries a trailing `source:` line tagging it as an npi-deck starter; keep it.
+4. Update the per-file footer commit SHA, the commit in each `source:` tag, and the "Pinned commit" line above.
 5. Update the "Date synced" line.
 
 The footers are intentionally per-file so reviewers can verify provenance without leaving the file they're reading.

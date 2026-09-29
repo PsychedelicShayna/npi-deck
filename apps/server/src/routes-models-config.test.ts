@@ -12,8 +12,6 @@ import { buildModelsConfigRouter, replaceModelsFile } from "./routes-models-conf
 const root = await mkdtemp(path.join(tmpdir(), "deck-models-config-test-"));
 await mkdir(path.join(root, "agent"), { recursive: true });
 process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
-process.env.OMP_DECK_INSTALL_STARTER_SKILLS = "0";
-process.env.OMP_DECK_INSTALL_STARTER_EXTENSIONS = "0";
 const backend = resolveBackendSelection();
 if (!backend) throw new Error("models.yml tests require a configured NeoPi backend");
 await loadBackend(backend);

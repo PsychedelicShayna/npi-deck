@@ -13,6 +13,7 @@ import type {
 	NotificationLevel,
 	NotificationSettingsResponse,
 	StarterGroup,
+	StarterItem,
 	StartersResponse,
 } from "@npi-deck/protocol";
 import type { ProviderInfo } from "@npi-deck/protocol";
@@ -1218,9 +1219,9 @@ function ThemeSwatchStrip({ definition }: { definition: (typeof THEMES)[number] 
 }
 
 /**
- * Starters section: what starters are, each bundled skill and extension with
- * its installed state and launch-time copy switch, then the maintenance
- * gate's settings (the one starter extension that has any).
+ * Starters section: what starters are, then each bundled skill and extension
+ * with its origin tag, installed state and opt-in switch. The maintenance
+ * gate's settings sit under its own row, the one starter that has any.
  */
 function StartersSection() {
 	const [data, setData] = useState<StartersResponse | null>(null);
@@ -1231,10 +1232,10 @@ function StartersSection() {
 		startersApi.list().then(setData, (err) => setError(apiErrorText(err)));
 	}, []);
 
-	async function setAutoInstall(kind: "skills" | "extensions", enabled: boolean): Promise<void> {
+	async function setOptedIn(item: StarterItem, optedIn: boolean): Promise<void> {
 		setBusy(true);
 		try {
-			setData(await startersApi.putAutoInstall({ [kind]: enabled }));
+			setData(await startersApi.setOptedIn(item.kind, item.name, optedIn));
 			setError(undefined);
 		} catch (err) {
 			setError(apiErrorText(err));
@@ -1249,17 +1250,32 @@ function StartersSection() {
 				<h1 className="text-xl font-semibold tracking-tight">Starters</h1>
 				<div className="mt-1 max-w-3xl space-y-2 text-sm text-ink-3">
 					<p>
-						Starters are skills and extensions that ship with the deck, so NeoPi has them without a trip
+						Starters are skills and extensions that ship with the deck, so NeoPi can have them without a trip
 						to the marketplace. A skill is a set of instructions the agent loads when a task calls for it,
 						or when you ask for it by name, such as <span className="font-mono">/skill:handoff</span>. An
 						extension is code NeoPi runs inside every session, in the deck and in the terminal alike.
 					</p>
 					<p>
-						Each time the deck launches, it copies any starter missing from your NeoPi agent directory. It
-						never overwrites a copy that is already there, so once installed, a starter is yours to edit.
-						Deleting one only lasts until the next launch; to keep it gone, switch the copy off below.
+						The deck installs none of them on its own. Opt a starter in and the deck copies it into your
+						NeoPi agent directory right away, and again at launch if it goes missing. It never overwrites a
+						copy that is already there, so once installed, a starter is yours to edit. Opting out stops the
+						copying and leaves an installed copy where it is; delete it yourself to remove it.
 					</p>
 				</div>
+				{data ? (
+					<div className="mt-2 text-xs text-ink-3">
+						{data.setting.editable ? (
+							<>
+								Opt-ins are saved as <span className="font-mono">{data.setting.key}</span> in the deck&rsquo;s .env.
+							</>
+						) : (
+							<>
+								The shell that launched the deck exports <span className="font-mono">{data.setting.key}</span>,
+								which overrides the deck&rsquo;s .env. Change your opt-ins there.
+							</>
+						)}
+					</div>
+				) : null}
 			</div>
 			{error ? (
 				<div role="alert" className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
@@ -1272,19 +1288,20 @@ function StartersSection() {
 						title="Starter skills"
 						group={data.skills}
 						busy={busy}
-						onToggle={(enabled) => void setAutoInstall("skills", enabled)}
+						editable={data.setting.editable}
+						onToggle={(item, optedIn) => void setOptedIn(item, optedIn)}
 					/>
 					<StarterGroupCard
 						title="Starter extensions"
 						group={data.extensions}
 						busy={busy}
-						onToggle={(enabled) => void setAutoInstall("extensions", enabled)}
+						editable={data.setting.editable}
+						onToggle={(item, optedIn) => void setOptedIn(item, optedIn)}
 					/>
 				</>
 			) : error ? null : (
 				<div className="text-sm text-ink-3">Loading...</div>
 			)}
-			<MaintenanceGateCard />
 		</div>
 	);
 }
@@ -1293,63 +1310,74 @@ function StarterGroupCard({
 	title,
 	group,
 	busy,
+	editable,
 	onToggle,
 }: {
 	title: string;
 	group: StarterGroup;
 	busy: boolean;
-	onToggle: (enabled: boolean) => void;
+	editable: boolean;
+	onToggle: (item: StarterItem, optedIn: boolean) => void;
 }) {
-	const inputId = `starter-auto-install-${group.setting.key}`;
 	return (
 		<div className="overflow-hidden rounded-md border border-line bg-paper">
 			<div className="border-b border-line bg-paper-2 px-3 py-2">
 				<div className="meta">{title}</div>
 				<div className="mt-1 space-y-0.5 font-mono text-2xs text-ink-3">
-					<div>bundled in: {group.sourceDir ?? "not found; nothing to copy"}</div>
-					<div>installed to: {group.targetDir}</div>
-				</div>
-				<div className="mt-2 flex items-center gap-2 text-sm">
-					<input
-						id={inputId}
-						type="checkbox"
-						checked={group.autoInstall}
-						disabled={busy || !group.setting.editable}
-						onChange={(e) => onToggle(e.target.checked)}
-					/>
-					<label htmlFor={inputId}>Copy missing starters when the deck launches</label>
-					<span className="font-mono text-2xs text-ink-3">{group.setting.key}</span>
-				</div>
-				<div className="mt-1 text-xs text-ink-3">
-					{group.setting.editable
-						? "Takes effect the next time the deck launches."
-						: `The shell that launched the deck exports ${group.setting.key}, which overrides the deck's .env. Change it there.`}
+					<div>bundled in: {group.sourceDir ?? "not found; nothing to install"}</div>
+					<div>installs to: {group.targetDir}</div>
 				</div>
 			</div>
 			{group.items.length === 0 ? (
 				<div className="px-3 py-4 text-xs text-ink-3">This deck bundles none.</div>
 			) : (
 				<ul className="divide-y divide-line">
-					{group.items.map((item) => (
-						<li key={item.name} className="flex items-start gap-3 px-3 py-2">
-							<div className="min-w-0 flex-1">
-								<div className="font-mono text-sm text-ink">{item.name}</div>
-								{item.description ? <div className="mt-0.5 text-xs text-ink-3">{item.description}</div> : null}
-							</div>
-							{item.installed ? (
-								<Badge tone="success" title={item.installedPath}>installed</Badge>
-							) : (
-								<Badge tone="muted" title={item.installedPath}>not installed</Badge>
-							)}
-						</li>
-					))}
+					{group.items.map((item) => {
+						const inputId = `starter-opt-in-${item.kind}-${item.name}`;
+						return (
+							<li key={item.name} className="px-3 py-2">
+								<div className="flex items-start gap-3">
+									<input
+										id={inputId}
+										type="checkbox"
+										className="mt-1"
+										checked={item.optedIn}
+										disabled={busy || !editable}
+										onChange={(e) => onToggle(item, e.target.checked)}
+									/>
+									<div className="min-w-0 flex-1">
+										<label htmlFor={inputId} className="font-mono text-sm text-ink">
+											{item.name}
+										</label>
+										<div className="mt-0.5 font-mono text-2xs text-ink-3">
+											source: {item.origin ?? "untagged"}
+										</div>
+										{item.description ? <div className="mt-0.5 text-xs text-ink-3">{item.description}</div> : null}
+									</div>
+									{item.installed ? (
+										<Badge tone={item.optedIn ? "success" : "default"} title={item.installedPath}>
+											{item.optedIn ? "installed" : "installed, not opted in"}
+										</Badge>
+									) : (
+										<Badge tone="muted" title={item.installedPath}>not installed</Badge>
+									)}
+								</div>
+								{item.kind === "extensions" && item.name === "maintenance-gate" ? (
+									<div className="mt-3 pl-6">
+										<MaintenanceGateCard starter={item} />
+									</div>
+								) : null}
+							</li>
+						);
+					})}
 				</ul>
 			)}
 		</div>
 	);
 }
 
-function MaintenanceGateCard() {
+/** Settings of the maintenance-gate starter, shown under its row in Starters. */
+function MaintenanceGateCard({ starter }: { starter: StarterItem }) {
 	const [data, setData] = useState<MaintenanceGateState | null>(null);
 	const [draft, setDraft] = useState<{
 		enabled: boolean;
@@ -1381,9 +1409,11 @@ function MaintenanceGateCard() {
 		}
 	}
 
+	// Opting in or out moves NPI_DECK_ORG_ROOT: re-read the state then, keeping unsaved knob edits.
 	useEffect(() => {
-		void refresh();
-	}, []);
+		if (!data) void refresh();
+		else startersApi.getMaintenanceGate().then(setData, (e) => setError(String(e)));
+	}, [starter.optedIn]);
 
 	function parseKnob(value: string): number | null {
 		const trimmed = value.trim();
@@ -1426,13 +1456,11 @@ function MaintenanceGateCard() {
 		}
 	}
 
-	const profile: "deck" | "flat-file" | "inactive" = !data
+	const profile: "deck" | "flat-file" | "inactive" = !data || !starter.installed || !data.enabled
 		? "inactive"
-		: !data.enabled
-			? "inactive"
-			: data.orgRoot
-				? "deck"
-				: "flat-file";
+		: data.orgRoot
+			? "deck"
+			: "flat-file";
 
 	return (
 		<div className="overflow-hidden rounded-md border border-line bg-paper">
@@ -1451,10 +1479,15 @@ function MaintenanceGateCard() {
 					extension is installed.
 				</p>
 				<div className="mt-1 space-y-0.5 font-mono text-2xs text-ink-3">
-					<div>extension: {data?.installedExtensionPath ?? "..."}</div>
-					<div>installed: {data ? (data.installedExtensionPresent ? "yes" : "missing") : "..."}</div>
 					<div>NPI_DECK_ORG_ROOT: {data?.orgRoot ?? "(unset)"} ({data?.orgRootSource ?? ""})</div>
 				</div>
+				{!starter.optedIn ? (
+					<p className="mt-1 text-xs text-ink-3">
+						Not opted in, so the deck does not set NPI_DECK_ORG_ROOT for its sessions
+						{starter.installed ? "; the installed copy runs with cwd-based detection only" : " and the extension is not installed"}.
+						These settings apply once it runs.
+					</p>
+				) : null}
 			</div>
 			<div className="space-y-4 p-4">
 				{error ? (
@@ -1516,12 +1549,6 @@ function MaintenanceGateCard() {
 								<RotateCcw className="h-3.5 w-3.5" />
 								Reload
 							</Button>
-							{!data.installedExtensionPresent ? (
-								<span className="font-mono text-2xs text-warn">
-									Extension not installed at expected path; knob changes won&rsquo;t take effect until
-									it&rsquo;s restored.
-								</span>
-							) : null}
 						</div>
 
 						<div className="overflow-hidden rounded-md border border-line bg-paper-2">

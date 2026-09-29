@@ -1,8 +1,9 @@
 import type {
 	MaintenanceGateState,
+	StarterKind,
 	StartersResponse,
 	UpdateMaintenanceGateRequest,
-	UpdateStarterAutoInstallRequest,
+	UpdateStarterRequest,
 } from "@npi-deck/protocol";
 
 const BASE = "/api";
@@ -23,8 +24,10 @@ export const startersApi = {
 	list(): Promise<StartersResponse> {
 		return req<StartersResponse>("/starters");
 	},
-	putAutoInstall(body: UpdateStarterAutoInstallRequest): Promise<StartersResponse> {
-		return req<StartersResponse>("/starters/auto-install", {
+	/** Opt a starter in (the server installs it now) or out (an installed copy stays). */
+	setOptedIn(kind: StarterKind, name: string, optedIn: boolean): Promise<StartersResponse> {
+		const body: UpdateStarterRequest = { optedIn };
+		return req<StartersResponse>(`/starters/${kind}/${encodeURIComponent(name)}`, {
 			method: "PUT",
 			body: JSON.stringify(body),
 		});

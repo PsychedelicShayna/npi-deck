@@ -26,8 +26,8 @@ import { startSkillsWatcher } from "./skills-watcher.ts";
 import { KbService, resolveKbRoot } from "./kb-service.ts";
 import { startKbWatcher } from "./kb-watcher.ts";
 import { KbProtocolHandler } from "./kb-protocol.ts";
-import { installStarterSkills } from "./starter-skills.ts";
-import { installStarterExtensions } from "./starter-extensions.ts";
+import { syncMaintenanceGateOrgRoot } from "./maintenance-gate.ts";
+import { installOptedInStarters, reportRetiredStarterSwitches } from "./starters.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
 import { abortOAuthFlows } from "./routes-auth-oauth.ts";
 import { activeBackend, formatDiagnostic, listBackends, loadBackend, readBackendConfig, resolveBackendSelection, sdk, writeActiveBackend, type BackendSelection } from "./backend/runtime.ts";
@@ -151,21 +151,11 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 	// restore the previous selection and request another worker generation.
 	if (!activeBackend()) log.warn(`running without a backend: ${backendReason ?? "none configured"}`);
 
-	// Tell the maintenance-gate extension (~/.omp/agent/extensions/maintenance-gate)
-	// that every session this server spawns IS a deck-managed org root, regardless
-	// of session cwd. Without this, the extension stays inactive in deck sessions
-	// because cwd rarely has the flat-file org markers (inbox/, tasks/, knowledge/)
-	// that the upstream detector looks for. Routine agent subprocesses inherit
-	// this env via Bun.spawn defaults, so a single set here covers both surfaces.
-	//
-	// Honors NPI_DECK_MAINTENANCE_GATE_DISABLED (set via Settings → Starters):
-	// when truthy we don't set the org root, so even an unaltered installed copy
-	// of the extension stays inactive. The extension itself also checks the flag.
-	const gateDisabledRaw = (process.env.NPI_DECK_MAINTENANCE_GATE_DISABLED ?? "").trim().toLowerCase();
-	const gateDisabled = ["1", "true", "yes", "on"].includes(gateDisabledRaw);
-	if (!process.env.NPI_DECK_ORG_ROOT && !gateDisabled) {
-		process.env.NPI_DECK_ORG_ROOT = resolveKbRoot();
-	}
+	// The maintenance-gate starter anchors captures at NPI_DECK_ORG_ROOT. The
+	// deck sets it to the kb root only while that starter is opted in and not
+	// disabled (Settings → Starters); see syncMaintenanceGateOrgRoot.
+	syncMaintenanceGateOrgRoot(resolveKbRoot());
+	reportRetiredStarterSwitches();
 
 	// Register the deck's `kb://` URI handler on the SDK's process-global
 	// router so `read kb://system/foo.md` resolves the same way the user's
@@ -192,12 +182,9 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 			log.warn(`SDK theme init failed; ask tool labels may not render`, err);
 		}
 	}
-	// Only a loaded SDK has an agent directory. Backendless boot must still
-	// serve the picker; starter installation is deferred until the next boot.
-	if (activeBackend()) {
-		await installStarterSkills();
-		await installStarterExtensions();
-	}
+	// Only a loaded SDK has an agent directory. Backendless boot skips starters
+	// entirely and still serves the picker. Nothing installs unless opted in.
+	if (activeBackend()) await installOptedInStarters(sdk().getAgentDir());
 
 	// Register the default browser notification channel. It broadcasts a
 	// `notification` ServerFrame to every connected web client. Future channels

@@ -63,8 +63,11 @@ The managed `.env` is `<data dir>/.env`. The same directory holds:
 
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
-| `NPI_DECK_INSTALL_STARTER_SKILLS` | _(on)_ | yes | `0`/`false`/`no`/`off` stops copying missing starter skills into the NeoPi agent dir at launch. Managed from Settings → Starters. |
-| `NPI_DECK_INSTALL_STARTER_EXTENSIONS` | _(on)_ | yes | Same, for starter extensions. |
+| `NPI_DECK_STARTERS` | _(none)_ | Settings: no; hand edits: next launch | Comma-separated starters to install into the NeoPi agent dir, as `skills/<name>` or `extensions/<name>` (e.g. `skills/handoff,extensions/maintenance-gate`). Unset installs nothing. Managed from Settings → Starters, which installs a starter the moment you opt in; each launch with a backend loaded re-copies an opted-in starter that went missing. Opting out never deletes an installed copy. |
+| `NPI_DECK_MAINTENANCE_GATE_DISABLED` | _(off)_ | no | Truthy silences the maintenance-gate extension in new sessions. Managed from its row in Settings → Starters. |
+| `NPI_DECK_ORG_ROOT` | kb root while maintenance-gate is opted in | no | The deck sets it to the kb root only while the maintenance-gate starter is opted in and not disabled. A value you set yourself is left alone. |
+
+Starters are opt-in. `NPI_DECK_INSTALL_STARTER_SKILLS` and `NPI_DECK_INSTALL_STARTER_EXTENSIONS`, which used to switch off the install-everything default, are retired: the deck ignores them and logs a line at launch when either is still set. An off value already matches the new behavior; an on value no longer installs anything, so opt in to the starters you want instead. Starters already in your agent dir stay there and show as "installed, not opted in" until you opt in or delete them. With no backend loaded the deck skips starters entirely.
 
 ### NeoPi SDK and new-chat models
 

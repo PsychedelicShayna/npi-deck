@@ -13,8 +13,6 @@ const project = path.join(root, "project");
 await mkdir(path.join(root, "agent"), { recursive: true });
 process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
 await mkdir(path.join(project, ".omp"), { recursive: true });
-process.env.OMP_DECK_INSTALL_STARTER_SKILLS = "0";
-process.env.OMP_DECK_INSTALL_STARTER_EXTENSIONS = "0";
 const backend = resolveBackendSelection();
 if (!backend) throw new Error("MCP server tests require a configured NeoPi backend");
 await loadBackend(backend);

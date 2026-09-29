@@ -3,18 +3,19 @@
  *
  * The maintenance-gate starter extension reads its config from the managed
  * env file. This module projects the relevant keys (with their source and
- * compiled defaults) for the Settings → Starters UI, and renders a preview of
- * the reminder the extension appends at turn end.
+ * compiled defaults) for the Settings → Starters UI, renders a preview of
+ * the reminder the extension appends at turn end, and sets the deck-session
+ * org root while the starter is opted in.
  *
  * Read on each call rather than caching; the values change rarely and the
  * cost is one small env-file read.
  */
 
-import { existsSync } from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-
 import { readManagedEnvFile } from "./env-store.ts";
+import { optedInStarters, starterId } from "./starters.ts";
+
+/** The bundled extension's directory name under `starter-extensions/`. */
+export const MAINTENANCE_GATE_STARTER = "maintenance-gate";
 
 export const MAINTENANCE_GATE_DEFAULTS = {
 	minOpMsgs: 4,
@@ -50,9 +51,6 @@ export interface MaintenanceGateState {
 	};
 	orgRoot: string | null;
 	orgRootSource: GateValueSource;
-	/** Whether the installed extension copy still exists on disk. */
-	installedExtensionPresent: boolean;
-	installedExtensionPath: string;
 	/** Server-side render of the at-turn-end reminder so the UI can preview it. */
 	preview: { deckMode: string; flatFileMode: string };
 }
@@ -84,16 +82,6 @@ export function readMaintenanceGateState(): MaintenanceGateState {
 	const disabled = resolve(MAINTENANCE_GATE_ENV_KEYS.disabled);
 	const orgRoot = resolve(MAINTENANCE_GATE_ENV_KEYS.orgRoot);
 	const enabled = !isTruthy(disabled.rawValue);
-
-	const installedExtensionPath = path.join(
-		os.homedir(),
-		".omp",
-		"agent",
-		"extensions",
-		"maintenance-gate",
-		"index.ts",
-	);
-
 	return {
 		enabled,
 		disabledRaw: disabled.rawValue,
@@ -111,8 +99,6 @@ export function readMaintenanceGateState(): MaintenanceGateState {
 		},
 		orgRoot: orgRoot.rawValue,
 		orgRootSource: orgRoot.source,
-		installedExtensionPresent: existsSync(installedExtensionPath),
-		installedExtensionPath,
 		preview: {
 			deckMode: renderMaintenanceReminder("deck"),
 			flatFileMode: renderMaintenanceReminder("flat-file"),
@@ -124,6 +110,32 @@ function isTruthy(value: string | null | undefined): boolean {
 	if (!value) return false;
 	const lower = value.trim().toLowerCase();
 	return ["1", "true", "yes", "on"].includes(lower);
+}
+
+/** The org root the deck last set itself; a value it did not set belongs to the user. */
+let deckOrgRoot: string | undefined;
+
+/**
+ * Point `NPI_DECK_ORG_ROOT` at `kbRoot` while the maintenance-gate starter is
+ * opted in and not disabled, so the extension treats every session this
+ * server spawns (routine subprocesses inherit the env) as a deck-managed org
+ * root regardless of cwd, which rarely has the flat-file org markers the
+ * upstream detector looks for. Otherwise remove the value the deck set. A
+ * value from the launching shell or the managed .env is left alone.
+ */
+export function syncMaintenanceGateOrgRoot(kbRoot: string): void {
+	const key = MAINTENANCE_GATE_ENV_KEYS.orgRoot;
+	const current = process.env[key];
+	if (current !== undefined && current !== deckOrgRoot) return;
+	const wanted = optedInStarters().has(starterId("extensions", MAINTENANCE_GATE_STARTER))
+		&& !isTruthy(process.env[MAINTENANCE_GATE_ENV_KEYS.disabled]);
+	if (wanted) {
+		process.env[key] = kbRoot;
+		deckOrgRoot = kbRoot;
+	} else if (current !== undefined) {
+		delete process.env[key];
+		deckOrgRoot = undefined;
+	}
 }
 
 /**

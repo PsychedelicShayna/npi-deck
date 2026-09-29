@@ -34,7 +34,7 @@ The deck:
 - Re-uses your existing `~/.npi-deck/` data dir (deck.db, managed `.env`, uploads, onboarding flag).
 - Re-uses your existing `~/.omp/agent/` (auth credentials, sessions, skills, extensions).
 - Applies any new SQLite migrations on first boot — idempotent, additive only (we never drop columns).
-- Picks up any new starter skills / extensions only if the user hasn't already created a file by the same name (we don't overwrite).
+- Installs no starter skills or extensions unless you opt in to them (Settings → Starters, `NPI_DECK_STARTERS`), and never overwrites a file by the same name.
 
 To check what version you have running:
 

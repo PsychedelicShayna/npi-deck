@@ -50,7 +50,9 @@ test("backs up WAL, migrates companion files and rewrites only legacy-root paths
 		const settings = readManagedEnvFile(path.join(target, ".env")).values;
 		expect(settings.get("NPI_DECK_UPLOADS_ROOT")).toBe(`${target}/uploads`);
 		expect(settings.get("NPI_DECK_KB_ROOT")).toBe("/home/someone/wiki");
-		expect(settings.get("NPI_DECK_INSTALL_STARTER_SKILLS")).toBe("0");
+		// omp-deck's install-everything switch does not carry over: no starter is opted in.
+		expect(settings.has("NPI_DECK_INSTALL_STARTER_SKILLS")).toBe(false);
+		expect(settings.has("NPI_DECK_STARTERS")).toBe(false);
 		expect(settings.get("TELEGRAM_BOT_TOKEN")).toBe("secret");
 		expect(settings.has("OMP_DECK_AUTO_START")).toBe(false);
 		const marker = readFileSync(path.join(target, ".omp-deck-migration.json"), "utf8");

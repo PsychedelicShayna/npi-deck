@@ -225,9 +225,6 @@ export async function migrate(args: string[], env: NodeJS.ProcessEnv = process.e
 			settings[`NPI_DECK_${suffix}`] = rewrite(value, source, target);
 		} else settings[key] = rewrite(value, source, target);
 	}
-	// Starter installs are opt-in after migration, regardless of old configuration.
-	settings.NPI_DECK_INSTALL_STARTER_SKILLS = "0";
-	settings.NPI_DECK_INSTALL_STARTER_EXTENSIONS = "0";
 	const dbs = dataFiles.filter((file) => file.endsWith(".db") && (!configuredDb || path.basename(file) !== "deck.db" || file === configuredDb) && (!configuredBridgeDb || path.basename(file) !== "telegram-bridge.db" || file === configuredBridgeDb));
 	const dbJobs: Array<[string, string]> = dbs.map((file) => [file, file === configuredDb ? "deck.db" : file === configuredBridgeDb ? "telegram-bridge.db" : path.relative(source.data, file)]);
 	for (const [file, filename] of extraDbs) {

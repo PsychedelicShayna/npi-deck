@@ -405,8 +405,6 @@ export interface MaintenanceGateState {
 	};
 	orgRoot: string | null;
 	orgRootSource: GateValueSource;
-	installedExtensionPresent: boolean;
-	installedExtensionPath: string;
 	preview: { deckMode: string; flatFileMode: string };
 }
 
@@ -417,19 +415,23 @@ export interface UpdateMaintenanceGateRequest {
 	fireFloorMs?: number | null;
 }
 
-/** One bundled starter skill or extension and whether it is in the NeoPi agent dir. */
+export type StarterKind = "skills" | "extensions";
+
+/** One bundled starter skill or extension, its origin, and whether it is opted in and installed. */
 export interface StarterItem {
+	kind: StarterKind;
 	name: string;
 	description: string;
+	/** The starter's `source:` tag (e.g. "npi-deck starter (from mattpocock/skills@b8be62f, MIT)"); null when untagged. */
+	origin: string | null;
+	/** Listed in `NPI_DECK_STARTERS`: the deck installs it now and again at launch when it goes missing. */
+	optedIn: boolean;
 	installed: boolean;
 	installedPath: string;
 }
 
-/** One kind of starter (skills or extensions): the bundle, its target and the launch-time copy switch. */
+/** One kind of starter (skills or extensions): the bundle and where it installs. */
 export interface StarterGroup {
-	/** Copy missing starters into `targetDir` when the deck launches. */
-	autoInstall: boolean;
-	setting: EnvBackedSetting;
 	/** Bundled source directory, or null when the deck cannot find it. */
 	sourceDir: string | null;
 	targetDir: string;
@@ -438,14 +440,15 @@ export interface StarterGroup {
 
 /** `GET /api/starters`. */
 export interface StartersResponse {
+	/** `NPI_DECK_STARTERS`, the opt-in list; read-only here when the launching shell exports it. */
+	setting: EnvBackedSetting;
 	skills: StarterGroup;
 	extensions: StarterGroup;
 }
 
-/** `PUT /api/starters/auto-install`; omitted fields stay as they are. */
-export interface UpdateStarterAutoInstallRequest {
-	skills?: boolean;
-	extensions?: boolean;
+/** `PUT /api/starters/:kind/:name`: opt a starter in (installs it now) or out (leaves any copy in place). */
+export interface UpdateStarterRequest {
+	optedIn: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -1,6 +1,8 @@
 # Starter skills
 
-omp-native skills bundled with NPI deck. On server boot, `apps/server/src/starter-skills.ts` walks this directory and copies any subdir that isn't already present in `~/.omp/agent/skills/`. The installer is **never-overwrite**: once a target exists, the user owns it. Deleting the destination dir + restarting reinstalls.
+omp-native skills bundled with NPI deck. None is installed unless you opt in to it from Settings → Starters (stored as `NPI_DECK_STARTERS`, e.g. `skills/handoff`). Opting in copies `<name>/` into the NeoPi agent dir's `skills/` right away, and each launch re-copies an opted-in skill that has gone missing (`apps/server/src/starters.ts`). The copy is **never-overwrite**: once a target exists, the user owns it. Opting out stops the copying and leaves an installed copy in place.
+
+Every skill's frontmatter carries a `source:` tag naming it as an npi-deck starter and where it came from; Settings → Starters shows it next to each one.
 
 ## Bundled skills
 
@@ -31,12 +33,11 @@ For full context see [ATTRIBUTION.md](./ATTRIBUTION.md) and the task that drove 
 
 ## Adding a new starter
 
-1. Create `starter-skills/<name>/SKILL.md` with proper frontmatter (`name`, `description`, optional `tags`). See [`create-skill/SKILL.md`](./create-skill/SKILL.md) for the authoring loop.
+1. Create `starter-skills/<name>/SKILL.md` with proper frontmatter (`name`, `description`, `source`, optional `tags`). `source` starts with `npi-deck starter` and names the origin, e.g. `npi-deck starter (from mattpocock/skills@b8be62f, MIT)`. See [`create-skill/SKILL.md`](./create-skill/SKILL.md) for the authoring loop.
 2. Ship any co-located scripts / references under the same dir.
 3. **If sourced from a third-party repo**, add a per-file footer pointing at the upstream blob (commit-pinned), add an entry in [ATTRIBUTION.md](./ATTRIBUTION.md), and document any adaptations.
-4. Restart the deck. Confirm the skill lands at `~/.omp/agent/skills/<name>/` and appears in `GET /api/skills` with `provider: "native"`.
+4. Restart the deck, opt in to the skill in Settings → Starters, and confirm it lands at `~/.omp/agent/skills/<name>/` and appears in `GET /api/skills` with `provider: "native"`.
 
-## Disabling
+## Source directory
 
-Set `NPI_DECK_INSTALL_STARTER_SKILLS=0` (or `false`/`no`/`off`, or untick it in Settings → Starters) to skip the bootstrap entirely.
 Set `NPI_DECK_STARTER_SKILLS_DIR=<path>` to override the source directory.

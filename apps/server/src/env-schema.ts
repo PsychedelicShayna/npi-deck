@@ -74,20 +74,17 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		},
 	},
 	{
-		key: "NPI_DECK_INSTALL_STARTER_SKILLS",
-		valueType: "boolean",
+		key: "NPI_DECK_STARTERS",
+		valueType: "string",
 		sensitive: false,
 		restartRequired: true,
 		hotApply: false,
-		description: "Copy missing bundled starter skills into the NeoPi agent dir when the deck launches. Set 0 to skip.",
-	},
-	{
-		key: "NPI_DECK_INSTALL_STARTER_EXTENSIONS",
-		valueType: "boolean",
-		sensitive: false,
-		restartRequired: true,
-		hotApply: false,
-		description: "Copy missing bundled starter extensions into the NeoPi agent dir when the deck launches. Set 0 to skip.",
+		description:
+			"Comma-separated bundled starters to install into the NeoPi agent dir, as skills/<name> or extensions/<name>. Unset installs none. Settings → Starters installs on opt-in; edits made here install at the next launch.",
+		validate: (value) => {
+			const bad = value.split(",").map((s) => s.trim()).filter((s) => s && !/^(skills|extensions)\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s));
+			return bad.length > 0 ? `Expected skills/<name> or extensions/<name>, got: ${bad.join(", ")}` : undefined;
+		},
 	},
 	{
 		key: "NPI_DECK_IDLE_TIMEOUT_MS",
@@ -198,7 +195,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		restartRequired: false,
 		hotApply: true,
 		description:
-			"Disable the maintenance-gate extension for new sessions when truthy. Honored by the deck (skips setting NPI_DECK_ORG_ROOT) and by the installed extension itself when present.",
+			"Disable the maintenance-gate extension for new sessions when truthy. Honored by the deck (skips setting NPI_DECK_ORG_ROOT) and by the installed extension itself.",
 	},
 	{
 		key: "OMP_MAINTENANCE_GATE_MIN_OP_MSGS",
@@ -235,7 +232,7 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		restartRequired: false,
 		hotApply: true,
 		description:
-			"Deck-session org root the maintenance-gate uses to anchor captures. Set automatically by the server to ~/kb unless overridden or disabled.",
+			"Deck-session org root the maintenance-gate uses to anchor captures. While the maintenance-gate starter is opted in and not disabled, the server sets it to the kb root unless you set it.",
 	},
 ];
 

@@ -17,8 +17,6 @@ await mkdir(path.join(root, "agent"), { recursive: true });
 await mkdir(nested, { recursive: true });
 await mkdir(outside);
 process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
-process.env.OMP_DECK_INSTALL_STARTER_SKILLS = "0";
-process.env.OMP_DECK_INSTALL_STARTER_EXTENSIONS = "0";
 const backend = resolveBackendSelection();
 if (!backend) throw new Error("mixture route tests require a configured NeoPi backend");
 await loadBackend(backend);

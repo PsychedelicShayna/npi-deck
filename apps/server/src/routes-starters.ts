@@ -1,10 +1,12 @@
 /**
  * Starter routes
  *
- * Starters are the skills and extensions bundled with the deck. GET /starters
- * lists them with their installed state and the launch-time install switches;
- * PUT /starters/auto-install flips those switches. The maintenance gate, the
- * one starter extension with settings, projects its env-backed state (see
+ * Starters are the skills and extensions bundled with the deck (see
+ * `starters.ts`). GET /starters lists each with its origin tag, whether it is
+ * opted in and whether it is installed. PUT /starters/:kind/:name opts one in,
+ * which copies it into the agent dir now, or out, which stops the launch-time
+ * copy and leaves an installed copy alone. The maintenance gate, the one
+ * starter extension with settings, projects its env-backed state (see
  * `maintenance-gate.ts`); its PUT writes the managed env file.
  */
 
@@ -13,60 +15,101 @@ import type {
 	MaintenanceGateState,
 	StartersResponse,
 	UpdateMaintenanceGateRequest,
-	UpdateStarterAutoInstallRequest,
+	UpdateStarterRequest,
 } from "@npi-deck/protocol";
 
 import { sdk } from "./backend/runtime.ts";
 import { appendEnvAudit, commitManagedEnvUpdates } from "./env-store.ts";
-import { ENV_SCHEMA_BY_KEY, resolveEnvSetting, validateEnvValue } from "./env-schema.ts";
-import { MAINTENANCE_GATE_ENV_KEYS, readMaintenanceGateState } from "./maintenance-gate.ts";
-import { STARTER_AUTO_INSTALL_ENV, readStarterGroup, type StarterKind } from "./starters.ts";
+import { ENV_SCHEMA_BY_KEY, validateEnvValue } from "./env-schema.ts";
+import { resolveKbRoot } from "./kb-service.ts";
+import {
+	MAINTENANCE_GATE_ENV_KEYS,
+	MAINTENANCE_GATE_STARTER,
+	readMaintenanceGateState,
+	syncMaintenanceGateOrgRoot,
+} from "./maintenance-gate.ts";
+import {
+	STARTERS_ENV,
+	STARTER_KINDS,
+	bundledStarterNames,
+	installStarter,
+	readStarterGroup,
+	resolveStartersSetting,
+	starterId,
+	type StarterKind,
+} from "./starters.ts";
 
-export function buildStartersRouter(opts: { agentDir?: () => string } = {}): Hono {
+// Opt-in changes read, install and rewrite the process-wide list; run them one at a time.
+let optInQueue: Promise<unknown> = Promise.resolve();
+
+export function buildStartersRouter(opts: { agentDir?: () => string; kbRoot?: () => string } = {}): Hono {
 	const app = new Hono();
 	const agentDir = opts.agentDir ?? (() => sdk().getAgentDir());
-	const readStarters = (): StartersResponse | null => {
-		let dir: string;
+	const kbRoot = opts.kbRoot ?? resolveKbRoot;
+	/** Only a loaded backend has an agent dir; without one, starters are skipped entirely. */
+	const currentAgentDir = (): string | null => {
 		try {
-			dir = agentDir();
+			return agentDir();
 		} catch {
 			return null;
 		}
-		return { skills: readStarterGroup("skills", dir), extensions: readStarterGroup("extensions", dir) };
+	};
+	const readStarters = (dir: string): StartersResponse => {
+		const { setting, optedIn } = resolveStartersSetting();
+		return {
+			setting,
+			skills: readStarterGroup("skills", dir, optedIn),
+			extensions: readStarterGroup("extensions", dir, optedIn),
+		};
 	};
 	const noBackend = { error: "No NeoPi backend is loaded, so the deck cannot tell which agent directory starters install into. Pick one under Settings → Backend." };
 
 	app.get("/starters", (c) => {
-		const body = readStarters();
-		return body ? c.json(body) : c.json(noBackend, 503);
+		const dir = currentAgentDir();
+		return dir ? c.json(readStarters(dir)) : c.json(noBackend, 503);
 	});
 
-	app.put("/starters/auto-install", async (c) => {
-		let body: UpdateStarterAutoInstallRequest;
+	app.put("/starters/:kind/:name", async (c) => {
+		const kind = c.req.param("kind") as StarterKind;
+		const name = c.req.param("name");
+		if (!STARTER_KINDS.includes(kind) || !bundledStarterNames(kind).includes(name)) {
+			return c.json({ error: `${kind}/${name} is not a bundled starter` }, 404);
+		}
+		let body: UpdateStarterRequest;
 		try {
-			body = (await c.req.json()) as UpdateStarterAutoInstallRequest;
+			body = (await c.req.json()) as UpdateStarterRequest;
 		} catch {
 			return c.json({ error: "invalid json body" }, 400);
 		}
-		const updates: Record<string, string | null> = {};
-		for (const kind of ["skills", "extensions"] as StarterKind[]) {
-			const value = body[kind];
-			if (value === undefined) continue;
-			if (typeof value !== "boolean") return c.json({ error: `${kind} must be a boolean` }, 400);
-			const key = STARTER_AUTO_INSTALL_ENV[kind];
-			if (!resolveEnvSetting(key).setting.editable) {
-				return c.json({ error: `${key} is set by the launching shell; unset it there to change it here` }, 409);
+		if (typeof body?.optedIn !== "boolean") return c.json({ error: "optedIn must be a boolean" }, 400);
+		const dir = currentAgentDir();
+		if (!dir) return c.json(noBackend, 503);
+
+		const run = optInQueue.then(async () => {
+			const { setting, optedIn } = resolveStartersSetting();
+			if (!setting.editable) {
+				return c.json({ error: `${STARTERS_ENV} is set by the launching shell; unset it there to change it here` }, 409);
 			}
-			// Unset is the default (install); 0 turns the installer off.
-			updates[key] = value ? null : "0";
-		}
-		await commitManagedEnvUpdates(updates);
-		const set = Object.keys(updates).filter((k) => updates[k] !== null);
-		const unset = Object.keys(updates).filter((k) => updates[k] === null);
-		if (set.length > 0) await appendEnvAudit("set", set);
-		if (unset.length > 0) await appendEnvAudit("unset", unset);
-		const next = readStarters();
-		return next ? c.json(next) : c.json(noBackend, 503);
+			const id = starterId(kind, name);
+			if (body.optedIn) {
+				// Install first so a refused or failed copy leaves the list as it was.
+				try {
+					await installStarter(dir, kind, name);
+				} catch (err) {
+					return c.json({ error: `Could not install ${id}: ${err instanceof Error ? err.message : String(err)}` }, 500);
+				}
+				optedIn.add(id);
+			} else {
+				optedIn.delete(id);
+			}
+			const next = [...optedIn].sort().join(",");
+			await commitManagedEnvUpdates({ [STARTERS_ENV]: next || null });
+			await appendEnvAudit(next ? "set" : "unset", [STARTERS_ENV]);
+			if (kind === "extensions" && name === MAINTENANCE_GATE_STARTER) syncMaintenanceGateOrgRoot(kbRoot());
+			return c.json(readStarters(dir));
+		});
+		optInQueue = run.catch(() => {});
+		return run;
 	});
 
 	app.get("/starters/maintenance-gate", (c) => {
@@ -130,6 +173,7 @@ export function buildStartersRouter(opts: { agentDir?: () => string } = {}): Hon
 		const unset = Object.keys(updates).filter((k) => updates[k] === null);
 		if (set.length > 0) await appendEnvAudit("set", set);
 		if (unset.length > 0) await appendEnvAudit("unset", unset);
+		if (MAINTENANCE_GATE_ENV_KEYS.disabled in updates) syncMaintenanceGateOrgRoot(kbRoot());
 
 		const resp: MaintenanceGateState = readMaintenanceGateState();
 		return c.json(resp);

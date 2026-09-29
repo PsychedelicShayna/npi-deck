@@ -2,6 +2,7 @@
 name: create-skill
 description: Author a new omp-native skill. Use when the user wants to capture a recurring workflow, create a skill from scratch, formalize a procedure into a SKILL.md, scaffold a new skill under ~/.omp/agent/skills/, or "turn this into a skill".
 tags: [authoring, meta, omp-native]
+source: npi-deck starter (from omp-deck v0.6.1)
 ---
 
 # Create Skill

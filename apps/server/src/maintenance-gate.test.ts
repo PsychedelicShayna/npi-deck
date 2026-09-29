@@ -12,25 +12,14 @@ const ENV_KEYS = [
 	"OMP_MAINTENANCE_GATE_MIN_RELEASE_AGE_MS",
 	"OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS",
 	"NPI_DECK_ORG_ROOT",
-	"HOME",
-	"USERPROFILE",
 ];
 
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
 	saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+	for (const k of ENV_KEYS) delete process.env[k];
 	process.env.NPI_DECK_HOME = mkdtempSync(path.join(os.tmpdir(), "npi-deck-gate-data-"));
-	// os.homedir() honors USERPROFILE on Windows and HOME on POSIX. Override
-	// both so the extension-presence probe never looks at the real user home.
-	const tmpHomeDir = mkdtempSync(path.join(os.tmpdir(), "npi-deck-gate-home-"));
-	process.env.HOME = tmpHomeDir;
-	process.env.USERPROFILE = tmpHomeDir;
-	for (const k of ENV_KEYS) {
-		if (k !== "NPI_DECK_HOME" && k !== "HOME" && k !== "USERPROFILE") {
-			delete process.env[k];
-		}
-	}
 });
 
 afterEach(() => {

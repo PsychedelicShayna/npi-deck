@@ -34,8 +34,6 @@ if (!fixtureRoot) {
 				XDG_CACHE_HOME: path.join(home, ".cache"),
 				PI_CODING_AGENT_DIR: path.join(root, "agent"),
 				OPENROUTER_API_KEY: "sk-or-advisor-selection-dummy",
-				OMP_DECK_INSTALL_STARTER_SKILLS: "0",
-				OMP_DECK_INSTALL_STARTER_EXTENSIONS: "0",
 				NPI_DECK_BACKEND: selection.path,
 				NPI_DECK_ADVISOR_SELECTION_ROOT: root,
 			});

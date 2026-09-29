@@ -1,5 +1,6 @@
 /**
  * maintenance-gate
+ * source: npi-deck starter (from omp-deck v0.6.1)
  *
  * Nudges the agent at turn-end to capture session output into the canonical
  * OMP folders before the conversation moves on. Synthesizes a follow-up
@@ -38,7 +39,7 @@
  *   still firing at meaningful "yield" points.
  *
  * Tuning knobs are env-overridable AND read on every evaluation, so the deck
- * Settings → Orientation panel can change them live without restarting any
+ * Settings → Starters panel can change them live without restarting any
  * agent session:
  *
  *   OMP_MAINTENANCE_GATE_MIN_OP_MSGS         (default 4)
@@ -46,17 +47,18 @@
  *   OMP_MAINTENANCE_GATE_FIRE_FLOOR_MS       (default 25 * 60_000)
  *   OMP_MAINTENANCE_GATE_ROOTS               (CSV of explicit org roots)
  *   NPI_DECK_ORG_ROOT                        (deck-session org root; set by
- *                                             the deck server before spawning
- *                                             sessions so the gate activates
- *                                             regardless of session cwd)
+ *                                             the deck server while this
+ *                                             starter is opted in, so the
+ *                                             gate activates regardless of
+ *                                             session cwd)
  *   NPI_DECK_MAINTENANCE_GATE_DISABLED       (truthy => gate stays silent;
  *                                             checked at session_start AND
  *                                             every turn_end so a mid-session
  *                                             toggle takes effect immediately)
  *
- * Installed by npi-deck's StarterExtensionsInstaller into
- * `~/.omp/agent/extensions/maintenance-gate/`. Idempotent — never
- * overwrites a user-edited copy.
+ * An npi-deck starter: opt in from Settings → Starters and the deck copies it
+ * into `<agent dir>/extensions/maintenance-gate/`. Never overwrites a
+ * user-edited copy.
  */
 
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
@@ -72,7 +74,7 @@ const NO_MAINT_PHRASE = "No maintenance needed";
 const FIRE_MARKER = "## Maintenance check";
 
 // Tuning floors are read per-fire, not at module init, so the deck Settings
-// → Orientation panel can hot-apply changes without requiring the user to
+// → Starters panel can hot-apply changes without requiring the user to
 // reload every session. The `NPI_DECK_MAINTENANCE_GATE_DISABLED` flag bails
 // the gate at activation time and again on every turn_end as a safety net.
 function getMinOpMsgsSinceRelease(): number {
@@ -147,7 +149,7 @@ function envInt(name: string, def: number): number {
  * overrides the structural sniff.
  */
 function detectOrgRoot(cwd: string): string | null {
-	// Hard kill switch from the deck Settings → Orientation panel. Bails the
+	// Hard kill switch from the deck Settings → Starters panel. Bails the
 	// gate regardless of which other signal (deck root, explicit roots,
 	// structural sniff) would otherwise activate it.
 	if (isGateDisabled()) return null;
@@ -433,7 +435,7 @@ export default function maintenanceGate(pi: ExtensionAPI): void {
 
 	pi.on("turn_end", async (_event, ctx) => {
 		if (profile === "inactive" || !orgDir) return;
-		// Live kill switch: a mid-session disable (Settings → Orientation)
+		// Live kill switch: a mid-session disable (Settings → Starters)
 		// short-circuits before any further evaluation. Cheap; runs at most
 		// once per turn boundary.
 		if (isGateDisabled()) return;
