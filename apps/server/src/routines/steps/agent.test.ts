@@ -87,7 +87,7 @@ if (process.argv.some(arg => arg.startsWith("warn"))) process.stderr.write("Unre
 		} as Extract<RoutineStep, { type: "agent" }>;
 		const invalid = await executeAgentStep(step, context, new AbortController().signal, dir, [process.execPath, script]);
 		expect(invalid.status).toBe("failed");
-		expect(invalid.error).toContain("structured_output schema failure");
+		expect(invalid.error).toContain("structured_output does not match schema: /answer must be equal to constant");
 		expect(invalid.llmCostMicros).toBe(2000);
 		expect(readFileSync(argsFile, "utf8")).toContain('"--skills","alpha,beta"');
 		expect(readFileSync(argsFile, "utf8")).toContain('"--model","openrouter/openai/gpt-4o-mini"');
@@ -116,6 +116,86 @@ if (process.argv.some(arg => arg.startsWith("warn"))) process.stderr.write("Unre
 		else process.env.NPI_DECK_HOME = previousHome;
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+describe("structured_output", () => {
+	const schema = {
+		type: "object",
+		properties: { name: { type: "string" }, tags: { type: "array", items: { type: "string" } } },
+		required: ["name"],
+		additionalProperties: false,
+	};
+
+	async function withAnswer(answer: string, structured: { schema: unknown; strict?: boolean }) {
+		const dir = mkdtempSync(path.join(tmpdir(), "npi-agent-structured-"));
+		const previousHome = process.env.NPI_DECK_HOME;
+		process.env.NPI_DECK_HOME = dir;
+		const script = path.join(dir, "cli.ts");
+		writeFileSync(script, `
+const msg = {role:"assistant",timestamp:1,model:"test",content:[{type:"text",text:${JSON.stringify(answer)}}],usage:{input:1,output:1,cacheRead:0,cacheWrite:0,cost:{total:0}}};
+process.stdout.write(JSON.stringify({type:"message_end",message:msg})+"\\n"+JSON.stringify({type:"agent_end",messages:[msg]})+"\\n");
+`);
+		try {
+			const step = { id: "agent", type: "agent", prompt: "reply", structured_output: structured } as Extract<RoutineStep, { type: "agent" }>;
+			return await executeAgentStep(step, context, new AbortController().signal, dir, [process.execPath, script]);
+		} finally {
+			if (previousHome === undefined) delete process.env.NPI_DECK_HOME;
+			else process.env.NPI_DECK_HOME = previousHome;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	}
+
+	test("schema-conforming output reaches steps.<id>.json unchanged", async () => {
+		const value = { name: "deck", tags: ["a", "b"] };
+		const result = await withAnswer(JSON.stringify(value), { schema });
+		expect(result.status).toBe("success");
+		expect(result.error).toBeUndefined();
+		expect(result.json).toEqual(value);
+	});
+
+	test("syntactically valid JSON that violates the schema fails strict mode with instance paths", async () => {
+		const cases: Array<[string, string[]]> = [
+			["null", ["/ must be object"]],
+			["{}", ["/ must have required property 'name'"]],
+			['{"name":5,"tags":["ok",7]}', ["/name must be string", "/tags/1 must be string"]],
+			['{"name":"deck","extra":true}', ["/ must NOT have additional properties 'extra'"]],
+		];
+		for (const [answer, messages] of cases) {
+			const result = await withAnswer(answer, { schema, strict: true });
+			expect(result.status).toBe("failed");
+			expect(result.json).toBeUndefined();
+			expect(result.error).toStartWith("structured_output does not match schema: ");
+			for (const message of messages) expect(result.error).toContain(message);
+		}
+	});
+
+	test("invalid JSON fails as a parse error distinct from schema mismatch", async () => {
+		const result = await withAnswer("Sure! Here is the JSON: {name: deck}", { schema });
+		expect(result.status).toBe("failed");
+		expect(result.json).toBeUndefined();
+		expect(result.error).toStartWith("structured_output is not valid JSON: ");
+		expect(result.error).not.toContain("schema");
+	});
+
+	test("an uncompilable schema fails in either mode as a schema error, not a parse error", async () => {
+		for (const [answer, strict] of [['{"name":"deck"}', true], ["not json", false]] as const) {
+			const result = await withAnswer(answer, { schema: { type: "no-such-type" }, strict });
+			expect(result.status).toBe("failed");
+			expect(result.error).toStartWith("structured_output schema could not be compiled: ");
+		}
+	});
+
+	test("strict: false keeps the raw answer and withholds invalid JSON from later steps", async () => {
+		for (const answer of ['{"name":5}', "not json"]) {
+			const result = await withAnswer(answer, { schema, strict: false });
+			expect(result.status).toBe("success");
+			expect(result.json).toBeUndefined();
+			expect(result.stdoutExcerpt).toBe(answer);
+		}
+		const valid = await withAnswer('{"name":"deck"}', { schema, strict: false });
+		expect(valid.status).toBe("success");
+		expect(valid.json).toEqual({ name: "deck" });
+	});
 });
 
 test("aborting a streaming agent retains usage emitted before the terminal event", async () => {

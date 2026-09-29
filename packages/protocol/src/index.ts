@@ -13,7 +13,7 @@
  */
 
 // Re-export the V1 routine spec validator. JSON Schemas live in src/schemas/.
-export { validateRoutineSpec, validateStructuredOutput } from "./validate";
+export { compileStructuredOutputSchema, validateRoutineSpec } from "./validate";
 export type { ValidationError, ValidationResult } from "./validate";
 // MIXTURES.toml document, validation report and mixture trace projections (#80).
 export * from "./mixtures";

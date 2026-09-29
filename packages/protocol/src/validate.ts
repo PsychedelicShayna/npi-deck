@@ -125,12 +125,15 @@ export function validateRoutineSpec(spec: unknown): ValidationResult {
 	return { valid: true };
 }
 
-/** Validate a headless agent's answer against its declared output schema. */
-export function validateStructuredOutput(schema: unknown, output: unknown): ValidationResult {
+/**
+ * Compile a headless agent's declared output schema. Throws when the schema
+ * itself is invalid, so callers can report that apart from a bad answer.
+ */
+export function compileStructuredOutputSchema(schema: unknown): (output: unknown) => ValidationResult {
 	const ajv = new Ajv2020({ allErrors: true, strict: false });
 	addFormats(ajv);
 	const validate = ajv.compile(schema as object);
-	return validate(output) ? { valid: true } : { valid: false, errors: normalizeErrors(validate.errors) };
+	return (output) => validate(output) ? { valid: true } : { valid: false, errors: normalizeErrors(validate.errors) };
 }
 
 /**
