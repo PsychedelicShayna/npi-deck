@@ -19,7 +19,6 @@ import type {
 } from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
-import { broadcastBus } from "./broadcast-bus.ts";
 import { deriveLabel } from "./workspace-label.ts";
 import {
 	createState,
@@ -38,10 +37,6 @@ import {
 } from "./db/tasks.ts";
 
 const log = logger("routes:tasks");
-
-function notifyTasksChanged(): void {
-	broadcastBus.broadcast({ type: "tasks_changed" });
-}
 
 export function buildTasksRouter(): Hono {
 	const app = new Hono();
@@ -80,7 +75,6 @@ export function buildTasksRouter(): Hono {
 		}
 		try {
 			const task = createTask(body);
-			notifyTasksChanged();
 			return c.json(task, 201);
 		} catch (err) {
 			log.error(`createTask failed`, err);
@@ -104,7 +98,6 @@ export function buildTasksRouter(): Hono {
 		try {
 			const updated = updateTask(c.req.param("id"), body);
 			if (!updated) return c.json({ error: "not found" }, 404);
-			notifyTasksChanged();
 			return c.json(updated);
 		} catch (err) {
 			log.error(`updateTask failed`, err);
@@ -113,9 +106,7 @@ export function buildTasksRouter(): Hono {
 	});
 
 	app.delete("/tasks/:id", (c) => {
-		const ok = deleteTask(c.req.param("id"));
-		if (ok) notifyTasksChanged();
-		return c.json({ ok });
+		return c.json({ ok: deleteTask(c.req.param("id")) });
 	});
 
 	app.post("/tasks/:id/move", async (c) => {
@@ -131,7 +122,6 @@ export function buildTasksRouter(): Hono {
 		try {
 			const moved = moveTask(c.req.param("id"), body.stateId, body.index);
 			if (!moved) return c.json({ error: "task not found" }, 404);
-			notifyTasksChanged();
 			return c.json(moved);
 		} catch (err) {
 			log.error(`moveTask failed`, err);
@@ -172,7 +162,6 @@ export function buildTasksRouter(): Hono {
 		}
 		try {
 			const states = reorderStates(body.orderedIds as string[]);
-			notifyTasksChanged();
 			return c.json({ states });
 		} catch (err) {
 			log.error(`reorderStates failed`, err);

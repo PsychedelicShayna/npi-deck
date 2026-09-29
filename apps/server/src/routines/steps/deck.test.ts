@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { broadcastBus, type BroadcastFrame } from "../../broadcast-bus.ts";
 import { createInbox, getInbox, listInbox } from "../../db/inbox.ts";
 import { closeDb, openDb } from "../../db/index.ts";
 import { createTask, findStateByName, getTask, listTasks } from "../../db/tasks.ts";
@@ -45,6 +46,20 @@ function ctx(): RunContext {
 		state: {},
 	};
 }
+
+/** Run `fn` while recording every frame the deck broadcasts to WS clients. */
+async function recordBroadcasts(fn: () => Promise<unknown>): Promise<BroadcastFrame[]> {
+	const frames: BroadcastFrame[] = [];
+	const unsubscribe = broadcastBus.subscribe((f) => frames.push(f));
+	try {
+		await fn();
+	} finally {
+		unsubscribe();
+	}
+	return frames;
+}
+
+const tasksChanged = (frames: BroadcastFrame[]) => frames.filter((f) => f.type === "tasks_changed");
 
 describe("executeDeckStep", () => {
 	test("create_inbox_item creates a native inbox item", async () => {
@@ -402,5 +417,51 @@ describe("executeDeckStep", () => {
 		);
 		expect(result.status).toBe("failed");
 		expect(result.error).toContain("T-9999");
+	});
+
+	describe("open kanbans refresh on routine task mutations", () => {
+		test("create_task publishes tasks_changed", async () => {
+			bootDb();
+			const frames = await recordBroadcasts(() =>
+				executeDeckStep(
+					{ id: "task", type: "deck", action: "create_task", title: "Live card" },
+					ctx(),
+					AbortSignal.timeout(1000),
+				),
+			);
+			expect(tasksChanged(frames)).toHaveLength(1);
+		});
+
+		test("move_task publishes tasks_changed", async () => {
+			bootDb();
+			const task = createTask({ title: "Slide me" });
+			const frames = await recordBroadcasts(() =>
+				executeDeckStep(
+					{
+						id: "move",
+						type: "deck",
+						action: "move_task",
+						task_ref: `T-${task.displayId}`,
+						state_ref: "active",
+					},
+					ctx(),
+					AbortSignal.timeout(1000),
+				),
+			);
+			expect(tasksChanged(frames)).toHaveLength(1);
+		});
+
+		test("promote_inbox_item_to_task publishes tasks_changed", async () => {
+			bootDb();
+			const item = createInbox({ kind: "capture", title: "Promote live" });
+			const frames = await recordBroadcasts(() =>
+				executeDeckStep(
+					{ id: "promote", type: "deck", action: "promote_inbox_item_to_task", inbox_ref: item.id },
+					ctx(),
+					AbortSignal.timeout(1000),
+				),
+			);
+			expect(tasksChanged(frames)).toHaveLength(1);
+		});
 	});
 });

@@ -1,6 +1,5 @@
 import type { SlashCommand, Task } from "@npi-deck/protocol";
 
-import { broadcastBus } from "./broadcast-bus.ts";
 import {
 	createTask,
 	findStateByName,
@@ -34,10 +33,6 @@ function fmtTask(t: Task): string {
 	return `T-${t.displayId}: ${t.title}${state ? ` (${state.name})` : ""}`;
 }
 
-function broadcastTasksChanged(): void {
-	broadcastBus.broadcast({ type: "tasks_changed" });
-}
-
 export const DECK_SLASH_COMMANDS: DeckSlashCommand[] = [
 	{
 		name: "task add",
@@ -47,7 +42,6 @@ export const DECK_SLASH_COMMANDS: DeckSlashCommand[] = [
 			const title = args.trim();
 			if (!title) throw new Error("Usage: /task add <title>");
 			const created = createTask({ title, stateId: "s_backlog", cwd: ctx.cwd });
-			broadcastTasksChanged();
 			return { kind: "consumed", output: `Created T-${created.displayId}: ${created.title} (backlog)` };
 		},
 	},
@@ -92,7 +86,6 @@ export const DECK_SLASH_COMMANDS: DeckSlashCommand[] = [
 			const fromState = getState(existing.stateId);
 			const moved = moveTask(existing.id, target.id, Number.POSITIVE_INFINITY);
 			if (!moved) throw new Error(`Task ${ref} disappeared.`);
-			broadcastTasksChanged();
 			return {
 				kind: "consumed",
 				output: `T-${moved.displayId}: ${fromState?.name ?? "?"} → done`,
@@ -118,7 +111,6 @@ export const DECK_SLASH_COMMANDS: DeckSlashCommand[] = [
 			const fromState = getState(existing.stateId);
 			const moved = moveTask(existing.id, target.id, Number.POSITIVE_INFINITY);
 			if (!moved) throw new Error(`Task ${ref} disappeared.`);
-			broadcastTasksChanged();
 			return {
 				kind: "consumed",
 				output: `T-${moved.displayId}: ${fromState?.name ?? "?"} → ${target.name}`,

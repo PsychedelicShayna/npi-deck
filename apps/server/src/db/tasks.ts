@@ -8,7 +8,18 @@
 
 import type { Task, TaskState } from "@npi-deck/protocol";
 
+import { broadcastBus } from "../broadcast-bus.ts";
 import { getDb, id, nowIso } from "./index.ts";
+
+/**
+ * Every committed change to the board goes through this module, so it is the
+ * one place that tells open kanbans to reload. REST routes, inbox promotion,
+ * routine steps, and deck slash commands all inherit the event by calling the
+ * mutators below; none of them publish it themselves.
+ */
+function notifyTasksChanged(): void {
+	broadcastBus.broadcast({ type: "tasks_changed" });
+}
 
 interface TaskRow {
 	id: string;
@@ -114,6 +125,7 @@ export function createState(input: {
 	).run(stateId, input.name, input.color ?? "#6e6a62", nextPos);
 	const out = getState(stateId);
 	if (!out) throw new Error("createState failed");
+	notifyTasksChanged();
 	return out;
 }
 
@@ -129,6 +141,7 @@ export function updateState(
 			"UPDATE task_states SET name = ?, color = ?, position = ? WHERE id = ?",
 		)
 		.run(next.name, next.color, next.position, stateId);
+	notifyTasksChanged();
 	return getState(stateId);
 }
 
@@ -168,6 +181,7 @@ export function reorderStates(orderedIds: string[]): TaskState[] {
 		}
 	})();
 
+	notifyTasksChanged();
 	return listStates();
 }
 
@@ -194,6 +208,7 @@ export function deleteState(stateId: string): { reassigned: number } {
 		renumberColumn(fallback.id);
 		db.prepare<unknown, [string]>("DELETE FROM task_states WHERE id = ?").run(stateId);
 	})();
+	notifyTasksChanged();
 	return { reassigned };
 }
 
@@ -301,6 +316,7 @@ export function createTask(input: {
 	})();
 	const out = getTask(taskId);
 	if (!out) throw new Error("createTask failed");
+	notifyTasksChanged();
 	return out;
 }
 
@@ -346,12 +362,15 @@ export function updateTask(
 		archivedAt,
 		taskId,
 	);
+	notifyTasksChanged();
 	return getTask(taskId);
 }
 
 export function deleteTask(taskId: string): boolean {
 	const r = getDb().prepare<unknown, [string]>("DELETE FROM tasks WHERE id = ?").run(taskId);
-	return Number(r.changes ?? 0) > 0;
+	const deleted = Number(r.changes ?? 0) > 0;
+	if (deleted) notifyTasksChanged();
+	return deleted;
 }
 
 /**
@@ -399,6 +418,7 @@ export function moveTask(taskId: string, stateId: string, index: number): Task |
 		}
 	})();
 
+	notifyTasksChanged();
 	return getTask(taskId);
 }
 
