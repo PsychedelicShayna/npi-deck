@@ -227,4 +227,13 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
 		await fs.promises.rm(tmp, { force: true });
 		throw err;
 	}
+	if (process.platform !== "win32") {
+		// Make the rename itself durable before reporting success.
+		const dir = await fs.promises.open(path.dirname(filePath), "r");
+		try {
+			await dir.sync();
+		} finally {
+			await dir.close();
+		}
+	}
 }
