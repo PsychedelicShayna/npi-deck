@@ -122,7 +122,9 @@ Read by the omp SDK directly from `process.env`. The deck Settings UI shows
 them masked. Revealing a value, like Settings → Restart, requires a request
 whose TCP connection comes from loopback (127.0.0.0/8 or `::1`) and whose
 `Host` is `localhost`, `127.0.0.1` or `[::1]`. On a non-loopback
-`NPI_DECK_HOST`, remote clients get 403 whatever `Host` they send.
+`NPI_DECK_HOST`, remote clients get 403 whatever `Host` they send. The same
+holds through the web dev and preview servers (`vite --host 0.0.0.0`): their
+proxy tells the deck the real client address in `x-npi-deck-proxy-peer`.
 
 | Var | Sensitive? | Notes |
 |---|---|---|

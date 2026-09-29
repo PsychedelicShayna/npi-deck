@@ -10,16 +10,28 @@ export interface RequestPeerBindings {
 export type RequestPeerEnv = { Bindings: RequestPeerBindings };
 
 /**
+ * The web dev and preview servers' `/api` proxy (apps/web/vite.config.ts) always overwrites
+ * this header with the address of the client that connected to it. Only a loopback socket
+ * peer can be that proxy, so the header is read only then; any other sender's copy is ignored.
+ */
+export const PROXY_PEER_HEADER = "x-npi-deck-proxy-peer";
+
+/**
  * Loopback gate for privileged routes (secret reveal, restart).
  *
  * Authorization rests on the socket peer: a remote client on a non-loopback bind can put
  * `Host: 127.0.0.1` in its request, but it cannot make its TCP connection come from
- * 127.0.0.0/8 or ::1. The Host check is an extra requirement, not a grant: it stops a
- * DNS-rebound page in a local browser (loopback peer, foreign Host) from reaching these
- * routes. A request with no known peer is refused.
+ * 127.0.0.0/8 or ::1. When the loopback peer is the web dev proxy, the client it relays for
+ * (`PROXY_PEER_HEADER`) must be loopback too, since Vite on `--host 0.0.0.0` relays remote
+ * clients from a loopback socket with a rewritten Host. The Host check is an extra
+ * requirement, not a grant: it stops a DNS-rebound page in a local browser (loopback peer,
+ * foreign Host) from reaching these routes. A request with no known peer is refused.
  */
 export function isLoopbackRequest(req: Request, bindings: RequestPeerBindings | undefined): boolean {
-	return isLoopbackAddress(bindings?.peerAddress) && isLoopbackHostname(new URL(req.url).hostname);
+	if (!isLoopbackAddress(bindings?.peerAddress)) return false;
+	const proxied = req.headers.get(PROXY_PEER_HEADER);
+	if (proxied !== null && !isLoopbackAddress(proxied)) return false;
+	return isLoopbackHostname(new URL(req.url).hostname);
 }
 
 function isLoopbackAddress(address: string | undefined): boolean {

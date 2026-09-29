@@ -8,6 +8,7 @@ import type { AgentBridge } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
 import { MANAGED_ENV_KEYS_LOADED, readManagedEnvFile } from "./env-store.ts";
 import { buildSettingsRouter } from "./routes-settings.ts";
+import { PROXY_PEER_HEADER } from "./request-peer.ts";
 
 const ENV_KEYS = ["NPI_DECK_HOME", "NPI_DECK_DEFAULT_CWD", "NPI_DECK_WORKSPACES"];
 
@@ -136,6 +137,38 @@ describe("privileged routes authorize by socket peer, not Host (#79)", () => {
 		expect(reveal.status).toBe(403);
 		const restart = await app.request("http://attacker.example/server/restart", { method: "POST" }, { peerAddress: "127.0.0.1" });
 		expect(restart.status).toBe(403);
+		expect(restarts()).toBe(0);
+	});
+
+	test("a remote client relayed by the loopback dev proxy is refused", async () => {
+		const { app, restarts } = setup();
+		for (const relayed of ["192.168.1.50", "::ffff:100.64.0.7", ""]) {
+			const headers = { [PROXY_PEER_HEADER]: relayed };
+			const reveal = await app.request(REVEAL, { headers }, { peerAddress: "127.0.0.1" });
+			expect(reveal.status).toBe(403);
+			expect(await reveal.text()).not.toContain(SECRET);
+			const restart = await app.request(RESTART, { method: "POST", headers }, { peerAddress: "127.0.0.1" });
+			expect(restart.status).toBe(403);
+		}
+		expect(restarts()).toBe(0);
+	});
+
+	test("a local client relayed by the loopback dev proxy reveals and restarts", async () => {
+		const { app, restarts } = setup();
+		for (const relayed of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+			const reveal = await app.request(REVEAL, { headers: { [PROXY_PEER_HEADER]: relayed } }, { peerAddress: "127.0.0.1" });
+			expect(reveal.status).toBe(200);
+		}
+		const restart = await app.request(RESTART, { method: "POST", headers: { [PROXY_PEER_HEADER]: "127.0.0.1" } }, { peerAddress: "127.0.0.1" });
+		expect(restart.status).toBe(200);
+		expect(restarts()).toBe(1);
+	});
+
+	test("a remote peer cannot claim a loopback client through the proxy header", async () => {
+		const { app, restarts } = setup();
+		const headers = { [PROXY_PEER_HEADER]: "127.0.0.1" };
+		expect((await app.request(REVEAL, { headers }, { peerAddress: "192.168.1.50" })).status).toBe(403);
+		expect((await app.request(RESTART, { method: "POST", headers }, { peerAddress: "192.168.1.50" })).status).toBe(403);
 		expect(restarts()).toBe(0);
 	});
 });
