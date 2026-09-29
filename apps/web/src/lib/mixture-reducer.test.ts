@@ -37,6 +37,12 @@ describe("mixture panel state", () => {
 		expect(state.messages.filter(message => message.role === "mixtureTrace")).toHaveLength(3);
 	});
 
+	test("after the last hop the run is finalizing and no member is shown working", () => {
+		const last = { ...hop(2, "editor", "editor"), run: { ...hop(2, "editor", "editor").run, phase: "finalizing" } };
+		const state = applyEvent(session(), { type: "mixture_hop_end", details: last } as never);
+		expect(mixtureRunPhase(onlyRun(state), live)).toEqual({ kind: "running", activeMemberId: undefined, phase: "finalizing" });
+	});
+
 	test("an aborted run is interrupted, whether it ended or checkpointed", () => {
 		const ended = applyEvent(applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never), { type: "mixture_run_end", details: runEnd(2, "aborted") } as never);
 		expect(mixtureRunPhase(onlyRun(ended), live)).toEqual({ kind: "interrupted", reason: "aborted" });
@@ -44,10 +50,14 @@ describe("mixture panel state", () => {
 		expect(mixtureRunPhase(onlyRun(checkpointed), live)).toEqual({ kind: "interrupted", reason: "abort" });
 	});
 
-	test("a run replayed from the transcript has no recorded outcome; a worker restart interrupts it", () => {
-		const replayed = session([card(hop(1, "writer", "editor"))], "/s/one.jsonl", false);
-		const run = onlyRun(replayed);
-		expect(mixtureRunPhase(run, { ...live, streaming: false })).toEqual({ kind: "unrecorded" });
+	test("replayed history never shows as running, even while a new turn streams", () => {
+		const replayed = onlyRun(session([card(hop(1, "writer", "editor"))], "/s/one.jsonl", false));
+		expect(mixtureRunPhase(replayed, live)).toEqual({ kind: "unrecorded" });
+		expect(mixtureRunPhase(replayed, { ...live, endedByRestart: true })).toEqual({ kind: "unrecorded" });
+	});
+
+	test("a run seen live is interrupted by a worker restart and frozen while disconnected", () => {
+		const run = onlyRun(applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never));
 		expect(mixtureRunPhase(run, { ...live, endedByRestart: true })).toEqual({ kind: "interrupted", reason: "worker restart" });
 		expect(mixtureRunPhase(run, { ...live, connected: false })).toEqual({ kind: "disconnected", activeMemberId: "editor" });
 	});

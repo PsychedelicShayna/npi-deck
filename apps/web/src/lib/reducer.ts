@@ -71,7 +71,7 @@ export function initSession(snapshot: SessionSnapshot, priorUsage: readonly unkn
 		ingestMessage(state, m);
 	}
 	// Live snapshots carry trace cards beside the model context; transcripts inline them.
-	state.mixture = hydrateMixtureTraces([...snapshot.messages, ...(snapshot.mixtureTraces ?? [])]);
+	state.mixture = hydrateMixtureTraces([...snapshot.messages, ...(snapshot.mixtureTraces ?? [])], snapshot.isStreaming);
 	return state;
 }
 

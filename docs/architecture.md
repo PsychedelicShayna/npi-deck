@@ -50,6 +50,22 @@ or to run sessions on different machines.
 Routes never import `@oh-my-pi/pi-coding-agent` directly. Everything
 sessions-related flows through `AgentBridge` or `SessionHandle`.
 
+## Mixtures of agents
+
+NeoPi owns mixture parsing, resolution, validation, persistence and execution.
+`apps/server/src/mixtures-service.ts` (routes in `routes-mixtures.ts`) reads a
+known workspace's project or user `MIXTURES.toml`, validates drafts through
+the `mixture-config` manifest feature, and saves with a hash compare, a
+read-back check and `AgentBridge.refreshMixtureRoster(cwd)`, the only place
+the deck replaces a workspace's mixture roster. The bridge otherwise leases a
+workspace scope per request (picker listing, chat creation, model switch) and
+re-validates the chosen mixture under the chat's settings.
+
+The web side keeps the chat's trace cards (`reducer.ts`) and the inspector's
+MoA panel (`mixture-reducer.ts`) on the same `mixture_*` events. The routine
+canvas and the mixture flowchart share `components/graph/GraphCanvasSurface.tsx`
+for React Flow chrome only; each keeps its own nodes, edges and semantics.
+
 ## Frame model
 
 The WS hub maintains:

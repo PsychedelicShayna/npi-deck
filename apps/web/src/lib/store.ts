@@ -318,9 +318,10 @@ export const useStore = create<StoreState>()(
 			set((s) => {
 				// A resumed read-only transcript is live now; keep showing it
 				// until the snapshot replaces it, but stop treating it as read-only.
+				// Its MoA panel restarts from that snapshot: resuming is not a reconnect.
 				const prev = s.sessionsById[created.sessionId];
 				return prev?.readOnly
-					? { activeId: created.sessionId, sessionsById: { ...s.sessionsById, [created.sessionId]: { ...prev, readOnly: undefined } } }
+					? { activeId: created.sessionId, sessionsById: { ...s.sessionsById, [created.sessionId]: { ...prev, readOnly: undefined, mixture: undefined } } }
 					: { activeId: created.sessionId };
 			});
 			// Background-refresh sidebar to reflect the new entry.

@@ -23,6 +23,8 @@ export interface MixtureRunUi {
 	latest: MixtureTraceHeader;
 	/** Every event once, by seq; a repeated (runId, seq) replaces its earlier copy. */
 	traces: MixtureTrace[];
+	/** Seen live on this connection (or possibly still running at hydration); replayed history is not. */
+	live: boolean;
 }
 
 export interface MixtureReset {
@@ -67,12 +69,13 @@ export function isMixtureTrace(value: unknown): value is MixtureTrace {
 	);
 }
 
-export function applyMixtureTrace(state: MixtureUi, value: unknown): MixtureUi {
+/** `live`: the event arrived on this connection, so its run belongs to the session's current activity. */
+export function applyMixtureTrace(state: MixtureUi, value: unknown, live = true): MixtureUi {
 	if (!isMixtureTrace(value)) return { ...state, dropped: state.dropped + 1 };
 	const index = state.runs.findIndex(run => run.runId === value.runId);
 	const previous = state.runs[index];
 	const same = previous?.traces.find(trace => trace.seq === value.seq);
-	if (same && JSON.stringify(same) === JSON.stringify(value)) return state;
+	if (same && JSON.stringify(same) === JSON.stringify(value) && (previous!.live || !live)) return state;
 	const traces = previous ? previous.traces.filter(trace => trace.seq !== value.seq) : [];
 	traces.push(value);
 	traces.sort((a, b) => a.seq - b.seq);
@@ -82,6 +85,7 @@ export function applyMixtureTrace(state: MixtureUi, value: unknown): MixtureUi {
 		mixture: typeof value.mixture === "string" ? value.mixture : (previous?.mixture ?? "mixture"),
 		latest,
 		traces,
+		live: live || !!previous?.live,
 	};
 	const runs = [...state.runs];
 	if (index < 0) runs.push(run);
@@ -89,15 +93,20 @@ export function applyMixtureTrace(state: MixtureUi, value: unknown): MixtureUi {
 	return { ...state, runs, currentRunId: index < 0 ? value.runId : state.currentRunId };
 }
 
-/** Rebuild from persisted `mixture_trace` custom messages (a snapshot or transcript). */
-export function hydrateMixtureTraces(messages: readonly unknown[]): MixtureUi {
+/**
+ * Rebuild from persisted `mixture_trace` custom messages (a snapshot or
+ * transcript). Replayed runs are history; only when the session is streaming
+ * can the last one still be running.
+ */
+export function hydrateMixtureTraces(messages: readonly unknown[], streaming = false): MixtureUi {
 	let state = emptyMixtureUi();
 	for (const message of messages) {
 		if (record(message) && message.role === "custom" && message.customType === "mixture_trace" && message.display !== false) {
-			state = applyMixtureTrace(state, message.details);
+			state = applyMixtureTrace(state, message.details, false);
 		}
 	}
-	return state;
+	if (!streaming || !state.currentRunId) return state;
+	return { ...state, runs: state.runs.map(run => (run.runId === state.currentRunId ? { ...run, live: true } : run)) };
 }
 
 /**
@@ -125,11 +134,13 @@ export function reconcileMixtureResubscribe(
 		const kept = hydrated.runs.find(candidate => candidate.runId === run.runId);
 		// A live-only run (no persisted trace) is kept whole; a replayed one gains the live-only events.
 		for (const trace of run.traces) {
-			if (!kept?.traces.some(candidate => candidate.seq === trace.seq)) merged = applyMixtureTrace(merged, trace);
+			if (!kept?.traces.some(candidate => candidate.seq === trace.seq)) merged = applyMixtureTrace(merged, trace, run.live);
 		}
 	}
+	const liveBefore = new Set(previous.runs.filter(run => run.live).map(run => run.runId));
 	return {
 		...merged,
+		runs: merged.runs.map(run => (liveBefore.has(run.runId) && !run.live ? { ...run, live: true } : run)),
 		currentRunId: merged.runs.some(run => run.runId === previous.currentRunId) ? previous.currentRunId : merged.currentRunId,
 		reconnectedAt: change.at,
 		resets: previous.resets,
@@ -158,6 +169,8 @@ export type MixtureRunPhase =
 
 const INTERRUPTING_END = new Set(["aborted", "error"]);
 const INTERRUPTING_CHECKPOINT = new Set(["abort", "error"]);
+/** Run phases in which `activeMemberId` is the member about to run or running. */
+const MEMBER_PHASES = new Set(["hop_ready", "generating", "resume_hop", "decision_pending", "awaiting_tools"]);
 
 /** Where one run stands, from its traces plus the session's live state. */
 export function mixtureRunPhase(
@@ -174,8 +187,12 @@ export function mixtureRunPhase(
 	if (status === "done") return { kind: "completed", endReason: run.latest.run.endReason ?? "done" };
 	if (status === "error") return { kind: "interrupted", reason: run.latest.run.endReason ?? "error" };
 	if (status === "paused" || status === "checkpoint") return { kind: "paused", reason: checkpoint && checkpoint.kind === "checkpoint" ? checkpoint.reason : status };
+	// Replayed history has no live outcome; only a run seen live can still be running.
+	if (!run.live) return { kind: "unrecorded" };
 	if (session.endedByRestart) return { kind: "interrupted", reason: "worker restart" };
 	if (!session.current || !session.streaming) return { kind: "unrecorded" };
-	if (!session.connected) return { kind: "disconnected", activeMemberId: run.latest.run.activeMemberId };
-	return { kind: "running", activeMemberId: run.latest.run.activeMemberId, phase: run.latest.run.phase };
+	// After the last hop the header keeps its member while the run finalizes; nobody is working then.
+	const activeMemberId = MEMBER_PHASES.has(run.latest.run.phase) ? run.latest.run.activeMemberId : undefined;
+	if (!session.connected) return { kind: "disconnected", activeMemberId };
+	return { kind: "running", activeMemberId, phase: run.latest.run.phase };
 }
