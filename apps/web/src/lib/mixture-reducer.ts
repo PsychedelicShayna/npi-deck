@@ -94,10 +94,20 @@ export function applyMixtureTrace(state: MixtureUi, value: unknown, live = true)
 	return { ...state, runs, currentRunId: index < 0 ? value.runId : state.currentRunId };
 }
 
-/** A run ended by `run_end` or by an abort/error checkpoint as its last event. */
+/**
+ * A member failure ends the run at once. NeoPi's failed hop card still says the
+ * run is running and no run end or card follows it live (only a persisted
+ * `error` checkpoint, which the deck's snapshot rebuilds).
+ */
+function failedLast(run: MixtureRunUi): boolean {
+	const last = run.traces[run.traces.length - 1];
+	return last?.kind === "hop" && last.status === "failed";
+}
+
+/** A run ended by `run_end`, by an abort/error checkpoint as its last event, or by a failed member. */
 function ended(run: MixtureRunUi): boolean {
 	const last = run.traces[run.traces.length - 1];
-	return run.traces.some(trace => trace.kind === "run_end") || (last?.kind === "checkpoint" && INTERRUPTING_CHECKPOINT.has(last.reason));
+	return run.traces.some(trace => trace.kind === "run_end") || (last?.kind === "checkpoint" && INTERRUPTING_CHECKPOINT.has(last.reason)) || failedLast(run);
 }
 
 /**
@@ -188,6 +198,8 @@ export function mixtureRunPhase(
 	const checkpoint = run.traces.findLast(trace => trace.kind === "checkpoint");
 	if (checkpoint && checkpoint.kind === "checkpoint" && INTERRUPTING_CHECKPOINT.has(checkpoint.reason) && checkpoint.seq === run.latest.seq)
 		return { kind: "interrupted", reason: checkpoint.reason };
+	// NeoPi fails the run the moment a member fails; the failed hop is its last event live.
+	if (failedLast(run)) return { kind: "interrupted", reason: "member failed" };
 	const status = run.latest.run.status;
 	if (status === "done") return { kind: "completed", endReason: run.latest.run.endReason ?? "done" };
 	if (status === "error") return { kind: "interrupted", reason: run.latest.run.endReason ?? "error" };

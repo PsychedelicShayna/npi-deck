@@ -50,6 +50,26 @@ describe("mixture panel state", () => {
 		expect(mixtureRunPhase(onlyRun(checkpointed), live)).toEqual({ kind: "interrupted", reason: "abort" });
 	});
 
+	test("a failed member ends the run as interrupted, live and on replay", () => {
+		// NeoPi's failed hop card: the hop failed while the run header still says running.
+		const failedHop = { ...hop(2, "editor", "editor"), status: "failed" };
+		let state = applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never);
+		state = applyEvent(state, { type: "mixture_hop_end", details: failedHop } as never);
+		const interrupted = { kind: "interrupted", reason: "member failed" };
+		expect(mixtureRunPhase(onlyRun(state), live)).toEqual(interrupted);
+		expect(mixtureRunPhase(onlyRun(state), { ...live, streaming: false })).toEqual(interrupted);
+		// Replayed while the chat streams a new turn on the same mixture: history, not running.
+		const onMixture = { provider: "mixture", id: "draft-then-edit" };
+		const replayed = initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: true, model: onMixture, messages: [], todoPhases: [], mixtureTraces: [card(hop(1, "writer", "editor")), card(failedHop)] as never });
+		expect(onlyRun(replayed).live).toBe(false);
+		expect(mixtureRunPhase(onlyRun(replayed), live)).toEqual(interrupted);
+		// With the snapshot's rebuilt error checkpoint the reason is NeoPi's own.
+		const rebuilt = { ...header(3, "error"), kind: "checkpoint", reason: "error" };
+		const withCheckpoint = initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: true, model: onMixture, messages: [], todoPhases: [], mixtureTraces: [card(hop(1, "writer", "editor")), card(failedHop), card(rebuilt)] as never });
+		expect(onlyRun(withCheckpoint).live).toBe(false);
+		expect(mixtureRunPhase(onlyRun(withCheckpoint), live)).toEqual({ kind: "interrupted", reason: "error" });
+	});
+
 	test("replayed history never shows as running, even while a new turn streams", () => {
 		const replayed = onlyRun(session([card(hop(1, "writer", "editor"))], "/s/one.jsonl", false));
 		expect(mixtureRunPhase(replayed, live)).toEqual({ kind: "unrecorded" });

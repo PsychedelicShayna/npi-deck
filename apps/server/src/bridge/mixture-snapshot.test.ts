@@ -26,3 +26,19 @@ test("a run still going, or one whose cards are on another branch, gets no run_e
 	const traces = mixtureSnapshotTraces([hop("live", 3, "writer")], [lifecycle({ kind: "run_end", runId: "elsewhere", endReason: "terminal", at: 1 })]);
 	expect(traces.map(trace => (trace.details as { kind: string }).kind)).toEqual(["hop"]);
 });
+
+test("a member failure's persisted error checkpoint becomes an error checkpoint card", () => {
+	// NeoPi: the failed hop's card (run header still `running`), then a `mixture_run` checkpoint with reason `error`.
+	const failed = hop("r2", 3, "writer");
+	(failed.details as Record<string, unknown>).status = "failed";
+	const traces = mixtureSnapshotTraces(
+		[failed],
+		[{ ...lifecycle({ v: 1, reason: "error", run: { id: "r2", status: "error", seq: 3, key: { mixture: "tea" } }, committedThrough: 0 }), timestamp: "2026-09-29T00:00:00.000Z" }],
+	);
+	expect(traces).toHaveLength(2);
+	expect(traces[1]).toMatchObject({
+		details: { runId: "r2", mixture: "tea", seq: 4, kind: "checkpoint", reason: "error", at: Date.parse("2026-09-29T00:00:00.000Z"), run: { status: "error", endReason: "error" } },
+	});
+	// Ordinary hop and decision checkpoints are not terminal and add nothing.
+	expect(mixtureSnapshotTraces([hop("r3", 3, "writer")], [lifecycle({ v: 1, reason: "hop", run: { id: "r3", status: "running", seq: 3 } })])).toHaveLength(1);
+});
