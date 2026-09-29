@@ -27,6 +27,22 @@ const log = logger("routes:hooks");
 
 const SIG_HEADER = "x-routine-signature";
 
+/**
+ * Headers whose values a rejected delivery's run keeps. Any other value may
+ * be a credential (the presented signature, `authorization`, `cookie`, a
+ * vendor API key) and is stored as `[redacted]`; its name still shows it arrived.
+ */
+const AUDITED_HEADER_VALUES = new Set(["accept", "content-encoding", "content-length", "content-type", "user-agent"]);
+
+function headersForAudit(headers: Record<string, string>): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const [name, value] of Object.entries(headers)) {
+		const key = name.toLowerCase();
+		out[key] = AUDITED_HEADER_VALUES.has(key) ? value : "[redacted]";
+	}
+	return out;
+}
+
 export function buildHooksRouter(runner: RoutinesRunner): Hono {
 	const app = new Hono();
 
@@ -42,7 +58,7 @@ export function buildHooksRouter(runner: RoutinesRunner): Hono {
 			insertAbortedRun({
 				routineId: record.routine_id,
 				triggerKind: "webhook",
-				triggerPayload: JSON.stringify({ path, headers: { ...c.req.header() } }).slice(0, 8 * 1024),
+				triggerPayload: { path, headers: headersForAudit(c.req.header()) },
 				abortReason: "signature_invalid",
 				error: `bad ${SIG_HEADER} on ${path}`,
 			});

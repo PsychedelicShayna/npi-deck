@@ -2,12 +2,13 @@ import { afterEach, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { RoutineSpec } from "@npi-deck/protocol";
+import type { ListRoutineRunsResponse, RoutineSpec } from "@npi-deck/protocol";
 import { closeDb, openDb } from "./db/index.ts";
 import { getWebhookSecretByPath, upsertWebhookSecret } from "./db/routine-step-runs.ts";
 import { createV1Routine, deleteRoutine, listRuns, updateV1Routine } from "./db/routines.ts";
 import { initializeOwnedGeneration, stopOwnedProcesses } from "./owned-process.ts";
 import { buildHooksRouter, hashSecretForStorage } from "./routes-hooks.ts";
+import { buildRoutinesRouter } from "./routes-routines.ts";
 import { RoutinesRunner } from "./routines-runner.ts";
 
 const SECRET = "hook-secret";
@@ -94,6 +95,40 @@ test("a signed webhook for an enabled routine is accepted and runs", async () =>
 	expect(await waitFor(() => listRuns(routine.id)[0]?.endedAt !== undefined)).toBe(true);
 	expect(fs.readFileSync(marker, "utf8").trim()).toBe("yes");
 	expect(JSON.parse(listRuns(routine.id)[0]!.triggerPayload!)).toEqual({ key: "value" });
+});
+
+test("a rejected webhook's run shows which headers arrived but never a credential value", async () => {
+	const { routine, hookPath } = setup(true);
+	const credentials = ["near-miss-hook-secret", "Bearer sender-token", "session=cookie-value", "api-key-value"];
+	const response = await buildHooksRouter(runner!).request(hookPath, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"user-agent": "sender/1.0",
+			"x-routine-signature": credentials[0]!,
+			authorization: credentials[1]!,
+			cookie: credentials[2]!,
+			"x-api-key": credentials[3]!,
+		},
+		body: JSON.stringify({ key: "value" }),
+	});
+	expect(response.status).toBe(401);
+	const runsResponse = await buildRoutinesRouter(runner!).request(`/routines/${routine.id}/runs`);
+	const { runs } = await runsResponse.json() as ListRoutineRunsResponse;
+	expect(runs).toHaveLength(1);
+	expect(runs[0]!.abortReason).toBe("signature_invalid");
+	for (const credential of credentials) expect(runs[0]!.triggerPayload).not.toContain(credential);
+	expect(JSON.parse(runs[0]!.triggerPayload!)).toEqual({
+		path: hookPath,
+		headers: {
+			"content-type": "application/json",
+			"user-agent": "sender/1.0",
+			"x-routine-signature": "[redacted]",
+			authorization: "[redacted]",
+			cookie: "[redacted]",
+			"x-api-key": "[redacted]",
+		},
+	});
 });
 
 test("a routine disabled while the webhook body streams is refused with 409 and not marked used", async () => {

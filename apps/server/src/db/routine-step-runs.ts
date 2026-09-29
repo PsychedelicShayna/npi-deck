@@ -9,6 +9,7 @@
 import type { RoutineStepRun, RoutineStepStatus } from "@npi-deck/protocol";
 
 import { getDb, id, nowIso } from "./index.ts";
+import { encodeTriggerPayload } from "./trigger-payload.ts";
 
 interface StepRunRow {
 	id: string;
@@ -325,11 +326,14 @@ export function finalizeRun(
 		);
 }
 
-/** Insert a "stillborn" run (e.g. webhook signature_invalid, concurrency_skipped). */
+/**
+ * Insert a "stillborn" run (e.g. webhook signature_invalid, concurrency_skipped).
+ * The trigger payload is stored through `encodeTriggerPayload`, like a started run's.
+ */
 export function insertAbortedRun(input: {
 	routineId: string;
 	triggerKind: "cron" | "manual" | "webhook" | "event";
-	triggerPayload?: string;
+	triggerPayload?: Record<string, unknown>;
 	abortReason: string;
 	error?: string;
 }): string {
@@ -349,7 +353,7 @@ export function insertAbortedRun(input: {
 			input.routineId,
 			now,
 			input.triggerKind,
-			input.triggerPayload ?? null,
+			input.triggerPayload === undefined ? null : encodeTriggerPayload(input.triggerPayload),
 			now,
 			input.abortReason,
 			input.error ?? null,

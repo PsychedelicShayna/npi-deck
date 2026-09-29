@@ -15,6 +15,7 @@ import type {
 } from "@npi-deck/protocol";
 
 import { getDb, id, nowIso } from "./index.ts";
+import { encodeTriggerPayload } from "./trigger-payload.ts";
 
 interface RoutineRow {
 	id: string;
@@ -380,14 +381,15 @@ export function setRoutineSchedule(
 
 // ─── Runs ──────────────────────────────────────────────────────────────────
 
-export function startRun(routineId: string, trigger: RoutineRun["trigger"], triggerPayload?: string): RoutineRun {
+/** Record a run's start. The trigger payload is stored through `encodeTriggerPayload`. */
+export function startRun(routineId: string, trigger: RoutineRun["trigger"], triggerPayload?: Record<string, unknown>): RoutineRun {
 	const runId = `run_${id().toLowerCase().slice(0, 18)}`;
 	const startedAt = nowIso();
 	getDb()
 		.prepare<unknown, [string, string, string, string, string | null]>(
 			"INSERT INTO routine_runs (id, routine_id, started_at, trigger, trigger_payload) VALUES (?, ?, ?, ?, ?)",
 		)
-		.run(runId, routineId, startedAt, trigger, triggerPayload ?? null);
+		.run(runId, routineId, startedAt, trigger, triggerPayload === undefined ? null : encodeTriggerPayload(triggerPayload));
 	const out = getRun(runId);
 	if (!out) throw new Error("startRun failed");
 	return out;

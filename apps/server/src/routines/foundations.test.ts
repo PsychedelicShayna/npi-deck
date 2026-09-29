@@ -101,6 +101,25 @@ test("disabled webhook does not execute, successful webhook persists payload", a
 	expect(JSON.parse(listRuns(enabled.id)[0]!.triggerPayload!)).toEqual({ key: "accepted" });
 });
 
+test("every trigger kind stores a bounded, parseable payload while its steps still see the full input", async () => {
+	setup();
+	const marker = path.join(home, "seen");
+	const r = routine(spec([{ id: "write", type: "run", command: `echo '{{ trigger.tag }}' >> '${marker}'` }], "parallel"));
+	// The blob precedes the tag, so only the full in-memory payload still carries the tag.
+	const payload = { blob: "\"x\"".repeat(40_000), tag: "tail-marker" };
+	for (const trigger of ["cron", "webhook", "event", "manual"] as const) await runner!.fire(r.id, trigger, payload);
+	expect(fs.readFileSync(marker, "utf8").trim().split("\n")).toEqual(Array(4).fill("tail-marker"));
+	const runs = listRuns(r.id);
+	expect(runs.map((run) => run.trigger).sort()).toEqual(["cron", "event", "manual", "webhook"]);
+	for (const run of runs) {
+		expect(Buffer.byteLength(run.triggerPayload!, "utf8")).toBeLessThanOrEqual(8 * 1024);
+		const stored = JSON.parse(run.triggerPayload!);
+		expect(stored.truncated).toBe(true);
+		expect(stored.bytes).toBe(Buffer.byteLength(JSON.stringify(payload), "utf8"));
+		expect(stored.preview.startsWith(`{"blob":"\\"x\\"`)).toBe(true);
+	}
+});
+
 test("disabled routine ignores cron and event triggers but still runs manually", async () => {
 	setup();
 	const marker = path.join(home, "disabled");

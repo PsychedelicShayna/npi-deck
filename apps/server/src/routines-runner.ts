@@ -163,7 +163,7 @@ export class RoutinesRunner {
 			log.warn(`V0 routine ${routine.id} missing action_kind/action_body`);
 			return;
 		}
-		const run = startRun(routine.id, trigger, JSON.stringify(payload));
+		const run = startRun(routine.id, trigger, payload);
 		const decision = this.concurrency.decide(routine.id, run.id, routine.concurrency);
 		if (decision.kind === "skip") {
 			finalizeRun(run.id, { endedAt: new Date().toISOString(), abortedAt: new Date().toISOString(), abortReason: "concurrency_skipped" });
@@ -207,14 +207,14 @@ export class RoutinesRunner {
 			insertAbortedRun({
 				routineId: routine.id,
 				triggerKind: trigger,
-				triggerPayload: JSON.stringify(payload),
+				triggerPayload: payload,
 				abortReason: "failure",
 				error: `spec_yaml parse failure: ${String(err)}`,
 			});
 			return;
 		}
 
-		const run = startRun(routine.id, trigger, JSON.stringify(payload));
+		const run = startRun(routine.id, trigger, payload);
 		const decision = this.concurrency.decide(routine.id, run.id, routine.concurrency);
 		if (decision.kind === "skip") {
 			finalizeRun(run.id, {
