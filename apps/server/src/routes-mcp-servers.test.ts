@@ -37,6 +37,15 @@ const request = (url: string, init?: RequestInit) => app.request(`http://127.0.0
 const send = (method: string, url: string, body: unknown) =>
 	request(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const list = async () => await (await request("/mcp-servers")).json() as McpServersResponse;
+/**
+ * A PUT or DELETE from a client that has just listed the entry: it carries the
+ * row's revision, as the page does.
+ */
+const fresh = async (method: string, name: string, body: Record<string, unknown>) => {
+	const file = typeof body.sourcePath === "string" ? body.sourcePath : body.scope === "user" ? userFile : projectFile;
+	const revision = (await list()).servers.find(server => server.name === name && server.sourcePath === file)?.revision ?? "unlisted";
+	return send(method, `/mcp-servers/${encodeURIComponent(name)}`, { ...body, revision });
+};
 /** The definition NeoPi resolves for a name: a shadowed loser is not it. */
 const rowOf = async (name: string) => {
 	const named = (await list()).servers.filter(server => server.name === name);
@@ -132,12 +141,50 @@ test("no env or header value, no credential argument and no URL secret reaches a
 	]);
 
 	const http = await rowOf("project-http");
-	expect(http?.url).toBe("https://••••••@example.test/mcp?token=••••••&mode=••••••");
+	expect(http?.url).toBe("https://••••••@example.test/mcp?••••••");
 	expect(http?.urlRedacted).toBe(true);
 });
 
+test("URL fragments, whole queries and token-shaped path segments never reach a client, and still round-trip", async () => {
+	const secretUrl = "https://example.test/v1/abcDEF1234567890ghijKLMN/mcp#access_token=s3cret-fragment";
+	await writeFile(userFile, JSON.stringify({
+		mcpServers: {
+			"fragment-http": { type: "http", url: secretUrl },
+			"fragment-args": {
+				type: "stdio",
+				command: "bun",
+				args: ["--url=https://example.test/cb#access_token=s3cret-frag-arg", "https://example.test/p?k=s3cret-bare-query", "plain.ts"],
+			},
+			"plain-http": { type: "http", url: "https://example.test/mcp" },
+		},
+	}, null, 2));
+	const raw = await (await request("/mcp-servers")).text();
+	for (const secret of ["s3cret-fragment", "s3cret-frag-arg", "s3cret-bare-query", "abcDEF1234567890ghijKLMN", "access_token", "k="]) {
+		expect(raw).not.toContain(secret);
+	}
+	expect(await rowOf("fragment-http")).toMatchObject({ url: "https://example.test/v1/••••••/mcp#••••••", urlRedacted: true });
+	expect((await rowOf("fragment-args"))?.args).toEqual([
+		{ display: "--url=https://example.test/cb#••••••", redacted: true },
+		{ display: "https://example.test/p?••••••", redacted: true },
+		{ display: "plain.ts", redacted: false },
+	]);
+	// A URL with nothing to hide is shown as stored.
+	expect(await rowOf("plain-http")).toMatchObject({ url: "https://example.test/mcp" });
+	expect((await rowOf("plain-http"))?.urlRedacted).toBeUndefined();
+
+	expect((await fresh("PUT", "fragment-http", { scope: "user", sourcePath: userFile, transport: "http", url: null, timeout: 5 })).status).toBe(200);
+	expect((await fresh("PUT", "fragment-args", {
+		scope: "user", sourcePath: userFile, transport: "stdio", command: "bun", args: ["plain.ts", { keepIndex: 1 }, { keepIndex: 0 }],
+	})).status).toBe(200);
+	const saved = JSON.parse(await readFile(userFile, "utf8"));
+	expect(saved.mcpServers["fragment-http"]).toMatchObject({ url: secretUrl, timeout: 5 });
+	expect(saved.mcpServers["fragment-args"].args).toEqual([
+		"plain.ts", "https://example.test/p?k=s3cret-bare-query", "--url=https://example.test/cb#access_token=s3cret-frag-arg",
+	]);
+});
+
 test("an edit keeps the values it was never shown, through a reorder", async () => {
-	const response = await send("PUT", "/mcp-servers/user-secretive", {
+	const response = await fresh("PUT", "user-secretive", {
 		scope: "user",
 		sourcePath: userFile,
 		transport: "stdio",
@@ -168,7 +215,7 @@ test("a kept argument cannot be moved out from behind the flag that hides it", a
 	const before = await readFile(userFile, "utf8");
 	// Index 2 is hidden only because `--api-key` precedes it; dropping the flag
 	// would put the credential back on screen at the next listing.
-	const orphaned = await send("PUT", "/mcp-servers/user-secretive", {
+	const orphaned = await fresh("PUT", "user-secretive", {
 		scope: "user", sourcePath: userFile, transport: "stdio", command: "bun",
 		args: ["serve.ts", { keepIndex: 2 }],
 	});
@@ -177,7 +224,7 @@ test("a kept argument cannot be moved out from behind the flag that hides it", a
 	expect(await readFile(userFile, "utf8")).toBe(before);
 
 	// Index 3 hides its own credential, so it travels anywhere.
-	const moved = await send("PUT", "/mcp-servers/user-secretive", {
+	const moved = await fresh("PUT", "user-secretive", {
 		scope: "user", sourcePath: userFile, transport: "stdio", command: "bun",
 		args: [{ keepIndex: 3 }, "serve.ts"],
 	});
@@ -187,7 +234,7 @@ test("a kept argument cannot be moved out from behind the flag that hides it", a
 });
 
 test("an http edit keeps the stored URL when the client only ever saw it redacted", async () => {
-	const response = await send("PUT", "/mcp-servers/project-http", {
+	const response = await fresh("PUT", "project-http", {
 		scope: "project", sourcePath: projectFile, transport: "http", url: null, timeout: 9000,
 		headers: [{ key: "Authorization", value: null }],
 	});
@@ -202,19 +249,19 @@ test("an http edit keeps the stored URL when the client only ever saw it redacte
 	});
 
 	// A typed URL replaces it; keeping one that does not exist is refused.
-	const typed = await send("PUT", "/mcp-servers/project-http", {
+	const typed = await fresh("PUT", "project-http", {
 		scope: "project", sourcePath: projectFile, transport: "http", url: "https://plain.test/mcp",
 	});
 	expect(typed.status).toBe(200);
 	expect(JSON.parse(await readFile(projectFile, "utf8")).mcpServers["project-http"].url).toBe("https://plain.test/mcp");
-	const missing = await send("PUT", "/mcp-servers/project-off", { scope: "project", transport: "http", url: null });
+	const missing = await fresh("PUT", "project-off", { scope: "project", transport: "http", url: null });
 	expect(missing.status).toBe(400);
 	expect(((await missing.json()) as { error: string }).error).toContain("no stored URL");
 });
 
 test("a rejected definition leaves the config file byte-identical", async () => {
 	const before = await readFile(projectFile, "utf8");
-	const cases: Array<[unknown, string]> = [
+	const cases: Array<[Record<string, unknown>, string]> = [
 		[{ scope: "project", transport: "stdio" }, 'requires "command" field'],
 		[{ scope: "project", transport: "http" }, 'requires "url" field'],
 		[{ scope: "project", transport: "carrier-pigeon", command: "true" }, "transport must be"],
@@ -224,7 +271,7 @@ test("a rejected definition leaves the config file byte-identical", async () => 
 		[{ scope: "project", transport: "stdio", command: "true", timeout: -5 }, "timeout must be"],
 	];
 	for (const [body, message] of cases) {
-		const response = await send("PUT", "/mcp-servers/project-off", body);
+		const response = await fresh("PUT", "project-off", body as Record<string, unknown>);
 		expect(response.status).toBe(400);
 		expect(((await response.json()) as { error: string }).error).toContain(message);
 	}
@@ -246,11 +293,11 @@ test("writes land in the requested scope and touch no other file", async () => {
 	const duplicate = await send("POST", "/mcp-servers", { scope: "project", name: "added-here", transport: "stdio", command: "bun" });
 	expect(duplicate.status).toBe(409);
 
-	const removed = await send("DELETE", "/mcp-servers/added-here", { scope: "project" });
+	const removed = await fresh("DELETE", "added-here", { scope: "project" });
 	expect(removed.status).toBe(200);
 	expect(JSON.parse(await readFile(projectFile, "utf8")).mcpServers["added-here"]).toBeUndefined();
 	expect(await readFile(userFile, "utf8")).toBe(userBefore);
-	expect((await send("DELETE", "/mcp-servers/added-here", { scope: "project" })).status).toBe(404);
+	expect((await fresh("DELETE", "added-here", { scope: "project" })).status).toBe(404);
 });
 
 test("a write refuses a file NeoPi's writer does not own", async () => {
@@ -311,26 +358,64 @@ test("apply reporting states exactly what reached live chats", async () => {
 		{ name: "loud", enabled: true },
 	]);
 
-	const removed = await send("DELETE", "/mcp-servers/loud", { scope: "project" });
+	const removed = await fresh("DELETE", "loud", { scope: "project" });
 	expect((await removed.json() as McpServerMutationResponse).applyNote).not.toContain("connected");
 });
 
-test("an edit made while the write waits for the file lock is merged, not overwritten", async () => {
+test("a stale draft cannot erase an external edit: PUT and DELETE answer 409 and the file is kept", async () => {
+	const listed = await list();
+	const revisionOf = (name: string) => listed.servers.find(server => server.name === name && server.sourcePath === userFile)!.revision!;
+	const stale = revisionOf("user-secretive");
+	// Revisions are keyed MACs: they reveal nothing of the stored values.
+	expect(stale).not.toContain("s3cret");
+	expect(stale.length).toBeGreaterThan(20);
+
+	// Someone adds an env key in a terminal after the page loaded.
+	const edited = JSON.parse(await readFile(userFile, "utf8"));
+	edited.mcpServers["user-secretive"].env.ADDED_ELSEWHERE = "keep-me";
+	await writeFile(userFile, JSON.stringify(edited, null, 2));
+	const external = await readFile(userFile, "utf8");
+
+	// The page's timeout-only save would have dropped nothing it could see, but
+	// its draft predates the key: refused, not merged away.
+	const put = await send("PUT", "/mcp-servers/user-secretive", {
+		scope: "user", sourcePath: userFile, transport: "stdio", command: "bun", timeout: 1000, revision: stale,
+		env: [{ key: "POSTGRES_URL", value: null }, { key: "LOG_LEVEL", value: null }],
+	});
+	expect(put.status).toBe(409);
+	expect(((await put.json()) as { error: string }).error).toContain("changed since this page loaded it");
+	const del = await send("DELETE", "/mcp-servers/user-secretive", { scope: "user", sourcePath: userFile, revision: stale });
+	expect(del.status).toBe(409);
+	expect(await readFile(userFile, "utf8")).toBe(external);
+
+	// Without a revision a write is refused outright; with the fresh one it goes through.
+	expect((await send("DELETE", "/mcp-servers/user-secretive", { scope: "user" })).status).toBe(400);
+	const current = (await list()).servers.find(server => server.name === "user-secretive")!.revision;
+	expect(current).not.toBe(stale);
+	const ok = await send("PUT", "/mcp-servers/user-secretive", {
+		scope: "user", sourcePath: userFile, transport: "stdio", command: "bun", timeout: 1000, revision: current,
+	});
+	expect(ok.status).toBe(200);
+	expect(JSON.parse(await readFile(userFile, "utf8")).mcpServers["user-secretive"]).toMatchObject({
+		timeout: 1000, env: { ADDED_ELSEWHERE: "keep-me" },
+	});
+});
+
+test("the revision check runs under the file lock, so a write that lands while the edit waits wins", async () => {
 	const mcp = feature("mcp-servers");
+	const revision = (await list()).servers.find(server => server.name === "user-secretive")!.revision;
 	let saw: "before" | "after" = "before";
-	// Hold NeoPi's per-file lock, then start the edit: it must block until the
-	// external change has landed and then merge against that, not against what
-	// the file held when the request arrived.
 	let pending: Promise<Response> | undefined;
 	await mcp.withFileLock(userFile, async () => {
 		pending = (async () => {
 			const response = await send("PUT", "/mcp-servers/user-secretive", {
-				scope: "user", sourcePath: userFile, transport: "stdio", command: "bunx", env: [{ key: "LOG_LEVEL", value: "warn" }],
+				scope: "user", sourcePath: userFile, transport: "stdio", command: "bunx", revision,
 			});
 			saw = "after";
 			return response;
 		})();
 		await Bun.sleep(150);
+		// The edit is blocked on the lock while this writer changes the entry.
 		expect(saw).toBe("before");
 		const stored = await mcp.readMCPConfigFile(userFile);
 		await mcp.writeMCPConfigFile(userFile, {
@@ -338,41 +423,58 @@ test("an edit made while the write waits for the file lock is merged, not overwr
 			mcpServers: { ...stored.mcpServers, "user-secretive": { ...stored.mcpServers!["user-secretive"]!, timeout: 4242 } },
 		});
 	});
-	const response = await pending!;
-	expect(response.status).toBe(200);
-
-	const saved = JSON.parse(await readFile(userFile, "utf8")) as {
-		mcpServers: Record<string, { command: string; timeout?: number; env: Record<string, string> }>;
-	};
-	// The request's own fields won, and the concurrent writer's field survived.
-	expect(saved.mcpServers["user-secretive"]).toMatchObject({ command: "bunx", timeout: 4242, env: { LOG_LEVEL: "warn" } });
+	expect((await pending!).status).toBe(409);
+	expect(JSON.parse(await readFile(userFile, "utf8")).mcpServers["user-secretive"]).toMatchObject({ command: "bun", timeout: 4242 });
 });
 
-test("removing a definition reconnects the one it was shadowing", async () => {
-	await writeFile(userFile, JSON.stringify({
-		mcpServers: { shared: { type: "stdio", command: "user-copy" } },
-	}, null, 2));
-	await writeFile(projectFile, JSON.stringify({
-		mcpServers: { shared: { type: "stdio", command: "project-copy" } },
-	}, null, 2));
-	// The project copy wins; the user copy is listed as shadowed.
+/** A chat whose NeoPi runtime connects `name` only when its own workspace still resolves it. */
+const calls = new Map<string, boolean[]>();
+function resolvingChat(sessionId: string, cwd: string, resolves: boolean): LiveMcpSession {
+	let connected = true;
+	calls.set(sessionId, []);
+	return {
+		sessionId,
+		cwd,
+		apply: async (_name, enabled) => {
+			calls.get(sessionId)!.push(enabled);
+			connected = enabled && resolves;
+			return "applied";
+		},
+		status: () => connected ? "connected" : "disconnected",
+	};
+}
+
+test("a removal makes every chat re-resolve the name against its own workspace", async () => {
+	await writeFile(userFile, JSON.stringify({ mcpServers: { shared: { type: "stdio", command: "user-copy" } } }, null, 2));
+	await writeFile(projectFile, JSON.stringify({ mcpServers: { shared: { type: "stdio", command: "project-copy" } } }, null, 2));
 	expect(await rowOf("shared")).toMatchObject({ sourcePath: projectFile, state: "enabled" });
 
-	live = [connectedChat("with-mcp")];
-	const removed = await send("DELETE", "/mcp-servers/shared", { scope: "project" });
+	// The deck's default workspace still resolves the user copy after the
+	// project one goes, but that says nothing about a chat in another
+	// workspace; each chat is asked to drop and re-resolve on its own.
+	const elsewhere = path.join(root, "elsewhere-workspace");
+	live = [resolvingChat("here", project, true), resolvingChat("there", elsewhere, false)];
+	const removed = await fresh("DELETE", "shared", { scope: "project" });
 	expect(removed.status).toBe(200);
 	const body = await removed.json() as McpServerMutationResponse;
-	// The surviving user definition is reported and the chat now runs it.
 	expect(body.server).toMatchObject({ sourcePath: userFile, command: "user-copy", state: "enabled" });
-	expect(body.live).toEqual([{ sessionId: "with-mcp", cwd: project, outcome: "applied", status: "connected" }]);
-	expect(applied).toEqual([{ name: "shared", enabled: false }, { name: "shared", enabled: true }]);
+	expect(body.live).toEqual([
+		{ sessionId: "here", cwd: project, outcome: "applied", status: "connected" },
+		{ sessionId: "there", cwd: elsewhere, outcome: "applied", status: "disconnected" },
+	]);
+	// Each chat dropped its connection before re-resolving (chats run concurrently).
+	for (const chat of live) expect(calls.get(chat.sessionId)).toEqual([false, true]);
+	expect(body.applyNote).toContain("1 still runs a definition of it from its own workspace");
+	expect(body.applyNote).toContain("1 dropped it");
 
-	// With nothing left to run, the removal only drops it.
-	applied.length = 0;
-	const last = await send("DELETE", "/mcp-servers/shared", { scope: "user" });
+	// With the last definition gone from the default workspace, a chat
+	// elsewhere that still resolves one keeps running it.
+	live = [resolvingChat("here", project, false), resolvingChat("there", elsewhere, true)];
+	const last = await fresh("DELETE", "shared", { scope: "user" });
 	expect(last.status).toBe(200);
-	expect((await last.json() as McpServerMutationResponse).server).toBeNull();
-	expect(applied).toEqual([{ name: "shared", enabled: false }]);
+	const lastBody = await last.json() as McpServerMutationResponse;
+	expect(lastBody.server).toBeNull();
+	expect(lastBody.live.map(entry => entry.status)).toEqual(["disconnected", "connected"]);
 });
 
 test("a malformed mcp.json fails with a generic error that never quotes it, and stays in place", async () => {

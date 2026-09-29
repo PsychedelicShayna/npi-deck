@@ -1,3 +1,4 @@
+import { createHmac, randomBytes } from "node:crypto";
 import * as path from "node:path";
 import { Hono, type Context } from "hono";
 import type { MCPServer } from "@oh-my-pi/pi-coding-agent/capability/mcp";
@@ -14,7 +15,9 @@ import type {
 	McpServerMutationResponse,
 	McpServerRow,
 	McpServerScope,
+	McpServerDeleteRequest,
 	McpServerTargetRequest,
+	McpServerUpdateRequest,
 	McpServersResponse,
 	McpServerWriteRequest,
 	McpTransport,
@@ -39,6 +42,17 @@ const WRITE_FAILED = "NeoPi could not save the MCP configuration; the deck serve
 const SECRET_FLAG = /(key|token|secret|password|passwd|credential|auth|cookie|session|bearer|pat)/i;
 const REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
+/**
+ * Key for entry revisions, private to this process. A revision must not be a
+ * plain digest: entries hold credentials, and an unkeyed hash of one can be
+ * brute-forced offline from the value it was computed over.
+ */
+const REVISION_KEY = randomBytes(32);
+/** Changes whenever the stored entry does; a client echoes it to prove its draft is current. */
+function revisionOf(entry: unknown): string {
+	return createHmac("sha256", REVISION_KEY).update(JSON.stringify(entry)).digest("base64url");
+}
+
 /** Names and set-state only: any env or header value can be a credential, so none is sent. */
 function keyRefs(record: Record<string, string> | undefined): McpKeyRef[] {
 	return Object.entries(record ?? {}).map(([key, value]) => ({ key, set: typeof value === "string" && value !== "" }));
@@ -47,9 +61,9 @@ function keyRefs(record: Record<string, string> | undefined): McpKeyRef[] {
 /**
  * Arguments as a client may show them. `--api-key X` and `--api-key=X` keep the
  * flag and drop the value; an argument that is only a secret (the one after the
- * flag) shows nothing else. Any argument carrying a URL also loses that URL's
- * userinfo and query values, so a connection string under an innocuous flag
- * (`--db=postgres://user:pw@host/db`) is not echoed either.
+ * flag) shows nothing else. Any argument carrying a URL is reduced the same way
+ * a server URL is (see redactUrl), so a connection string under an innocuous
+ * flag (`--db=postgres://user:pw@host/db`) is not echoed either.
  */
 function redactArgs(args: readonly string[] | undefined): McpArg[] {
 	const out: McpArg[] = [];
@@ -68,10 +82,11 @@ function redactArgs(args: readonly string[] | undefined): McpArg[] {
 			continue;
 		}
 		if (arg.startsWith("-") && equals === -1 && SECRET_FLAG.test(arg)) valueOfSecretFlag = true;
-		// `--db=postgres://…`, or a bare URL argument.
-		const prefix = equals > 0 ? arg.slice(0, equals + 1) : "";
+		// `--db=postgres://…`, or an argument that is itself a URL. Only a flag's
+		// `=` separates a prefix: a bare URL's `?k=v` is part of the URL.
+		const prefix = arg.startsWith("-") && equals > 0 ? arg.slice(0, equals + 1) : "";
 		const rest = arg.slice(prefix.length);
-		if (rest.includes("://")) {
+		if (arg.includes("://")) {
 			const url = redactUrl(rest);
 			if (url.redacted) {
 				out.push({ display: `${prefix}${url.display}`, redacted: true });
@@ -83,23 +98,37 @@ function redactArgs(args: readonly string[] | undefined): McpArg[] {
 	return out;
 }
 
-/** A URL without its userinfo or query values; both routinely carry tokens. */
+/** A path segment that reads as a credential: an embedded `key=value`, or a long opaque token. */
+function isTokenSegment(segment: string): boolean {
+	return segment.includes("=")
+		|| (segment.length >= 20 && /^[A-Za-z0-9_\-.~%]+$/.test(segment) && /[A-Za-z]/.test(segment) && /[0-9]/.test(segment));
+}
+
+/**
+ * A URL as a client may see it: scheme, host, port and path only. Userinfo, the
+ * whole query and the fragment are replaced (each routinely carries a token,
+ * e.g. `#access_token=…`), and so is any path segment that looks like one.
+ * Anything that does not parse as a URL with a host is hidden entirely.
+ */
 function redactUrl(raw: string): { display: string; redacted: boolean } {
 	let url: URL;
 	try { url = new URL(raw); }
-	// Not a URL NeoPi can connect to either; show nothing rather than guess where a secret sits.
 	catch { return { display: REDACTED, redacted: true }; }
+	if (url.host === "") return { display: REDACTED, redacted: true };
 	let redacted = false;
-	if (url.username !== "" || url.password !== "") {
-		url.username = REDACTED;
-		url.password = "";
+	const path = url.pathname.split("/").map(segment => {
+		if (!isTokenSegment(segment)) return segment;
 		redacted = true;
-	}
-	for (const key of [...url.searchParams.keys()]) {
-		url.searchParams.set(key, REDACTED);
-		redacted = true;
-	}
-	return { display: decodeURI(url.toString()), redacted };
+		return REDACTED;
+	}).join("/");
+	const userinfo = url.username !== "" || url.password !== "";
+	const query = url.search !== "" || raw.includes("?");
+	const fragment = url.hash !== "" || raw.includes("#");
+	if (!redacted && !userinfo && !query && !fragment) return { display: raw, redacted: false };
+	return {
+		display: `${url.protocol}//${userinfo ? `${REDACTED}@` : ""}${url.host}${path}${query ? `?${REDACTED}` : ""}${fragment ? `#${REDACTED}` : ""}`,
+		redacted: true,
+	};
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -194,6 +223,18 @@ async function listServers(cwd: string): Promise<McpServersResponse> {
 		includeDisabled: true,
 		disabledExtensions,
 	});
+	// Revisions are computed over what the file stores (NeoPi's discovery hands
+	// back env-expanded values), so a PUT or DELETE can prove it saw the entry
+	// that is still there.
+	const stored = new Map<string, Record<string, unknown> | undefined>();
+	for (const server of loaded.all) {
+		const file = server._source.path;
+		if (stored.has(file) || writableSource(cwd, file) === undefined) continue;
+		stored.set(file, await mcp.readMCPConfigFile(file).then(
+			parsed => parsed.mcpServers as Record<string, unknown> | undefined,
+			() => undefined,
+		));
+	}
 
 	const servers = loaded.all.map((server): McpServerRow => {
 		const source = server._source;
@@ -232,6 +273,7 @@ async function listServers(cwd: string): Promise<McpServersResponse> {
 			providerName: source.providerName,
 			editable: scope !== undefined,
 			...(scope !== undefined ? { scope } : {}),
+			...(stored.get(source.path)?.[server.name] !== undefined ? { revision: revisionOf(stored.get(source.path)![server.name]) } : {}),
 			state,
 			...(disabledReason !== undefined ? { disabledReason } : {}),
 			forceEnabled,
@@ -420,17 +462,50 @@ function requireTarget(body: unknown): McpServerTargetRequest {
 	return { scope: body.scope, ...(typeof body.sourcePath === "string" ? { sourcePath: body.sourcePath } : {}) };
 }
 
+/** The revision a PUT or DELETE carries: the one its row was listed with. */
+function requireRevision(body: unknown): string {
+	const revision = isRecord(body) ? body.revision : undefined;
+	if (typeof revision !== "string" || revision === "") throw new RequestError("revision required: send the row's revision from the listing", 400);
+	return revision;
+}
+
+/** A stale draft would silently erase whatever changed since it was loaded. */
+function checkRevision(file: string, name: string, existing: unknown, revision: string): void {
+	if (revisionOf(existing) !== revision) {
+		throw new RequestError(`"${name}" in ${file} changed since this page loaded it; reload and apply your change again.`, 409);
+	}
+}
+
+/** Run a read-modify-write of `file` under NeoPi's own cross-process lock. */
+async function underLock<T>(file: string, run: () => Promise<T>): Promise<T> {
+	return feature("mcp-servers").withFileLock(file, run).catch((err: unknown) => {
+		// NeoPi waits ~5s for the lock, then gives up; that is a busy file, not a broken one.
+		if (err instanceof Error && err.message.startsWith("Failed to acquire lock")) {
+			throw new RequestError(`Another writer is holding ${file}; try again.`, 409);
+		}
+		throw err;
+	});
+}
+
 /**
- * Reconcile one server with the config now on disk in every live chat.
- * `connect` drops any existing connection first, so an edited command or URL
- * cannot leave the previous process attached.
+ * What a change asks of each live chat's MCP runtime:
+ * - `connect`: drop any connection, then connect what the chat's workspace resolves;
+ * - `disconnect`: drop it;
+ * - `reresolve`: a definition was removed; drop the connection and reconnect only
+ *   if the chat's own workspace still resolves a definition of that name.
+ *
+ * `connect` and `reresolve` do the same two steps: NeoPi's reconnect loads the
+ * configs for the chat's cwd and connects nothing when that resolves no entry.
  */
-async function reconcileLive(bridge: AgentBridge, name: string, connect: boolean): Promise<McpLiveApply[]> {
+type Reconcile = "connect" | "disconnect" | "reresolve";
+
+/** Reconcile one server with the config now on disk in every live chat, each against its own workspace. */
+async function reconcileLive(bridge: AgentBridge, name: string, mode: Reconcile): Promise<McpLiveApply[]> {
 	return Promise.all(bridge.liveMcpSessions().map(async (live): Promise<McpLiveApply> => {
 		try {
-			if (connect) await live.apply(name, false);
-			const outcome = await live.apply(name, connect);
+			const outcome = await live.apply(name, false);
 			if (outcome === "no-mcp-runtime") return { sessionId: live.sessionId, cwd: live.cwd, outcome };
+			if (mode !== "disconnect") await live.apply(name, true);
 			return { sessionId: live.sessionId, cwd: live.cwd, outcome, status: live.status(name) ?? "disconnected" };
 		} catch (err) {
 			log.warn(`applying MCP server ${name} to session ${live.sessionId} failed`, err);
@@ -440,20 +515,24 @@ async function reconcileLive(bridge: AgentBridge, name: string, connect: boolean
 }
 
 /** What the change actually reached; never claims more than the reconcile reported. */
-function applyNote(file: string, live: McpLiveApply[], connect: boolean): string {
+function applyNote(file: string, live: McpLiveApply[], mode: Reconcile): string {
 	const saved = `Saved to ${file}. New chats read it when they start.`;
 	if (live.length === 0) return `${saved} No chat is running.`;
 	const applied = live.filter(entry => entry.outcome === "applied");
 	const parts = [`${applied.length} of ${live.length} live chat${live.length === 1 ? "" : "s"} reloaded this server`];
-	if (connect && applied.length > 0) {
-		// Each state is named as NeoPi reports it: a handshake still in flight is
-		// not a connection, and a server that refused is not one either.
-		const connected = applied.filter(entry => entry.status === "connected").length;
-		const connecting = applied.filter(entry => entry.status === "connecting").length;
+	// Each state is named as NeoPi reports it: a handshake still in flight is
+	// not a connection, and a server that refused is not one either.
+	const connected = applied.filter(entry => entry.status === "connected").length;
+	const connecting = applied.filter(entry => entry.status === "connecting").length;
+	const stayed = applied.length - connected - connecting;
+	if (mode === "connect" && applied.length > 0) {
 		if (connected > 0) parts.push(`${connected} connected`);
 		if (connecting > 0) parts.push(`${connecting} still connecting`);
-		const stayed = applied.length - connected - connecting;
 		if (stayed > 0) parts.push(`${stayed} did not connect`);
+	} else if (mode === "reresolve" && applied.length > 0) {
+		const running = connected + connecting;
+		if (running > 0) parts.push(`${running} still run${running === 1 ? "s" : ""} a definition of it from ${running === 1 ? "its" : "their"} own workspace`);
+		if (stayed > 0) parts.push(`${stayed} dropped it`);
 	}
 	const without = live.filter(entry => entry.outcome === "no-mcp-runtime").length;
 	if (without > 0) parts.push(`${without} run${without === 1 ? "s" : ""} without MCP`);
@@ -507,56 +586,59 @@ export function buildMcpServersRouter(bridge: AgentBridge, config: Config): Hono
 		if (await mcp.getMCPServer(file, name) !== undefined) throw new RequestError(`Server "${name}" already exists in ${file}`, 409);
 		await mcp.addMCPServer(file, name, entry);
 		await verifyWrite(file, name, entry);
-		const live = await reconcileLive(bridge, name, true);
-		return { path: file, server: await rowFor(cwd, name, file), applyNote: applyNote(file, live, true), live };
+		const live = await reconcileLive(bridge, name, "connect");
+		return { path: file, server: await rowFor(cwd, name, file), applyNote: applyNote(file, live, "connect"), live };
 	}));
 
 	/**
 	 * Replace an existing server's definition in the file that holds it. The
-	 * read, the merge (kept env values, kept arguments, kept URL, and every
-	 * field the editor does not own) and the write all happen inside NeoPi's own
-	 * per-file lock, so a concurrent writer cannot have its change merged away.
+	 * revision check, the read, the merge (kept env values, kept arguments, kept
+	 * URL, and every field the editor does not own) and the write all happen
+	 * inside NeoPi's own per-file lock, so neither a concurrent writer nor an
+	 * edit made after this page loaded is merged away.
 	 */
 	app.put("/mcp-servers/:name", c => respond(c, async () => {
-		const body = await readJson<McpServerWriteRequest>(c);
+		const body = await readJson<McpServerUpdateRequest>(c);
 		const target = requireTarget(body);
+		const revision = requireRevision(body);
 		const name = requireName(c.req.param("name"));
 		const file = targetFile(cwd, target);
 		const mcp = feature("mcp-servers");
-		const entry = await mcp.withFileLock(file, async () => {
+		const entry = await underLock(file, async () => {
 			const stored = await mcp.readMCPConfigFile(file);
 			const existing = stored.mcpServers?.[name];
 			if (existing === undefined) throw new RequestError(`Server "${name}" is not defined in ${file}`, 404);
+			checkRevision(file, name, existing, revision);
 			const merged = buildConfig(name, body, existing);
 			await mcp.writeMCPConfigFile(file, { ...stored, mcpServers: { ...stored.mcpServers, [name]: merged } });
 			return merged;
-		}).catch((err: unknown) => {
-			// NeoPi waits ~5s for the lock, then gives up; that is a busy file, not a broken one.
-			if (err instanceof Error && err.message.startsWith("Failed to acquire lock")) {
-				throw new RequestError(`Another writer is holding ${file}; try again.`, 409);
-			}
-			throw err;
 		});
 		await verifyWrite(file, name, entry);
-		const connect = entry.enabled !== false;
-		const live = await reconcileLive(bridge, name, connect);
-		return { path: file, server: await rowFor(cwd, name, file), applyNote: applyNote(file, live, connect), live };
+		const mode: Reconcile = entry.enabled === false ? "disconnect" : "connect";
+		const live = await reconcileLive(bridge, name, mode);
+		return { path: file, server: await rowFor(cwd, name, file), applyNote: applyNote(file, live, mode), live };
 	}));
 
 	app.delete("/mcp-servers/:name", c => respond(c, async () => {
-		const target = requireTarget(await readJson<McpServerTargetRequest>(c));
+		const body = await readJson<McpServerDeleteRequest>(c);
+		const target = requireTarget(body);
+		const revision = requireRevision(body);
 		const name = requireName(c.req.param("name"));
 		const file = targetFile(cwd, target);
 		const mcp = feature("mcp-servers");
-		if (await mcp.getMCPServer(file, name) === undefined) throw new RequestError(`Server "${name}" is not defined in ${file}`, 404);
-		await mcp.removeMCPServer(file, name);
-		if (await mcp.getMCPServer(file, name) !== undefined) throw new RequestError(`NeoPi kept "${name}" in ${file}; reload and try again.`, 409);
-		// Removing one definition can uncover a lower-priority one of the same
-		// name: the live chats then have to connect that, not just drop this.
-		const survivor = await rowFor(cwd, name, file);
-		const connect = survivor !== null && survivor.state === "enabled";
-		const live = await reconcileLive(bridge, name, connect);
-		return { path: file, server: survivor, applyNote: applyNote(file, live, connect), live };
+		await underLock(file, async () => {
+			const stored = await mcp.readMCPConfigFile(file);
+			const existing = stored.mcpServers?.[name];
+			if (existing === undefined) throw new RequestError(`Server "${name}" is not defined in ${file}`, 404);
+			checkRevision(file, name, existing, revision);
+			const { [name]: _removed, ...remaining } = stored.mcpServers ?? {};
+			await mcp.writeMCPConfigFile(file, { ...stored, mcpServers: remaining });
+		});
+		if (await mcp.getMCPServer(file, name) !== undefined) throw new RequestError(`${file} still defines "${name}"; reload and try again.`, 409);
+		// A lower-priority definition of the same name may now win — in some
+		// chats' workspaces and not others — so each chat re-resolves its own.
+		const live = await reconcileLive(bridge, name, "reresolve");
+		return { path: file, server: await rowFor(cwd, name, file), applyNote: applyNote(file, live, "reresolve"), live };
 	}));
 
 	/**
@@ -603,8 +685,9 @@ export function buildMcpServersRouter(bridge: AgentBridge, config: Config): Hono
 				409,
 			);
 		}
-		const live = await reconcileLive(bridge, name, body.enabled);
-		return { path: file, server: row, applyNote: applyNote(file, live, body.enabled), live };
+		const mode: Reconcile = body.enabled ? "connect" : "disconnect";
+		const live = await reconcileLive(bridge, name, mode);
+		return { path: file, server: row, applyNote: applyNote(file, live, mode), live };
 	}));
 
 	return app;

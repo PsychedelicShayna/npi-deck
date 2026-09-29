@@ -1877,9 +1877,13 @@ export interface McpServerRow {
 	args?: McpArg[];
 	/** Working directory for a stdio server. */
 	cwd?: string;
-	/** The URL with any userinfo and query values redacted; keep it by sending `url: null`. */
+	/**
+	 * Scheme, host, port and path only: userinfo, query and fragment are replaced,
+	 * as is any path segment that looks like a token. Keep the stored URL by
+	 * sending `url: null`.
+	 */
 	url?: string;
-	/** The stored URL carries credentials, so `url` above is not the whole of it. */
+	/** The stored URL carries more than `url` shows. */
 	urlRedacted?: boolean;
 	env: McpKeyRef[];
 	headers: McpKeyRef[];
@@ -1895,6 +1899,12 @@ export interface McpServerRow {
 	editable: boolean;
 	/** Scope the editor writes for an editable row. */
 	scope?: McpServerScope;
+	/**
+	 * Opaque revision of the stored entry (a keyed MAC, so it reveals nothing
+	 * about the values). Present on editable rows; an update or removal must
+	 * echo it and gets 409 when the entry changed since it was listed.
+	 */
+	revision?: string;
 	state: "enabled" | "disabled" | "shadowed";
 	disabledReason?: McpDisabledReason;
 	/** Named in the user `enabledServers` allowlist, which overrides a non-writable source's `enabled: false`. */
@@ -1944,6 +1954,16 @@ export interface McpServerWriteRequest extends McpServerTargetRequest {
 
 export interface McpServerCreateRequest extends McpServerWriteRequest {
 	name: string;
+}
+
+/** Replace an existing entry; `revision` is the one its row was listed with. */
+export interface McpServerUpdateRequest extends McpServerWriteRequest {
+	revision: string;
+}
+
+/** Remove an existing entry; `revision` is the one its row was listed with. */
+export interface McpServerDeleteRequest extends McpServerTargetRequest {
+	revision: string;
 }
 
 export interface McpServerEnabledRequest extends McpServerTargetRequest {

@@ -224,8 +224,6 @@ export const MANIFEST = {
 			withFileLock: op("@oh-my-pi/pi-utils/file-lock", "withFileLock"),
 			getMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "getMCPServer"),
 			addMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "addMCPServer"),
-			updateMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "updateMCPServer"),
-			removeMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "removeMCPServer"),
 			setMcpServerEnabled: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "setMcpServerEnabled"),
 			readDisabledServers: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "readDisabledServers"),
 			readEnabledServers: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "readEnabledServers"),

@@ -13,7 +13,7 @@ import type {
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { mcpServersApi } from "@/lib/mcp-servers-api";
+import { McpServersApiError, mcpServersApi } from "@/lib/mcp-servers-api";
 import { cn } from "@/lib/utils";
 
 /** An env or header row being edited; `stored` means "keep the value the file holds". */
@@ -133,15 +133,25 @@ export function McpServersSection() {
 		await refresh();
 	}, [refresh]);
 
-	/** Every mutation settles here: a rejected save shows in the section's error bar, never as an unhandled rejection. */
+	/**
+	 * Every mutation settles here: a rejected save shows in the section's error
+	 * bar, never as an unhandled rejection. A 409 means the entry changed since
+	 * this page loaded it, so the list reloads and the stale editor closes; the
+	 * message stays up so the change can be made again on fresh data.
+	 */
 	const run = useCallback(async (action: () => Promise<McpServerMutationResponse>): Promise<void> => {
 		try {
 			setError(undefined);
 			await report(await action());
 		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
+			const message = err instanceof Error ? err.message : String(err);
+			if (err instanceof McpServersApiError && err.status === 409) {
+				setEditing(null);
+				await refresh();
+			}
+			setError(message);
 		}
-	}, [report]);
+	}, [report, refresh]);
 
 	const groups = useMemo(() => {
 		if (!data) return [];
@@ -159,8 +169,8 @@ export function McpServersSection() {
 					<p className="mt-1 max-w-3xl text-sm text-ink-3">
 						Every Model Context Protocol server NeoPi discovers, from your user and project{" "}
 						<span className="font-mono">mcp.json</span> and from other tools' configs. Env and header values
-						never leave the server, credential-bearing arguments keep only their flag, and a URL is shown
-						without its userinfo or query values. An edit keeps whatever it was not shown.
+						never leave the server, credential-bearing arguments keep only their flag, and a URL shows only
+						its scheme, host, port and path. An edit keeps whatever it was not shown.
 					</p>
 				</div>
 				<div className="flex gap-2">
@@ -229,8 +239,7 @@ export function McpServersSection() {
 										editing={editing === `${row.sourcePath}:${row.name}`}
 										onEdit={() => { setEditing(`${row.sourcePath}:${row.name}`); setAdding(null); }}
 										onCancel={() => setEditing(null)}
-										onResult={report}
-										onError={message => setError(message)}
+										run={run}
 									/>
 								))}
 							</div>
@@ -256,20 +265,18 @@ function writeBody(draft: Draft) {
 	};
 }
 
-function ServerRow({ row, editing, onEdit, onCancel, onResult, onError }: {
+function ServerRow({ row, editing, onEdit, onCancel, run: runAction }: {
 	row: McpServerRow;
 	editing: boolean;
 	onEdit: () => void;
 	onCancel: () => void;
-	onResult: (result: McpServerMutationResponse) => Promise<void>;
-	onError: (message: string) => void;
+	run: (action: () => Promise<McpServerMutationResponse>) => Promise<void>;
 }) {
 	const [busy, setBusy] = useState(false);
 
 	async function run(action: () => Promise<McpServerMutationResponse>): Promise<void> {
 		setBusy(true);
-		try { await onResult(await action()); }
-		catch (err) { onError(err instanceof Error ? err.message : String(err)); }
+		try { await runAction(action); }
 		finally { setBusy(false); }
 	}
 
@@ -299,7 +306,7 @@ function ServerRow({ row, editing, onEdit, onCancel, onResult, onError }: {
 				<Editor
 					draft={draftOf(row)}
 					onCancel={onCancel}
-					onSubmit={async draft => { await run(() => mcpServersApi.update(row.name, { scope: draft.scope, ...writeBody(draft) })); }}
+					onSubmit={draft => run(() => mcpServersApi.update(row.name, { scope: draft.scope, ...writeBody(draft), revision: row.revision ?? "" }))}
 				/>
 			) : (
 				<div className="flex flex-wrap items-center gap-2 pt-1">
@@ -319,7 +326,7 @@ function ServerRow({ row, editing, onEdit, onCancel, onResult, onError }: {
 								variant="danger"
 								size="sm"
 								disabled={busy}
-								onClick={() => void run(() => mcpServersApi.remove(row.name, target))}
+								onClick={() => void run(() => mcpServersApi.remove(row.name, { ...target, revision: row.revision ?? "" }))}
 							>
 								<Trash2 className="h-3.5 w-3.5" />
 								Remove

@@ -352,8 +352,8 @@ await check("MCP: per-session override rejects unknown and shadowed names", [
 
 await check("MCP servers: list every source, write one scope, toggle, apply live", [
 	"getMCPConfigPath", "mcpCapability", "isProviderEnabled", "isUserSourceEnabled", "cfgDisabledExtensions",
-	"cfgMcpEnableProjectConfig", "readMCPConfigFile", "getMCPServer", "addMCPServer", "updateMCPServer",
-	"removeMCPServer", "setMcpServerEnabled", "readDisabledServers", "readEnabledServers", "validateServerName",
+	"cfgMcpEnableProjectConfig", "readMCPConfigFile", "getMCPServer", "addMCPServer",
+	"setMcpServerEnabled", "readDisabledServers", "readEnabledServers", "validateServerName",
 	"validateServerConfig", "applyMcpToggleRuntime", "clearFsCache", "writeMCPConfigFile", "withFileLock",
 ], async () => {
 	const servers = feature("mcp-servers");
@@ -383,8 +383,13 @@ await check("MCP servers: list every source, write one scope, toggle, apply live
 		const duplicate = await servers.addMCPServer(projectPath, "contract-live", { type: "stdio", command: "true" })
 			.then(() => undefined, (error: unknown) => error);
 		assert(duplicate instanceof Error, "a duplicate server name was accepted");
-		await servers.updateMCPServer(projectPath, "contract-live", {
-			type: "stdio", command: process.execPath, args: [fixture, "contract-live", marker], timeout: 20_000,
+		// The deck's edit: read, merge and write under NeoPi's lock with the lock-free writer.
+		await servers.withFileLock(projectPath, async () => {
+			const current = await servers.readMCPConfigFile(projectPath);
+			await servers.writeMCPConfigFile(projectPath, {
+				...current,
+				mcpServers: { ...current.mcpServers, "contract-live": { ...current.mcpServers!["contract-live"]!, timeout: 20_000 } },
+			});
 		});
 		const stored = await servers.getMCPServer(projectPath, "contract-live");
 		assert(stored?.type === "stdio" && stored.timeout === 20_000, `update did not land: ${JSON.stringify(stored?.type)}`);
@@ -428,8 +433,18 @@ await check("MCP servers: list every source, write one scope, toggle, apply live
 		assert(!(await servers.readDisabledServers(userPath)).includes("contract-foreign"), "re-enable left the denylist entry");
 		assert((await servers.readEnabledServers(userPath)).includes("contract-foreign"), "foreign enable did not reach the allowlist");
 
-		await servers.removeMCPServer(projectPath, "contract-live");
+		await servers.withFileLock(projectPath, async () => {
+			const { "contract-live": _removed, ...remaining } = (await servers.readMCPConfigFile(projectPath)).mcpServers ?? {};
+			await servers.writeMCPConfigFile(projectPath, { mcpServers: remaining });
+		});
 		assert(await servers.getMCPServer(projectPath, "contract-live") === undefined, "remove left the entry behind");
+		// After a removal the deck asks each chat to reconnect; NeoPi must connect
+		// nothing when the chat's own workspace no longer resolves the name.
+		rmSync(marker, { force: true });
+		await apply(true);
+		assert(manager.getConnectionStatus("contract-live") === "disconnected", "a removed server reconnected");
+		await Bun.sleep(200);
+		assert(!(await Bun.file(marker).exists()), "a removed server was spawned again");
 
 		// The deck merges an edit inside this lock and writes with the lock-free
 		// writer; NeoPi's own writers must queue behind it rather than interleave.
@@ -450,8 +465,7 @@ await check("MCP servers: list every source, write one scope, toggle, apply live
 		assert(order.join(",") === "lock-enter,lock-exit,contender", `writers interleaved: ${order.join(",")}`);
 		const both = await servers.readMCPConfigFile(projectPath);
 		assert(both.mcpServers?.locked !== undefined && both.mcpServers?.contender !== undefined, "a locked write lost the contender's entry");
-		await servers.removeMCPServer(projectPath, "locked");
-		await servers.removeMCPServer(projectPath, "contender");
+		// (the next step overwrites the file, dropping both entries)
 		// An edit made outside NeoPi's writer (a terminal, another tool) is only
 		// visible once the capability file cache is dropped.
 		await Bun.write(projectPath, JSON.stringify({ mcpServers: { "contract-external": { type: "stdio", command: "true" } } }));
