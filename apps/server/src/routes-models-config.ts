@@ -106,8 +106,8 @@ function validateWithNeoPi(text: string): Validation {
 
 /**
  * Summary of a masked document's config: credentials are at most placeholders,
- * and only their presence is reported; a baseUrl that can carry a credential is
- * shown as `scheme://host[:port]/path` with its other components redacted.
+ * and only their presence is reported; a baseUrl shows at most its scheme and
+ * `••••••`, never its host or path.
  */
 function summarize(config: ModelsConfig, secrets: Map<string, Secret>): ModelsConfigProviderSummary[] {
 	return Object.entries(config.providers ?? {}).map(([name, provider]) => ({

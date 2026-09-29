@@ -33,6 +33,8 @@ const load = async () => await (await request("/models-config")).json() as Model
 const PLACEHOLDER = /<npi-deck-masked:[0-9a-f]{16}>/;
 const COMMENT = /^# <npi-deck-comment:[0-9a-f]{16}>$/;
 const COMMENT_ANYWHERE = /# <npi-deck-comment:[0-9a-f]{16}>/;
+const BETA_URL = /(  beta:\n    baseUrl: )"<npi-deck-masked:[0-9a-f]{16}>"/;
+const BETA_URL_LINE = /  beta:\n    baseUrl: "<npi-deck-masked:[0-9a-f]{16}>"\n/;
 
 const SECRETS = [
 	"sk-acme-live-77aa0b", "sk-bearer-3c4d1e", "svc-live-9a8b7c6d", "meta-tag-5e6f7a8b",
@@ -142,8 +144,8 @@ test("a placeholder outside a credential position is refused before validation a
 		["model name", raw!.replace("- id: beta-small", `- id: beta-small\n        name: "${placeholder}"`)],
 		["model id", raw!.replace("- id: gamma-mini", `- id: "${placeholder}"`)],
 		["provider key", raw!.replace("  gamma:\n", `  "${placeholder}":\n`)],
-		["inside a baseUrl", raw!.replace("https://beta.test/v1", `https://beta.test/v1?key=${placeholder}`)],
-		["an apiKey as a whole baseUrl", raw!.replace("baseUrl: https://beta.test/v1", `baseUrl: "${placeholder}"`)],
+		["inside a baseUrl", raw!.replace(BETA_URL, `$1"https://beta.test/v1?key=${placeholder}"`)],
+		["an apiKey as a whole baseUrl", raw!.replace(BETA_URL, `$1"${placeholder}"`)],
 		["api", raw!.replace("api: openai-completions", `api: "${placeholder}"`)],
 		["comment", raw!.replace(COMMENT_ANYWHERE, `# ${placeholder}`)],
 		["alias into a name", raw!.replace(`apiKey: "${placeholder}"`, `apiKey: &k "${placeholder}"`).replace("- id: beta-small", "- id: beta-small\n        name: *k")],
@@ -163,7 +165,7 @@ test("a placeholder outside a credential position is refused before validation a
 });
 
 test("a short credential that also appears elsewhere withholds the document; a long one is masked where it appears", async () => {
-	await writeFile(modelsFile, "providers:\n  tiny:\n    baseUrl: https://example.test/zq9\n    api: openai-completions\n    apiKey: zq9\n    models:\n      - id: tiny-model\n");
+	await writeFile(modelsFile, "providers:\n  tiny:\n    baseUrl: https://example.test/v1\n    api: openai-completions\n    apiKey: zq9\n    models:\n      - id: tiny-zq9\n");
 	const short = await load();
 	expect(short.raw).toBeNull();
 	expect(short.rawUnavailable).toBeDefined();
@@ -180,12 +182,15 @@ test("a short credential that also appears elsewhere withholds the document; a l
 	expect(resave.status).toBe(400);
 });
 
-test("a baseUrl with userinfo, a query, a fragment or encoded delimiters is masked whole, redacted in the summary, and round-trips", async () => {
+test("every baseUrl is masked whole, shown only as its scheme, and restores exactly, only as a baseUrl", async () => {
 	const urls = {
 		query: "https://gateway.test/v1?token=sk-query-live-1111",
 		userinfo: "https://svc-user:pw%2Duserinfo%2D2222@userinfo.test:8443/v1",
 		fragment: "https://frag.test/v1#sk-fragment-live-3333",
 		encoded: "https://pct.test/v1%3Ftoken%3Dsk-pct-live-4444",
+		host: "https://sk-host-live-7777.gw.test/v1",
+		path: "https://gw.test/v1/keys/sk-path-live-8888",
+		plain: "http://plain.test/v1",
 		model: "https://model.test/v2?key=sk-model-live-5555",
 	};
 	const provider = (name: string, baseUrl: string, model = "") =>
@@ -195,45 +200,45 @@ test("a baseUrl with userinfo, a query, a fragment or encoded delimiters is mask
 		provider("ui", urls.userinfo),
 		provider("fr", urls.fragment),
 		provider("pc", urls.encoded),
-		provider("plain", "https://plain.test/v1"),
+		provider("hs", urls.host),
+		provider("ph", urls.path),
+		provider("plain", urls.plain),
 	].join("")}`;
 	await writeFile(modelsFile, file);
 	const leaked = [
-		...Object.values(urls), "sk-query-live-1111", "svc-user", "pw%2Duserinfo%2D2222", "pw-userinfo-2222",
-		"sk-fragment-live-3333", "sk-pct-live-4444", "%3Dsk-pct", "sk-model-live-5555",
+		...Object.values(urls), "gateway.test", "sk-query-live-1111", "svc-user", "pw-userinfo-2222", "sk-fragment-live-3333",
+		"sk-pct-live-4444", "sk-host-live-7777", "sk-path-live-8888", "plain.test", "sk-model-live-5555",
 	];
 	const response = await request("/models-config");
 	expectNoSecret(await response.clone().text(), leaked);
 	const body = await response.json() as ModelsConfigResponse;
-	expect(body.raw!.match(/baseUrl: "<npi-deck-masked:[0-9a-f]{16}>"/g)).toHaveLength(5);
-	expect(body.raw).toContain('baseUrl: "https://plain.test/v1"');
-	const expected = {
-		gw: "https://gateway.test/v1?••••••",
-		ui: "https://••••••@userinfo.test:8443/v1",
-		fr: "https://frag.test/v1#••••••",
-		pc: "https://pct.test/••••••",
-		plain: "https://plain.test/v1",
-	};
-	const shown = (providers: ModelsConfigResponse["providers"]) => Object.fromEntries(providers.map(p => [p.name, p.baseUrl]));
+	expect(body.raw!.match(/baseUrl: "<npi-deck-masked:[0-9a-f]{16}>"/g)).toHaveLength(8);
+	const shown = (providers: ModelsConfigResponse["providers"]) =>
+		providers.flatMap(p => [p.baseUrl, ...p.models.map(m => m.baseUrl).filter(Boolean)]);
+	const expected = ["https://••••••", "https://••••••", "https://••••••", "https://••••••", "https://••••••", "https://••••••", "https://••••••", "http://••••••"];
 	expect(shown(body.providers)).toEqual(expected);
-	expect(body.providers.find(p => p.name === "gw")!.models[0]!.baseUrl).toBe("https://model.test/v2?••••••");
 
 	const validated = await send("POST", "/models-config/validate", { raw: body.raw! });
 	const validatedText = await validated.text();
 	expectNoSecret(validatedText, leaked);
 	expect(shown((JSON.parse(validatedText) as { providers: ModelsConfigResponse["providers"] }).providers)).toEqual(expected);
 
-	const edited = body.raw!.replace("- id: plain-model", "- id: plain-model\n      - id: plain-extra");
+	// A new URL typed over a placeholder replaces the stored one; the rest restore exactly.
+	const edited = body.raw!
+		.replace(/(  plain:\n    baseUrl: )"<npi-deck-masked:[0-9a-f]{16}>"/, '$1"http://replaced.test/v9"')
+		.replace("- id: plain-model", "- id: plain-model\n      - id: plain-extra");
 	const saved = await send("PUT", "/models-config", { raw: edited, revision: body.revision });
 	expect(saved.status).toBe(200);
-	expectNoSecret(await saved.text(), leaked);
+	expectNoSecret(await saved.text(), [...leaked, "replaced.test"]);
 	const onDisk = parseYaml(await readFile(modelsFile, "utf8")) as { providers: Record<string, { baseUrl: string; models: Array<{ id: string; baseUrl?: string }> }> };
 	expect(onDisk.providers.gw!.baseUrl).toBe(urls.query);
 	expect(onDisk.providers.gw!.models[0]!.baseUrl).toBe(urls.model);
 	expect(onDisk.providers.ui!.baseUrl).toBe(urls.userinfo);
 	expect(onDisk.providers.fr!.baseUrl).toBe(urls.fragment);
 	expect(onDisk.providers.pc!.baseUrl).toBe(urls.encoded);
-	expect(onDisk.providers.plain!.models.map(m => m.id)).toEqual(["plain-model", "plain-extra"]);
+	expect(onDisk.providers.hs!.baseUrl).toBe(urls.host);
+	expect(onDisk.providers.ph!.baseUrl).toBe(urls.path);
+	expect(onDisk.providers.plain).toMatchObject({ baseUrl: "http://replaced.test/v9", models: [{ id: "plain-model" }, { id: "plain-extra" }] });
 });
 
 test("no comment text is shown; unchanged comment placeholders restore verbatim, edited and new comments are kept as typed", async () => {
@@ -290,12 +295,14 @@ test("a comment placeholder anywhere but a whole unchanged comment is refused; a
 });
 
 test("the revision is keyed: a short apiKey cannot be recovered offline from raw and revision", async () => {
-	const file = 'providers:\n  pin:\n    baseUrl: https://pin.test/v1\n    api: openai-completions\n    apiKey: "zz42"\n    models:\n      - id: pin-model\n';
+	const file = 'providers:\n  pin:\n    baseUrl: "https://pin.test/v1"\n    api: openai-completions\n    apiKey: "zz42"\n    models:\n      - id: pin-model\n';
 	await writeFile(modelsFile, file);
 	const body = await load();
-	const reconstruct = (guess: string) => body.raw!.replace(/"<npi-deck-masked:[0-9a-f]{16}>"/, JSON.stringify(guess));
+	const reconstruct = (guess: string) => body.raw!
+		.replace(/baseUrl: "<npi-deck-masked:[0-9a-f]{16}>"/, 'baseUrl: "https://pin.test/v1"')
+		.replace(/apiKey: "<npi-deck-masked:[0-9a-f]{16}>"/, `apiKey: ${JSON.stringify(guess)}`);
 	const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
-	// The masked text plus the right guess is the file, so an unkeyed digest would confirm the guess.
+	// The masked text plus the right guesses is the file, so an unkeyed digest would confirm them.
 	expect(reconstruct("zz42")).toBe(file);
 	const candidates = Array.from({ length: 100 }, (_, n) => `zz${String(n).padStart(2, "0")}`);
 	expect(candidates.filter(guess => [sha256(reconstruct(guess)), sha256(guess)].includes(body.revision))).toEqual([]);
@@ -336,7 +343,7 @@ test("compare-and-replace refuses a file that changed after the edit's revision,
 test("invalid documents are rejected with NeoPi's message and leave models.yml and its backup alone", async () => {
 	const { raw, revision } = await load();
 	const cases: Array<[string, string]> = [
-		[raw!.replace("    baseUrl: https://beta.test/v1\n", ""), 'Provider beta: "baseUrl" is required when defining custom models.'],
+		[raw!.replace(BETA_URL_LINE, "  beta:\n"), 'Provider beta: "baseUrl" is required when defining custom models.'],
 		[raw!.replace("contextWindow: 128000", "contextWindow: -5"), "Provider acme, model acme-large: invalid contextWindow"],
 		[raw!.replace("api: openai-completions", "api: not-an-api"), "Schema error"],
 		[`${raw!}  broken: [\n`, "YAML"],

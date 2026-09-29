@@ -245,7 +245,7 @@ export interface ModelsConfigModelSummary {
 /** One provider, read from the masked document: credentials are at most placeholders, and reduced to whether they are set. */
 export interface ModelsConfigProviderSummary {
 	name: string;
-	/** A URL with userinfo, a query or a fragment is shown as `scheme://host[:port]/path` with `••••••` for each of those. */
+	/** Never the URL: at most its `http://` or `https://` scheme followed by `••••••`. */
 	baseUrl?: string;
 	api?: string;
 	auth: "apiKey" | "none" | "oauth";
@@ -273,9 +273,9 @@ export interface ModelsConfigResponse {
 	/**
 	 * The document with every credential replaced by a `<npi-deck-masked:…>` placeholder:
 	 * apiKey, every header and requestMetadata value, every baseUrl (provider, model, model
-	 * override) with userinfo, a query or a fragment, values under credential-like keys and
-	 * their other occurrences. A placeholder saved as the whole value of an apiKey, header or
-	 * requestMetadata entry, or a masked URL saved as a whole baseUrl, keeps the value on disk;
+	 * override) whatever its shape, values under credential-like keys and their other
+	 * occurrences. A placeholder saved as the whole value of an apiKey, header or requestMetadata
+	 * entry, or a baseUrl placeholder saved as a whole baseUrl, keeps the value on disk;
 	 * anywhere else the save is refused (400).
 	 * Every comment is replaced by `# <npi-deck-comment:…>`, restored verbatim when saved as
 	 * that unchanged whole comment and refused (400) anywhere else. Null when the credentials
