@@ -5,6 +5,8 @@ import { workRegistry } from "../work-registry.ts";
 type Registry = ReturnType<typeof import("@oh-my-pi/pi-coding-agent/registry/agent-registry").AgentRegistry.global>;
 type Bus = { on(channel: string, listener: (payload: any) => void): () => void };
 
+const TERMINAL = new Set(["completed", "failed", "aborted"]);
+
 /** One root generation owns one bus. Never infer ownership from a user-supplied file path. */
 export class SubagentTree {
 	private readonly registry: Registry;
@@ -66,8 +68,12 @@ export class SubagentTree {
 
 	private lifecycle(data: { id: string; agent?: string; description?: string; status: string; sessionFile?: string }): void {
 		if (!this.belongs(data.id)) return;
-		const ref = this.registry.get(data.id)!;
+		const ref = this.registry.get(data.id);
 		const previous = this.nodes.get(data.id);
+		if (!ref) {
+			if (previous) this.settleRemoved(previous, data.status, data.description, data.sessionFile);
+			return;
+		}
 		const status = data.status === "started" ? ref.status : data.status;
 		this.nodes.set(data.id, {
 			id: data.id, parentId: ref.parentId!, name: ref.displayName || data.agent || data.id,
@@ -87,7 +93,11 @@ export class SubagentTree {
 		if (!id || !this.belongs(id)) return;
 		const node = this.nodes.get(id);
 		if (!node) return;
-		const ref = this.registry.get(id)!;
+		const ref = this.registry.get(id);
+		if (!ref) {
+			if (data.progress.status) this.settleRemoved(node, data.progress.status, data.progress.description, data.sessionFile);
+			return;
+		}
 		const status = ref.status === "aborted" ? "aborted" : data.progress.status ?? node.status;
 		this.nodes.set(id, { ...node, status, description: data.progress.description ?? node.description,
 			activity: status === "running" ? ref.activity ?? data.progress.activity ?? node.activity : undefined,
@@ -99,9 +109,23 @@ export class SubagentTree {
 	private event(data: { id: string; event?: { type?: string; toolName?: string } }): void {
 		if (!this.belongs(data.id)) return;
 		const node = this.nodes.get(data.id);
-		if (!node || node.status !== "running") return;
-		const ref = this.registry.get(data.id)!;
+		const ref = this.registry.get(data.id);
+		// Activity belongs to a live ref; a removed one has no activity left to show.
+		if (!node || !ref || node.status !== "running") return;
 		this.nodes.set(data.id, { ...node, activity: ref.activity ?? (data.event?.toolName ? `Using ${data.event.toolName}` : node.activity) });
+		this.publish();
+	}
+
+	/**
+	 * A bus record that arrives after the registry removed its ref can only
+	 * settle a still-running node to a terminal status. It never revives the
+	 * node, overwrites an earlier terminal status, or re-admits work, since no
+	 * later removal would release that admission.
+	 */
+	private settleRemoved(node: SubagentNode, status: string, description?: string, sessionFile?: string): void {
+		if (!TERMINAL.has(status) || TERMINAL.has(node.status)) return;
+		this.release(node.id);
+		this.nodes.set(node.id, { ...node, status, description: description ?? node.description, activity: undefined, sessionFile: node.sessionFile ?? sessionFile });
 		this.publish();
 	}
 

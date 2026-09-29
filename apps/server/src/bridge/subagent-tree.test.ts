@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { workRegistry } from "../work-registry.ts";
 import { SubagentTree } from "./subagent-tree.ts";
 
 const refs = new Map<string, any>();
@@ -80,5 +81,51 @@ test("replaced generation is forbidden and disappearing child cannot be marked a
 	refs.set("race", { ...original, parentId: "foreign", sessionFile: "/tmp/foreign.jsonl" });
 	await expect(tree.transcript("race")).rejects.toThrow("Forbidden subagent");
 	await expect(tree.abort("race")).rejects.toThrow("Forbidden subagent");
+	tree.dispose();
+});
+
+function removedAfterStart(id: string) {
+	refs.clear(); released.length = 0;
+	refs.set("rootA", { id: "rootA", kind: "main" });
+	const ref = { id, parentId: "rootA", kind: "sub", status: "running", createdAt: 1, displayName: id, sessionFile: `/tmp/${id}.jsonl`, activity: "Thinking" };
+	refs.set(id, ref);
+	const events = bus(), tree = new SubagentTree("rootA", events, api);
+	events.emit("task:subagent:lifecycle", { id, status: "started" });
+	expect(workRegistry.snapshot()).toContainEqual({ kind: "subagent", id: `rootA:${id}` });
+	refs.delete(id);
+	for (const listener of listeners) listener({ type: "removed", ref });
+	expect(workRegistry.snapshot()).not.toContainEqual({ kind: "subagent", id: `rootA:${id}` });
+	return { events, tree };
+}
+
+test("late lifecycle after removal records a terminal status and never re-admits work", () => {
+	const { events, tree } = removedAfterStart("late-life");
+	expect(() => events.emit("task:subagent:lifecycle", { id: "late-life", status: "started" })).not.toThrow();
+	expect(workRegistry.snapshot()).not.toContainEqual({ kind: "subagent", id: "rootA:late-life" });
+	expect(() => events.emit("task:subagent:lifecycle", { id: "late-life", status: "completed", description: "done" })).not.toThrow();
+	expect(tree.snapshot()).toMatchObject([{ id: "late-life", parentId: "rootA", status: "completed", description: "done", activity: undefined, sessionFile: "/tmp/late-life.jsonl" }]);
+	expect(workRegistry.snapshot()).not.toContainEqual({ kind: "subagent", id: "rootA:late-life" });
+	events.emit("task:subagent:lifecycle", { id: "late-life", status: "failed" });
+	expect(tree.snapshot()[0]?.status).toBe("completed");
+	tree.dispose();
+});
+
+test("late progress after removal records a terminal status and ignores running updates", () => {
+	const { events, tree } = removedAfterStart("late-progress");
+	expect(() => events.emit("task:subagent:progress", { progress: { id: "late-progress", status: "running", activity: "Using bash" } })).not.toThrow();
+	expect(tree.snapshot()[0]).toMatchObject({ status: "running", activity: "Thinking" });
+	expect(() => events.emit("task:subagent:progress", { progress: { id: "late-progress", status: "failed" } })).not.toThrow();
+	expect(tree.snapshot()[0]).toMatchObject({ status: "failed", activity: undefined });
+	expect(workRegistry.snapshot()).not.toContainEqual({ kind: "subagent", id: "rootA:late-progress" });
+	tree.dispose();
+});
+
+test("late tool event after removal is ignored", () => {
+	const { events, tree } = removedAfterStart("late-event");
+	const seen: unknown[] = [];
+	tree.subscribe(nodes => seen.push(nodes));
+	expect(() => events.emit("task:subagent:event", { id: "late-event", event: { type: "tool_execution_start", toolName: "bash" } })).not.toThrow();
+	expect(seen).toHaveLength(1);
+	expect(tree.snapshot()[0]).toMatchObject({ status: "running", activity: "Thinking" });
 	tree.dispose();
 });
