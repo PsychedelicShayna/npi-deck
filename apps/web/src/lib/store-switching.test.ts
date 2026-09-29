@@ -196,3 +196,24 @@ test("a chat reopened read-only after closing keeps its view when the slow close
 	expect(state.subscribed.has("alpha")).toBe(false);
 	expect(pending.filter(transcriptOf("alpha"))).toEqual([]);
 });
+
+test("closing a live chat ends this connection's stream at once; a resume before the reply stays subscribed", async () => {
+	useStore.getState().selectSession("alpha");
+	sockets.at(-1)!.emit("message", { type: "subscribed", sessionId: "alpha", snapshot: snapshot("alpha") });
+	// Unsubscribed before the slow close starts, so the server's session_disposed
+	// for this generation never reaches a resume that finishes ahead of it.
+	const closing = useStore.getState().disposeSession("alpha");
+	expect(sent().filter((f) => f.type === "unsubscribe")).toEqual([{ type: "unsubscribe", sessionId: "alpha" }]);
+	answer((p) => p.method === "DELETE" && p.url.endsWith("/sessions/alpha"), { ok: true });
+	await closing;
+
+	await Promise.all([useStore.getState().openTranscript("/s/alpha.jsonl"), settle().then(() => answer(transcriptOf("alpha"), transcript("alpha")))]);
+	useStore.getState().sendPrompt("back again");
+	await settle();
+	answer(resumeOf("alpha"), { sessionId: "alpha", sessionFile: "/s/alpha.jsonl", cwd: "/tmp" });
+	await Bun.sleep(5);
+	expect(useStore.getState().subscribed.has("alpha")).toBe(true);
+	// The reply to the close's unsubscribe arrives late: the resumed chat keeps its subscription.
+	sockets.at(-1)!.emit("message", { type: "unsubscribed", sessionId: "alpha" });
+	expect(useStore.getState().subscribed.has("alpha")).toBe(true);
+});

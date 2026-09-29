@@ -461,7 +461,12 @@ export const useStore = create<StoreState>()(
 		},
 
 		async disposeSession(id: string) {
+			// A reconnect must not resubscribe a closed chat.
+			get().subscribed.delete(id);
 			if (!get().sessionsById[id]?.readOnly) {
+				// End this connection's stream now. The server finishes the close in
+				// the background; its session_disposed must not reach a faster resume.
+				get().ws?.send({ type: "unsubscribe", sessionId: id });
 				try {
 					await api.disposeSession(id);
 				} catch (err) {
@@ -471,8 +476,6 @@ export const useStore = create<StoreState>()(
 			// Closing the chat on screen is a navigation: an open still in
 			// flight must not bring a chat back afterwards.
 			if (get().activeId === id) ++navigation;
-			// The server finishes the close in the background; a reconnect meanwhile must not resubscribe.
-			get().subscribed.delete(id);
 			set((s) => {
 				const next = { ...s.sessionsById };
 				delete next[id];
@@ -686,7 +689,8 @@ function handleFrame(
 			return;
 
 		case "unsubscribed":
-			get().subscribed.delete(frame.sessionId);
+			// disposeSession already forgot the chat; a late reply must not drop
+			// the subscription of a resume that followed it.
 			return;
 
 		case "session_event": {

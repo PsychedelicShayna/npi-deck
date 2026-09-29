@@ -1,7 +1,7 @@
 import type { ServerWebSocket } from "bun";
 import type { ClientFrame, ServerFrame } from "@npi-deck/protocol";
 
-import type { AgentBridge } from "./bridge/types.ts";
+import type { AgentBridge, SessionHandle } from "./bridge/types.ts";
 import { broadcastBus } from "./broadcast-bus.ts";
 import { logger } from "./log.ts";
 import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
@@ -10,10 +10,17 @@ import { activeBackend } from "./backend/runtime.ts";
 import type { BackendStatusResponse } from "@npi-deck/protocol";
 const log = logger("ws");
 
+/** One connection's stream of one live session generation. */
+interface Subscription {
+	/** The generation it streams; a chat reopened under the same id is another handle. */
+	handle: SessionHandle;
+	teardown: () => void;
+}
+
 /** Per-connection state. */
 export interface ConnectionData {
 	connectionId: string;
-	subscriptions: Map<string, () => void>;
+	subscriptions: Map<string, Subscription>;
 }
 
 /**
@@ -142,9 +149,9 @@ export class WsHub {
 		const subs = ws.data.subscriptions;
 		const connectionId = ws.data.connectionId;
 		log.debug(`close ${connectionId} subs=${subs.size}`);
-		for (const [sessionId, unsub] of subs.entries()) {
+		for (const [sessionId, sub] of subs.entries()) {
 			try {
-				unsub();
+				sub.teardown();
 			} catch (err) {
 				log.warn(`unsubscribe on close failed`, err);
 			}
@@ -177,10 +184,10 @@ export class WsHub {
 	}
 
 	private dropSubscription(ws: ServerWebSocket<ConnectionData>, sessionId: string): boolean {
-		const teardown = ws.data.subscriptions.get(sessionId);
-		if (!teardown) return false;
+		const sub = ws.data.subscriptions.get(sessionId);
+		if (!sub) return false;
 		ws.data.subscriptions.delete(sessionId);
-		teardown();
+		sub.teardown();
 		this.bridge.trackSubscriberRemoved(sessionId, ws.data.connectionId);
 		return true;
 	}
@@ -189,14 +196,16 @@ export class WsHub {
 
 	private async handleSubscribe(ws: ServerWebSocket<ConnectionData>, sessionId: string): Promise<void> {
 		const connectionId = ws.data.connectionId;
-		if (ws.data.subscriptions.has(sessionId)) {
+		const current = ws.data.subscriptions.get(sessionId);
+		if (current) {
 			const handle = this.bridge.getSession(sessionId);
-			if (handle) {
+			if (handle === current.handle) {
 				this.bridge.bumpActivity(sessionId);
 				send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot() });
 				return;
 			}
-			// Closing: its teardown has not reported yet. Answer as for any ended session.
+			// Closing, or closed and reopened: that generation's stream is over.
+			// Drop it; the chat is answered below as ended or subscribed afresh.
 			this.dropSubscription(ws, sessionId);
 		}
 
@@ -249,7 +258,7 @@ export class WsHub {
 				log.warn(`subagent unsubscribe threw`, err);
 			}
 		};
-		ws.data.subscriptions.set(sessionId, teardown);
+		ws.data.subscriptions.set(sessionId, { handle, teardown });
 		this.bridge.trackSubscriberAdded(sessionId, connectionId);
 		send(ws, { type: "subscribed", sessionId, snapshot: handle.snapshot() });
 	}

@@ -4,6 +4,8 @@
  * longer than Bun's 10 s idle timeout, so a DELETE that waited got an empty
  * reply (#110). Its subscribers hear `session_disposed` when the close ends,
  * and resumes and closes of one chat racing each other leave one outcome.
+ * Resuming a chat that is already live reuses its session (#2), and a socket
+ * that resubscribes after a close and resume streams the reopened chat (#11).
  */
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -43,6 +45,10 @@ function hold(event: "session_shutdown" | "session_start") {
 	};
 }
 
+/** NeoPi sessions started in this process, counted by the fixture extension. */
+const STARTS = "__npiDeckSessionStarts";
+const sessionStarts = () => ((globalThis as Record<string, unknown>)[STARTS] as number | undefined) ?? 0;
+
 if (!fixtureRoot) {
 	test("closing a chat answers before its slow dispose ends and races resumes cleanly", () => {
 		const selection = resolveBackendSelection();
@@ -72,7 +78,7 @@ if (!fixtureRoot) {
 			const output = `${child.stdout.toString()}${child.stderr.toString()}`;
 			if (child.exitCode !== 0) console.error(output);
 			expect(child.exitCode).toBe(0);
-			expect(output).toContain("4 pass");
+			expect(output).toContain("5 pass");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -86,6 +92,7 @@ if (!fixtureRoot) {
 	writeFileSync(path.join(extensionDir, "index.ts"), `export default function (pi) {
 	for (const event of ["session_shutdown", "session_start"]) {
 		pi.on(event, async () => {
+			if (event === "session_start") globalThis.${STARTS} = (globalThis.${STARTS} ?? 0) + 1;
 			const gate = globalThis.${GATES}?.[event];
 			if (!gate) return;
 			gate.entered();
@@ -125,6 +132,19 @@ if (!fixtureRoot) {
 				hub.onOpen(ws);
 				return { ws, frames, disposed: () => frames.filter((f) => f.type === "session_disposed") };
 			},
+			/**
+			 * Send a prompt the deck answers itself (a `/task` usage error) from
+			 * `from`, and return the message events each client received for it
+			 * (NeoPi's own background events, such as advisor costs, are left out).
+			 */
+			prompt: async (from: { ws: Parameters<WsHub["onOpen"]>[0]; frames: ServerFrame[] }, clients: Array<{ frames: ServerFrame[] }>) => {
+				const marks = clients.map((c) => c.frames.length);
+				const mark = from.frames.length;
+				await hub.onMessage(from.ws, JSON.stringify({ type: "prompt", sessionId: id, text: "/task add" }));
+				const deadline = Date.now() + 30_000;
+				while (!from.frames.slice(mark).some((f) => f.type === "prompt_consumed") && Date.now() < deadline) await Bun.sleep(10);
+				return clients.map((c, i) => c.frames.slice(marks[i]).filter((f) => f.type === "session_event" && /^message_/.test(f.event.type)));
+			},
 			close: async () => {
 				hub.dispose();
 				await bridge.dispose();
@@ -134,7 +154,7 @@ if (!fixtureRoot) {
 
 	test("DELETE answers 202 while dispose runs; session_disposed reaches only subscribers when it ends", async () => {
 		const id = "01a0ea00-0000-7000-8000-000000000110";
-		const { file, bridge, hub, request, connect, close } = await fixture(id);
+		const { file, bridge, hub, request, connect, prompt, close } = await fixture(id);
 		try {
 			const first = await bridge.resumeSession({ sessionPath: file });
 			expect(first.sessionId).toBe(id);
@@ -170,12 +190,46 @@ if (!fixtureRoot) {
 			expect(reopened).not.toBe(first);
 			expect(again).toBe(reopened!);
 			expect(bridge.getSession(id)).toBe(reopened);
-			expect(reopened!.snapshot().messages.length).toBe(2);
 			// The dropped subscription does not swallow a fresh subscribe to the reopened chat.
 			await hub.onMessage(subscriber.ws, JSON.stringify({ type: "subscribe", sessionId: id }));
 			expect(subscriber.frames.at(-1)?.type).toBe("subscribed");
+			// Without reconnecting, the socket streams the reopened chat's prompt events.
+			const [events] = await prompt(subscriber, [subscriber]);
+			expect(events!.map((f) => f.type === "session_event" && `${f.event.type}:${(f.event as { message?: { role?: string } }).message?.role}`)).toEqual(["message_start:user", "message_start:assistant", "message_end:assistant"]);
 
 			expect((await request("DELETE", "/sessions/01a0ea00-0000-7000-8000-00000000dead")).status).toBe(404);
+		} finally {
+			await close();
+		}
+	}, 90_000);
+
+	test("resuming a live chat, twice at once or again later, reuses its one session and stream", async () => {
+		const id = "01a0ea00-0000-7000-8000-000000000002";
+		const { file, bridge, hub, request, connect, prompt, close } = await fixture(id);
+		try {
+			const before = sessionStarts();
+			const resume = () => request("POST", "/sessions", { resumeFromPath: file });
+			const [one, two] = await Promise.all([resume(), resume()]);
+			expect([one.status, two.status]).toEqual([200, 200]);
+			const sessionIdOf = async (r: Response) => ((await r.json()) as { sessionId: string }).sessionId;
+			expect([await sessionIdOf(one), await sessionIdOf(two)]).toEqual([id, id]);
+			const live = bridge.getSession(id)!;
+			expect(sessionStarts() - before).toBe(1);
+
+			// Two tabs subscribe; a resume from either reuses the session they watch.
+			const tabA = connect();
+			const tabB = connect();
+			await hub.onMessage(tabA.ws, JSON.stringify({ type: "subscribe", sessionId: id }));
+			await hub.onMessage(tabB.ws, JSON.stringify({ type: "subscribe", sessionId: id }));
+			expect((await resume()).status).toBe(200);
+			expect(await bridge.resumeSession({ sessionPath: file })).toBe(live);
+			expect(bridge.getSession(id)).toBe(live);
+			expect(sessionStarts() - before).toBe(1);
+
+			// One stream: both tabs see the same events for a prompt from either.
+			const [seenByA, seenByB] = await prompt(tabA, [tabA, tabB]);
+			expect(seenByA!.length).toBe(3);
+			expect(seenByB).toEqual(seenByA!);
 		} finally {
 			await close();
 		}
