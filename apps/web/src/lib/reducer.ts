@@ -545,13 +545,15 @@ function ingestMessage(state: SessionUi, msg: any): void {
 }
 
 /**
- * The reply in flight: the newest assistant message, if it is still
- * streaming. A chat that subscribed mid-reply never saw its message_start,
- * so the newest assistant message is an earlier, finished one.
+ * The reply in flight: the newest assistant message of the current turn
+ * (after the latest prompt), if it is still streaming. A chat that
+ * subscribed mid-reply never saw its message_start, so the newest assistant
+ * message is an earlier, finished one, or belongs to an earlier turn.
  */
 function streamingAssistantIndex(messages: SessionUi["messages"]): number {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
+		if (m?.role === "user") return -1;
 		if (m?.role === "assistant") return m.isStreaming ? i : -1;
 	}
 	return -1;

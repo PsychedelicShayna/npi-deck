@@ -350,4 +350,16 @@ describe("a reply already streaming when the chat subscribes", () => {
 		expect(textOf(s)).toEqual(["q", "partial"]);
 		expect(s.usage.totalTokens).toBe(5);
 	});
+
+	test("a reply left unended before the latest prompt is never written into", () => {
+		// An earlier bridge sent slash-command replies without message_end.
+		let s = initSession({ sessionId: "s1", cwd: "/tmp", isStreaming: false, todoPhases: [], messages: [] });
+		s = applyEvent(s, { type: "message_start", message: { role: "user", content: "/help", synthetic: true, timestamp: 1 } } as never);
+		s = applyEvent(s, { type: "message_start", message: assistant("help text", 0) } as never);
+		s = applyEvent(s, { type: "message_start", message: { role: "user", content: "question", timestamp: 2 } } as never);
+		// Subscribed mid-reply: no message_start for the answer.
+		s = applyEvent(s, { type: "message_update", message: assistant("ans", 0) } as never);
+		s = applyEvent(s, { type: "message_end", message: assistant("answer", 5) } as never);
+		expect(textOf(s)).toEqual(["/help", "help text", "question", "answer"]);
+	});
 });

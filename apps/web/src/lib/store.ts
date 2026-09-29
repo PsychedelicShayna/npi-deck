@@ -43,6 +43,7 @@ export interface NotificationItem {
 const MAX_NOTIFICATIONS = 50;
 
 import { api } from "./api";
+import { dropDraft } from "./composer-drafts";
 import { emptyMixtureUi, reconcileMixtureResubscribe } from "./mixture-reducer";
 import { applyEvent, initSession } from "./reducer";
 import { TRANSCRIPT_TAIL } from "./transcript-window";
@@ -466,6 +467,9 @@ export const useStore = create<StoreState>()(
 					console.warn("dispose failed", err);
 				}
 			}
+			// Closing the chat on screen is a navigation: an open still in
+			// flight must not bring a chat back afterwards.
+			if (get().activeId === id) ++navigation;
 			set((s) => {
 				const next = { ...s.sessionsById };
 				delete next[id];
@@ -609,6 +613,12 @@ export const useStore = create<StoreState>()(
 		},
 	})),
 );
+
+// A chat that leaves the store (closed, or dropped by a worker restart)
+// takes its unsent composer draft with it.
+useStore.subscribe((s) => s.sessionsById, (next, prev) => {
+	for (const id of Object.keys(prev)) if (!(id in next)) dropDraft(id);
+});
 
 function handleFrame(
 	frame: ServerFrame,

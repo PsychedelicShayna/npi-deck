@@ -17,15 +17,11 @@ import { SlashCommandPicker } from "@/components/composer/SlashCommandPicker";
 import { Paperclip, ArrowUp, Square, X } from "lucide-react";
 import type { ImageAttachment } from "@npi-deck/protocol";
 
+import { readDraft, saveDraft, type PendingImage } from "@/lib/composer-drafts";
 import { selectActiveSession, useStore } from "@/lib/store";
 import { useComposerHistory } from "@/lib/use-composer-history";
 import { cn } from "@/lib/utils";
 import { useAdvisorPicker } from "@/lib/advisor-ui";
-
-interface PendingImage extends ImageAttachment {
-	id: string;
-	preview: string;
-}
 
 const MAX_PENDING_IMAGES = 8;
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -37,13 +33,6 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
  * `/api/slash-commands` calls on every Vite reload is noise.
  */
 const slashCommandsCache = new Map<string, SlashCommand[]>();
-
-/**
- * Unsent drafts by session id. The composer remounts per session (see
- * ChatView), so text typed for one chat is never sent to another and is
- * still there when the reader switches back.
- */
-const drafts = new Map<string, { text: string; images: PendingImage[] }>();
 
 export function Composer() {
 	const session = useStore(selectActiveSession);
@@ -58,8 +47,10 @@ export function Composer() {
 	const openAdvisorPicker = useAdvisorPicker((s) => s.open);
 	const liveSessionId = session && !session.readOnly ? session.sessionId : undefined;
 	const draftKey = session?.sessionId;
-	const [draft, setDraft] = useState(() => (draftKey ? drafts.get(draftKey)?.text : undefined) ?? "");
-	const [images, setImages] = useState<PendingImage[]>(() => (draftKey ? drafts.get(draftKey)?.images : undefined) ?? []);
+	// The composer remounts per session (see ChatView); its draft outlives the switch.
+	const [restored] = useState(() => (draftKey ? readDraft(draftKey) : undefined));
+	const [draft, setDraft] = useState(restored?.text ?? "");
+	const [images, setImages] = useState<PendingImage[]>(restored?.images ?? []);
 	const [dragOver, setDragOver] = useState(false);
 	const taRef = useRef<HTMLTextAreaElement>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
@@ -67,9 +58,7 @@ export function Composer() {
 	imagesRef.current = images;
 
 	useEffect(() => {
-		if (!draftKey) return;
-		if (draft || images.length > 0) drafts.set(draftKey, { text: draft, images });
-		else drafts.delete(draftKey);
+		if (draftKey) saveDraft(draftKey, { text: draft, images });
 	}, [draftKey, draft, images]);
 
 	// ─── Slash commands ─────────────────────────────────────────────────────

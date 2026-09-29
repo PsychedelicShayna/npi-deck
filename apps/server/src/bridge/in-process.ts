@@ -1260,15 +1260,16 @@ export class InProcessSessionHandle implements SessionHandle {
 			},
 		} as unknown as AgentSessionEventJson);
 		if (!assistantText) return;
-		this.emit({
-			type: "message_start",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: assistantText }],
-				timestamp: now,
-				synthetic: true,
-			},
-		} as unknown as AgentSessionEventJson);
+		const reply = {
+			role: "assistant",
+			content: [{ type: "text", text: assistantText }],
+			timestamp: now,
+			synthetic: true,
+		};
+		// Ended like a real reply: clients treat an unended assistant message
+		// as still streaming.
+		this.emit({ type: "message_start", message: reply } as unknown as AgentSessionEventJson);
+		this.emit({ type: "message_end", message: reply } as unknown as AgentSessionEventJson);
 	}
 
 	async prompt(

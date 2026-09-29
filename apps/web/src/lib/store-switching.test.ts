@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { dropDraft, readDraft, saveDraft } from "./composer-drafts";
 import { useStore } from "./store";
 
 class FakeSocket {
@@ -146,4 +147,27 @@ test("a live chat the server no longer runs stays on screen read-only and resuma
 	state = useStore.getState();
 	expect(sent().filter((f) => f.type === "prompt")).toEqual([{ type: "prompt", sessionId: "alpha", text: "still there?" }]);
 	expect(state.subscribed.has("alpha")).toBe(true);
+});
+
+test("closing the chat on screen stops an open still in flight from taking the view", async () => {
+	sockets.at(-1)!.emit("message", { type: "subscribed", sessionId: "alpha", snapshot: snapshot("alpha") });
+	useStore.getState().selectSession("alpha");
+	const open = useStore.getState().openTranscript("/s/bravo.jsonl");
+	const close = useStore.getState().disposeSession("alpha");
+	answer((p) => p.method === "DELETE", { ok: true });
+	await close;
+	answer(transcriptOf("bravo"), transcript("bravo"));
+	await open;
+	expect(useStore.getState().activeId).toBeUndefined();
+});
+
+test("closing a chat drops its unsent draft; other chats keep theirs", async () => {
+	await Promise.all([useStore.getState().openTranscript("/s/echo.jsonl"), settle().then(() => answer(transcriptOf("echo"), transcript("echo")))]);
+	await Promise.all([useStore.getState().openTranscript("/s/delta.jsonl"), settle().then(() => answer(transcriptOf("delta"), transcript("delta")))]);
+	saveDraft("echo", { text: "for echo", images: [] });
+	saveDraft("delta", { text: "for delta", images: [] });
+	await useStore.getState().disposeSession("echo");
+	expect(readDraft("echo")).toBeUndefined();
+	expect(readDraft("delta")?.text).toBe("for delta");
+	dropDraft("delta");
 });
