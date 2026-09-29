@@ -7,7 +7,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { closeDb, openDb } from "./index.ts";
+import { broadcastBus } from "../broadcast-bus.ts";
+import { closeDb, getDb, openDb } from "./index.ts";
 import {
 	createState,
 	createTask,
@@ -169,5 +170,70 @@ describe("state_entered_at + recency sort", () => {
 
 		const done = listTasks().filter((t) => t.stateId === "s_done");
 		expect(done.map((t) => t.id)).toEqual([a.id, b.id]);
+	});
+});
+
+describe("tasks_changed follows the outermost commit", () => {
+	/** Record each tasks_changed publish and whether a transaction was still open at that moment. */
+	function recordPublishes(): { openAtPublish: boolean[]; stop: () => void } {
+		const openAtPublish: boolean[] = [];
+		const stop = broadcastBus.subscribe((f) => {
+			if (f.type === "tasks_changed") openAtPublish.push(getDb().inTransaction);
+		});
+		return { openAtPublish, stop };
+	}
+
+	test("a rolled-back outer transaction publishes nothing", () => {
+		bootDb();
+		const rec = recordPublishes();
+		try {
+			expect(() =>
+				getDb().transaction(() => {
+					createTask({ title: "never happened", stateId: "s_backlog" });
+					throw new Error("abort");
+				})(),
+			).toThrow("abort");
+		} finally {
+			rec.stop();
+		}
+		expect(listTasks().some((t) => t.title === "never happened")).toBe(false);
+		expect(rec.openAtPublish).toHaveLength(0);
+	});
+
+	test("a committed outer transaction publishes once, after the commit", () => {
+		bootDb();
+		const rec = recordPublishes();
+		try {
+			getDb().transaction(() => {
+				const t = createTask({ title: "kept", stateId: "s_backlog" });
+				moveTask(t.id, "s_active", 0);
+			})();
+		} finally {
+			rec.stop();
+		}
+		// Two mutations, one commit: a single refresh, sent with no transaction open.
+		expect(rec.openAtPublish).toEqual([false]);
+	});
+
+	test("a write rolled back to its savepoint publishes nothing when the outer transaction commits", () => {
+		bootDb();
+		const rec = recordPublishes();
+		const db = getDb();
+		try {
+			db.transaction(() => {
+				try {
+					db.transaction(() => {
+						createTask({ title: "savepoint victim", stateId: "s_backlog" });
+						throw new Error("inner abort");
+					})();
+				} catch {
+					// The outer transaction carries on without the inner write.
+				}
+			})();
+		} finally {
+			rec.stop();
+		}
+		expect(listTasks().some((t) => t.title === "savepoint victim")).toBe(false);
+		expect(rec.openAtPublish).toHaveLength(0);
 	});
 });

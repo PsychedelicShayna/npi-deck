@@ -9,15 +9,22 @@
 import type { Task, TaskState } from "@npi-deck/protocol";
 
 import { broadcastBus } from "../broadcast-bus.ts";
-import { getDb, id, nowIso } from "./index.ts";
+import { afterCommit, getDb, id, nowIso } from "./index.ts";
 
 /**
  * Every committed change to the board goes through this module, so it is the
  * one place that tells open kanbans to reload. REST routes, inbox promotion,
  * routine steps, and deck slash commands all inherit the event by calling the
  * mutators below; none of them publish it themselves.
+ *
+ * The event waits for the caller's outermost transaction to commit and is
+ * dropped on rollback, so clients never refetch a change that did not land.
  */
 function notifyTasksChanged(): void {
+	afterCommit(publishTasksChanged);
+}
+
+function publishTasksChanged(): void {
 	broadcastBus.broadcast({ type: "tasks_changed" });
 }
 

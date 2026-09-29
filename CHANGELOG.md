@@ -46,7 +46,7 @@ All notable changes to NPI deck (a fork of bjb2/omp-deck; entries before the for
 - Session browsing uses a read-only global scan for project filters instead of repairing NeoPi session backups (#76); model-picker discovery uses read-only settings and cannot migrate user config (#77).
 - The plan-mode bridge tests wait for a proposal to become pending instead of sleeping a fixed 10 ms, so a slower backend load no longer fails them (#85).
 - A routine with several cron triggers keeps reporting its earliest upcoming fire as the next run after it runs, instead of switching to the first trigger's next fire (#25). Scheduling and post-run updates now compute next-run metadata the same way. Disabling a routine clears its next run, and a manual run of a disabled routine leaves it cleared.
-- An open kanban now refreshes when a routine creates or moves a task or an inbox item is promoted, whether from another tab or a routine step (#18). The task store publishes `tasks_changed` after each committed task or column change, so REST, inbox promotion, routine steps, and deck slash commands all share one notification path. Deleting, adding, or renaming a column now refreshes other open boards too.
+- An open kanban now refreshes when a routine creates or moves a task or an inbox item is promoted, whether from another tab or a routine step (#18). The task store publishes `tasks_changed` after each committed task or column change, so REST, inbox promotion, routine steps, and deck slash commands all share one notification path. A mutation inside a caller's transaction publishes once when the outermost transaction commits, and publishes nothing if that transaction rolls back. Deleting, adding, or renaming a column now refreshes other open boards too.
 
 ### Removed
 

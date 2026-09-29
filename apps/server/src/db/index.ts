@@ -33,6 +33,7 @@ export function openDb(opts: DbOpenOpts): Database {
 	fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 	const db = new Database(dbPath, { create: true, strict: true });
+	trackTransactions(db);
 	db.exec("PRAGMA journal_mode = WAL");
 	db.exec("PRAGMA foreign_keys = ON");
 	db.exec("PRAGMA synchronous = NORMAL");
@@ -55,6 +56,76 @@ export function closeDb(): void {
 		instance.close();
 		instance = null;
 	}
+}
+
+// ─── Commit hooks ──────────────────────────────────────────────────────────
+
+/**
+ * Callbacks deferred by `afterCommit`, one set per open `db.transaction`
+ * level (outermost first). Sets coalesce repeats of the same callback, so
+ * several mutations in one commit still fire it once.
+ */
+const commitFrames: Set<() => void>[] = [];
+
+/**
+ * Run `cb` once the current write is durable: immediately outside a
+ * transaction, otherwise when the outermost `db.transaction` commits. A
+ * rollback, at any nesting level, drops what was deferred inside it.
+ *
+ * Only transactions opened through `db.transaction(...)` are tracked; a raw
+ * `BEGIN` would run `cb` before its commit.
+ */
+export function afterCommit(cb: () => void): void {
+	const frame = commitFrames.at(-1);
+	if (frame) frame.add(cb);
+	else runCommitCallback(cb);
+}
+
+function runCommitCallback(cb: () => void): void {
+	try {
+		cb();
+	} catch (err) {
+		// The write already committed; a failing observer must not report it as failed.
+		log.error("afterCommit callback failed", err);
+	}
+}
+
+/**
+ * Wrap `db.transaction` (and its deferred/immediate/exclusive variants) so each
+ * call opens a commit frame. On success an inner frame merges into its parent
+ * and the outermost frame flushes; on throw the frame is discarded.
+ */
+function trackTransactions(db: Database): void {
+	const original = db.transaction.bind(db);
+	const track =
+		<A extends unknown[], R>(run: (...args: A) => R) =>
+		(...args: A): R => {
+			commitFrames.push(new Set());
+			let committed = false;
+			try {
+				const result = run(...args);
+				committed = true;
+				return result;
+			} finally {
+				const frame = commitFrames.pop()!;
+				if (committed) {
+					const parent = commitFrames.at(-1);
+					for (const cb of frame) {
+						if (parent) parent.add(cb);
+						else runCommitCallback(cb);
+					}
+				}
+			}
+		};
+	db.transaction = ((fn: (...args: unknown[]) => unknown) => {
+		const tx = original(fn);
+		return Object.assign(track(tx), {
+			deferred: track(tx.deferred),
+			immediate: track(tx.immediate),
+			exclusive: track(tx.exclusive),
+			database: db,
+		});
+	}) as Database["transaction"];
 }
 
 // ─── Migrations ────────────────────────────────────────────────────────────
