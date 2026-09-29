@@ -652,13 +652,14 @@ await check("skills: capability loader finds a user skill", ["loadCapability", "
 	return `${result.items.length} skill(s), contract-skill found`;
 });
 
-await check("marketplace: registry paths isolated, manager lists", [
+await check("marketplace: registry paths isolated, manager lists, checks for and applies updates", [
 	"MarketplaceManager",
 	"getInstalledPluginsRegistryPath",
 	"getMarketplacesCacheDir",
 	"getMarketplacesRegistryPath",
 	"getPluginsCacheDir",
 	"parsePluginId",
+	"clearPluginRootsAndCaches",
 ], async () => {
 	const paths = {
 		marketplacesRegistryPath: core.getMarketplacesRegistryPath(),
@@ -667,11 +668,54 @@ await check("marketplace: registry paths isolated, manager lists", [
 		pluginsCacheDir: core.getPluginsCacheDir(),
 	};
 	for (const [k, v] of Object.entries(paths)) assert(v.startsWith(tmp), `${k} escapes isolation: ${v}`);
-	const manager = new core.MarketplaceManager(paths);
+	// Wired as marketplace-service.ts wires it.
+	const manager = new core.MarketplaceManager({ ...paths, clearPluginRootsCache: core.clearPluginRootsAndCaches });
 	const markets = await manager.listMarketplaces();
 	const parsed = core.parsePluginId("tool@market");
 	assert(parsed?.name === "tool" && parsed.marketplace === "market", `parsePluginId: ${JSON.stringify(parsed)}`);
-	return `${markets.length} marketplaces; paths under the temp home`;
+
+	// The Skills view's update check and upgrade (#29): a local source moves ahead
+	// of the install, updateMarketplace re-reads it, checkForUpdates reports it and
+	// upgradePlugin / upgradePluginAcrossScopes re-install at the new version. Skill
+	// discovery must follow each upgrade: the old version's directory is deleted.
+	const source = mkdir("marketplace-source");
+	const writeSource = (version: string) => {
+		const pluginDir = path.join(source, "plugins", "tool");
+		mkdirSync(path.join(source, ".claude-plugin"), { recursive: true });
+		mkdirSync(path.join(pluginDir, "skills", "tool-skill"), { recursive: true });
+		writeFileSync(path.join(pluginDir, "package.json"), JSON.stringify({ name: "tool", version }));
+		writeFileSync(path.join(pluginDir, "skills", "tool-skill", "SKILL.md"), `---\nname: tool-skill\ndescription: Contract plugin skill ${version}.\n---\nBody.\n`);
+		writeFileSync(
+			path.join(source, ".claude-plugin", "marketplace.json"),
+			JSON.stringify({ name: "market", owner: { name: "contract" }, plugins: [{ name: "tool", source: "./plugins/tool", version }] }),
+		);
+	};
+	const discoveredSkillPath = async () =>
+		(await core.loadCapability<{ name: string; path: string }>(core.skillCapability.id, { cwd: rootB })).items.find(
+			(s) => s.name === "tool-skill",
+		)?.path;
+	writeSource("1.0.0");
+	await manager.addMarketplace(source);
+	await manager.installPlugin("tool", "market");
+	const firstPath = await discoveredSkillPath();
+	assert(firstPath?.includes("1.0.0"), `installed plugin skill not discovered: ${firstPath}`);
+	writeSource("1.1.0");
+	await manager.updateMarketplace("market");
+	const updates = await manager.checkForUpdates();
+	assert(
+		JSON.stringify(updates) === JSON.stringify([{ pluginId: "tool@market", scope: "user", from: "1.0.0", to: "1.1.0" }]),
+		`checkForUpdates: ${JSON.stringify(updates)}`,
+	);
+	const upgraded = await manager.upgradePlugin("tool@market", "user");
+	assert(upgraded.version === "1.1.0" && upgraded.installPath.startsWith(tmp), `upgradePlugin: ${JSON.stringify(upgraded)}`);
+	const upgradedPath = await discoveredSkillPath();
+	assert(upgradedPath?.startsWith(upgraded.installPath), `skill discovery kept the old plugin root: ${upgradedPath}`);
+	writeSource("1.2.0");
+	await manager.updateMarketplace("market");
+	const across = await manager.upgradePluginAcrossScopes("tool@market");
+	assert(across.length === 1 && across[0]?.version === "1.2.0", `upgradePluginAcrossScopes: ${JSON.stringify(across)}`);
+	assert((await manager.checkForUpdates()).length === 0, "an update remained after upgrading");
+	return `${markets.length} marketplaces before the fixture; paths under the temp home; tool@market 1.0.0 → 1.1.0 → 1.2.0 via checkForUpdates/upgradePlugin/upgradePluginAcrossScopes; skill discovery followed the upgrade`;
 });
 
 await check("plan mode: xd://propose round trip to resolveApprovedPlan", [

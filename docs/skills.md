@@ -113,7 +113,12 @@ flags risky installs at a glance.
 ## Lifecycle
 
 - **Install / uninstall** for marketplace plugins lives on the
-  [Marketplace](./marketplaces.md) view; the Skills view is read-only.
+  [Marketplace](./marketplaces.md) view.
+- **Updates**: the Skills view's **Check for updates** fetches every
+  marketplace from its source and lists outdated plugins under **Plugin
+  updates**, each with its own **Upgrade** button; skills of an outdated
+  plugin carry an `update` tag. Nothing upgrades without that click. See
+  [Checking for and applying updates](./marketplaces.md#checking-for-and-applying-updates).
 - **Enable / disable** is **plugin-level** (or `frontmatter.hide: true` for
   individual skills under any provider). The Skills view shows the
   inherited state and the hidden flag, but doesn't expose a finer toggle —

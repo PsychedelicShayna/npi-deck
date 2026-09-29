@@ -83,10 +83,31 @@ the latest catalog JSON for every registered marketplace.
 A refresh:
 
 - Updates `cachedAt` for each marketplace.
-- Does **not** auto-upgrade installed plugins. Upgrades go through
-  `POST /api/marketplace/install` with `force: true` on an existing entry, or
-  via the SDK's `/marketplace upgrade <id>` slash command. The deck's UI for
-  upgrade is a follow-up.
+- Does **not** auto-upgrade installed plugins.
+
+## Checking for and applying updates
+
+The Skills view (`/skills`) is where installed plugins are kept current:
+
+- On open it compares installed versions with the **cached** catalogs
+  (`GET /api/marketplace/updates`, no network).
+- **Check for updates** re-fetches every registered marketplace from its
+  source, then compares (`POST /api/marketplace/updates/check`). A source that
+  cannot be fetched is listed as such and its cached catalog is compared
+  instead. Checking never upgrades anything.
+- Outdated plugins are listed under **Plugin updates** with `from → to` and
+  their scope; their skills carry an `update` tag, and a skill's detail pane
+  shows the same upgrade. **Upgrade** re-installs that one plugin at the
+  catalog's version (`POST /api/marketplace/plugins/:id/upgrade`, body
+  `{ scope }`; without a scope every installed scope is upgraded).
+
+All of this goes through NeoPi's own `MarketplaceManager`
+(`updateMarketplace`, `checkForUpdates`, `upgradePlugin`,
+`upgradePluginAcrossScopes`). A catalog entry without a `version` is never
+reported as outdated. The deck checks user-scope installs only; it has no
+project registry. There is no background check or auto-upgrade in the deck:
+NeoPi's `marketplace.autoUpdate` setting is acted on only when the `npi` CLI
+starts, not by deck sessions.
 
 ## Capability badges
 

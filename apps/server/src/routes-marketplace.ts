@@ -5,11 +5,14 @@ import type {
 	InstallPluginResponse,
 	ListMarketplaceResponse,
 	MarketplaceSource,
+	MarketplaceUpdatesResponse,
 	UninstallPluginRequest,
+	UpgradePluginRequest,
+	UpgradePluginResponse,
 } from "@npi-deck/protocol";
 
 import { logger } from "./log.ts";
-import type { MarketplaceService } from "./marketplace-service.ts";
+import { InvalidPluginIdError, type MarketplaceService } from "./marketplace-service.ts";
 
 const log = logger("routes:marketplace");
 
@@ -74,6 +77,59 @@ export function buildMarketplaceRouter(service: MarketplaceService): Hono {
 			return c.json({ ok: true });
 		} catch (err) {
 			log.error(`refresh failed`, err);
+			return c.json({ error: String((err as Error).message ?? err) }, 500);
+		}
+	});
+
+	// Compare installed plugins against their catalogs. GET reads only the
+	// cached catalogs (no network); POST .../check re-fetches every marketplace
+	// from its source first. Neither upgrades anything.
+	app.get("/marketplace/updates", async (c) => {
+		try {
+			const body: MarketplaceUpdatesResponse = await service.checkForUpdates({ refresh: false });
+			return c.json(body);
+		} catch (err) {
+			log.error(`checkForUpdates failed`, err);
+			return c.json({ error: String((err as Error).message ?? err) }, 500);
+		}
+	});
+
+	app.post("/marketplace/updates/check", async (c) => {
+		try {
+			const body: MarketplaceUpdatesResponse = await service.checkForUpdates({ refresh: true });
+			return c.json(body);
+		} catch (err) {
+			log.error(`checkForUpdates(refresh) failed`, err);
+			return c.json({ error: String((err as Error).message ?? err) }, 500);
+		}
+	});
+
+	app.post("/marketplace/plugins/:id/upgrade", async (c) => {
+		const id = c.req.param("id");
+		let body: UpgradePluginRequest = {};
+		const raw = await c.req.text();
+		if (raw.trim()) {
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(raw);
+			} catch {
+				return c.json({ error: "invalid json" }, 400);
+			}
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+				return c.json({ error: "body must be a JSON object" }, 400);
+			}
+			body = parsed as UpgradePluginRequest;
+		}
+		if (body.scope !== undefined && body.scope !== "user" && body.scope !== "project") {
+			return c.json({ error: 'scope must be "user" or "project"' }, 400);
+		}
+		try {
+			const upgraded = await service.upgrade(id, body.scope);
+			const resp: UpgradePluginResponse = { ok: true, upgraded };
+			return c.json(resp);
+		} catch (err) {
+			if (err instanceof InvalidPluginIdError) return c.json({ error: err.message }, 400);
+			log.error(`upgrade failed`, err);
 			return c.json({ error: String((err as Error).message ?? err) }, 500);
 		}
 	});

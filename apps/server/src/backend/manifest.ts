@@ -52,6 +52,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/mcp/manager": typeof import("@oh-my-pi/pi-coding-agent/mcp/manager");
 	"@oh-my-pi/pi-coding-agent/capability/fs": typeof import("@oh-my-pi/pi-coding-agent/capability/fs");
 	"@oh-my-pi/pi-coding-agent/discovery": typeof import("@oh-my-pi/pi-coding-agent/discovery");
+	"@oh-my-pi/pi-coding-agent/discovery/helpers": typeof import("@oh-my-pi/pi-coding-agent/discovery/helpers");
 	"@oh-my-pi/pi-coding-agent/extensibility/settings": typeof import("@oh-my-pi/pi-coding-agent/extensibility/settings");
 	"@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime": typeof import("@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime");
 	"@oh-my-pi/pi-utils/file-lock": typeof import("@oh-my-pi/pi-utils/file-lock");
@@ -154,6 +155,9 @@ export const MANIFEST = {
 			),
 			getPluginsCacheDir: op("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace", "getPluginsCacheDir"),
 			parsePluginId: op("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace", "parsePluginId"),
+			// After a plugin install/upgrade/uninstall NeoPi's skill discovery keeps the old
+			// plugin roots (an upgrade deletes them) until this invalidates its caches.
+			clearPluginRootsAndCaches: op("@oh-my-pi/pi-coding-agent/discovery/helpers", "clearPluginRootsAndCaches"),
 			// The ask tool reads pi-tui's module-level `theme`; the deck must set it at boot.
 			getThemeByName: op("@oh-my-pi/pi-tui/theme/theme", "getThemeByName"),
 			setThemeInstance: op("@oh-my-pi/pi-tui/theme/theme", "setThemeInstance"),

@@ -720,6 +720,47 @@ export interface AddMarketplaceRequest {
 	source: string; // url, github "owner/repo", git+url, or absolute local path
 }
 
+/**
+ * One installed plugin whose marketplace catalog declares a newer version,
+ * as reported by NeoPi's `MarketplaceManager.checkForUpdates()`.
+ */
+export interface MarketplacePluginUpdate {
+	pluginId: string; // "name@marketplace"
+	name: string;
+	marketplace: string;
+	scope: "user" | "project";
+	/** Installed version. */
+	from: string;
+	/** Version the catalog declares. */
+	to: string;
+}
+
+export interface MarketplaceUpdatesResponse {
+	updates: MarketplacePluginUpdate[];
+	/**
+	 * True when every marketplace was re-fetched from its source first
+	 * (`POST /api/marketplace/updates/check`); false when installed versions
+	 * were compared against the cached catalogs (`GET /api/marketplace/updates`).
+	 */
+	refreshed: boolean;
+	/**
+	 * Marketplaces whose source could not be fetched during a refresh. Their
+	 * cached catalogs were compared instead. Always empty when `refreshed` is false.
+	 */
+	refreshErrors: Array<{ marketplace: string; error: string }>;
+	checkedAt: string;
+}
+
+export interface UpgradePluginRequest {
+	/** Upgrade only this scope; omitted upgrades every scope the plugin is installed in. */
+	scope?: "user" | "project";
+}
+
+export interface UpgradePluginResponse {
+	ok: boolean;
+	upgraded: InstalledPluginInfo[];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Skills (enumeration across every omp skill provider)
 // ─────────────────────────────────────────────────────────────────────────────

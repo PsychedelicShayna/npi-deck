@@ -4,7 +4,10 @@ import type {
 	InstallPluginResponse,
 	ListMarketplaceResponse,
 	MarketplaceSource,
+	MarketplaceUpdatesResponse,
 	UninstallPluginRequest,
+	UpgradePluginRequest,
+	UpgradePluginResponse,
 } from "@npi-deck/protocol";
 
 const BASE = "/api";
@@ -49,5 +52,19 @@ export const marketplaceApi = {
 	},
 	removeMarketplace(name: string): Promise<{ ok: boolean }> {
 		return req<{ ok: boolean }>(`/marketplaces/${encodeURIComponent(name)}`, { method: "DELETE" });
+	},
+	/** Installed plugins vs the cached catalogs; no network. */
+	updates(): Promise<MarketplaceUpdatesResponse> {
+		return req<MarketplaceUpdatesResponse>("/marketplace/updates");
+	},
+	/** Re-fetch every marketplace from its source, then compare. Never upgrades. */
+	checkForUpdates(): Promise<MarketplaceUpdatesResponse> {
+		return req<MarketplaceUpdatesResponse>("/marketplace/updates/check", { method: "POST" });
+	},
+	upgrade(id: string, body: UpgradePluginRequest = {}): Promise<UpgradePluginResponse> {
+		return req<UpgradePluginResponse>(`/marketplace/plugins/${encodeURIComponent(id)}/upgrade`, {
+			method: "POST",
+			body: JSON.stringify(body),
+		});
 	},
 };

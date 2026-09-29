@@ -1,18 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Loader2, Search, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowUpCircle, Loader2, RefreshCw, Search, Sparkles } from "lucide-react";
 import type {
 	ListSkillsResponse,
+	MarketplacePluginUpdate,
+	MarketplaceUpdatesResponse,
 	SkillDetailResponse,
 	SkillSummary,
 } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
 import { Markdown } from "@/lib/markdown";
+import { marketplaceApi } from "@/lib/marketplace-api";
 import { skillsApi } from "@/lib/skills-api";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 type LevelFilter = "all" | "user" | "project";
+
+/** Upgrade key: a plugin can be installed (and outdated) in both scopes. */
+const updateKey = (u: Pick<MarketplacePluginUpdate, "pluginId" | "scope">) => `${u.pluginId}:${u.scope}`;
 
 /**
  * Cockpit for every skill `omp` discovers — across `native`, `claude-plugins`,
@@ -35,6 +41,14 @@ export function SkillsView() {
 	// picks a row, then we slide to detail with a back affordance. At lg+ the
 	// CSS grid renders them side-by-side and this flag is inert.
 	const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+	// Marketplace plugin updates. Loaded from the cached catalogs on open; the
+	// "Check for updates" button re-fetches every marketplace from its source.
+	// Nothing upgrades without a click on that plugin's Upgrade button.
+	const [updates, setUpdates] = useState<MarketplaceUpdatesResponse | null>(null);
+	const [checking, setChecking] = useState(false);
+	const [upgrading, setUpgrading] = useState<string | undefined>();
+	const [updateError, setUpdateError] = useState<string | undefined>();
+	const [upgradeNotice, setUpgradeNotice] = useState<string | undefined>();
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -51,6 +65,65 @@ export function SkillsView() {
 	useEffect(() => {
 		void refresh();
 	}, [refresh]);
+
+	useEffect(() => {
+		let cancelled = false;
+		marketplaceApi
+			.updates()
+			.then((next) => {
+				if (!cancelled) setUpdates(next);
+			})
+			.catch((e) => {
+				if (!cancelled) setUpdateError(String((e as Error).message ?? e));
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const checkForUpdates = useCallback(async (): Promise<void> => {
+		setChecking(true);
+		setUpdateError(undefined);
+		setUpgradeNotice(undefined);
+		try {
+			setUpdates(await marketplaceApi.checkForUpdates());
+		} catch (e) {
+			setUpdateError(String((e as Error).message ?? e));
+		} finally {
+			setChecking(false);
+		}
+	}, []);
+
+	const upgrade = useCallback(
+		async (u: MarketplacePluginUpdate): Promise<void> => {
+			setUpgrading(updateKey(u));
+			setUpdateError(undefined);
+			setUpgradeNotice(undefined);
+			try {
+				const res = await marketplaceApi.upgrade(u.pluginId, { scope: u.scope });
+				const version = res.upgraded[0]?.version ?? u.to;
+				setUpdates((prev) =>
+					prev ? { ...prev, updates: prev.updates.filter((x) => updateKey(x) !== updateKey(u)) } : prev,
+				);
+				setUpgradeNotice(`Upgraded ${u.name} to ${version}`);
+				void refresh();
+			} catch (e) {
+				setUpdateError(String((e as Error).message ?? e));
+			} finally {
+				setUpgrading(undefined);
+			}
+		},
+		[refresh],
+	);
+
+	/** First outdated scope per plugin, for the skill rows and detail pane. */
+	const updateByPlugin = useMemo(() => {
+		const m = new Map<string, MarketplacePluginUpdate>();
+		for (const u of updates?.updates ?? []) if (!m.has(u.pluginId)) m.set(u.pluginId, u);
+		return m;
+	}, [updates]);
+	const updateCount = updates?.updates.length ?? 0;
+	const updateBusy = checking || upgrading !== undefined;
 
 	const skillsChangeCounter = useStore((s) => s.skillsChangeCounter);
 	useEffect(() => {
@@ -119,6 +192,16 @@ export function SkillsView() {
 					onProviderFilter={setProviderFilter}
 					levelFilter={levelFilter}
 					onLevelFilter={setLevelFilter}
+					updates={
+						<UpdatesSection
+							updates={updates}
+							error={updateError}
+							notice={upgradeNotice}
+							checking={checking}
+							upgrading={upgrading}
+							onUpgrade={(u) => void upgrade(u)}
+						/>
+					}
 				/>
 			}
 			inspector={<SkillInspector skill={selected} detail={detail} />}
@@ -129,7 +212,25 @@ export function SkillsView() {
 						<div className="text-xs text-ink-3">
 							{loading ? "loading..." : `${filtered.length} / ${data?.skills.length ?? 0}`}
 						</div>
+						{updateCount > 0 ? (
+							<span
+								data-testid="skills-update-count"
+								className="rounded bg-accent-soft/50 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-accent"
+							>
+								{updateCount === 1 ? "1 update" : `${updateCount} updates`}
+							</span>
+						) : null}
 						<div className="flex-1" />
+						<button
+							type="button"
+							onClick={() => void checkForUpdates()}
+							disabled={updateBusy}
+							title="Fetch every marketplace from its source and compare with the installed plugins. Nothing is upgraded."
+							className="flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-paper-2 px-2 py-1 text-xs text-ink-2 transition-colors hover:bg-paper-3 hover:text-ink disabled:opacity-60"
+						>
+							{checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+							<span className="hidden sm:inline">{checking ? "Checking..." : "Check for updates"}</span>
+						</button>
 						<div className="flex items-center gap-2 rounded-md border border-line bg-paper-2 px-2 py-1 text-xs">
 							<Search className="h-3.5 w-3.5 text-ink-3" />
 							<input
@@ -165,6 +266,7 @@ export function SkillsView() {
 									key={s.id}
 									skill={s}
 									active={selected?.id === s.id}
+									update={s.pluginId ? updateByPlugin.get(s.pluginId) : undefined}
 									onClick={() => {
 										setSelectedId(s.id);
 										setMobileDetailOpen(true);
@@ -185,6 +287,10 @@ export function SkillsView() {
 									detail={detail}
 									loading={detailLoading}
 									error={detailError}
+									update={selected.pluginId ? updateByPlugin.get(selected.pluginId) : undefined}
+									upgrading={upgrading}
+									upgradeDisabled={updateBusy}
+									onUpgrade={(u) => void upgrade(u)}
 									onBack={() => setMobileDetailOpen(false)}
 								/>
 							)}
@@ -196,7 +302,17 @@ export function SkillsView() {
 	);
 }
 
-function SkillRow({ skill, active, onClick }: { skill: SkillSummary; active: boolean; onClick: () => void }) {
+function SkillRow({
+	skill,
+	active,
+	update,
+	onClick,
+}: {
+	skill: SkillSummary;
+	active: boolean;
+	update: MarketplacePluginUpdate | undefined;
+	onClick: () => void;
+}) {
 	return (
 		<button
 			type="button"
@@ -210,8 +326,16 @@ function SkillRow({ skill, active, onClick }: { skill: SkillSummary; active: boo
 			<div className="flex w-full items-center gap-2">
 				<Sparkles className="h-3.5 w-3.5 shrink-0 text-accent" />
 				<span className="truncate text-sm font-medium text-ink">{skill.name}</span>
+				{update ? (
+					<span
+						title={`${update.pluginId}: ${update.from} → ${update.to}`}
+						className="ml-auto shrink-0 rounded bg-accent-soft/50 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-accent"
+					>
+						update
+					</span>
+				) : null}
 				{!skill.enabled ? (
-					<span className="ml-auto rounded bg-paper-3 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-ink-3">
+					<span className={cn("rounded bg-paper-3 px-1.5 py-0.5 font-mono text-2xs uppercase tracking-meta text-ink-3", !update && "ml-auto")}>
 						hidden
 					</span>
 				) : null}
@@ -248,12 +372,20 @@ function SkillDetailPane({
 	detail,
 	loading,
 	error,
+	update,
+	upgrading,
+	upgradeDisabled,
+	onUpgrade,
 	onBack,
 }: {
 	skill: SkillSummary;
 	detail: SkillDetailResponse | null;
 	loading: boolean;
 	error: string | undefined;
+	update: MarketplacePluginUpdate | undefined;
+	upgrading: string | undefined;
+	upgradeDisabled: boolean;
+	onUpgrade: (u: MarketplacePluginUpdate) => void;
 	onBack?: () => void;
 }) {
 	return (
@@ -291,6 +423,25 @@ function SkillDetailPane({
 						</>
 					)}
 				</div>
+				{update ? (
+					<div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/30 bg-accent-soft/20 px-2 py-1.5 text-xs">
+						<ArrowUpCircle className="h-3.5 w-3.5 shrink-0 text-accent" />
+						<span className="text-ink-2">
+							Plugin update available:{" "}
+							<span className="font-mono">
+								{update.from} → {update.to}
+							</span>{" "}
+							<span className="font-mono text-2xs uppercase tracking-meta text-ink-3">{update.scope}</span>
+						</span>
+						<UpgradeButton
+							update={update}
+							busy={upgrading === updateKey(update)}
+							disabled={upgradeDisabled}
+							onUpgrade={onUpgrade}
+							className="ml-auto"
+						/>
+					</div>
+				) : null}
 				{skill.frontmatter.description ? (
 					<p className="mt-2 text-sm text-ink-2">{skill.frontmatter.description}</p>
 				) : null}
@@ -361,12 +512,14 @@ function SkillsSidebar({
 	onProviderFilter,
 	levelFilter,
 	onLevelFilter,
+	updates,
 }: {
 	skills: SkillSummary[];
 	providerFilter: string | "all";
 	onProviderFilter: (p: string | "all") => void;
 	levelFilter: LevelFilter;
 	onLevelFilter: (l: LevelFilter) => void;
+	updates: React.ReactNode;
 }) {
 	const providers = useMemo(() => {
 		const m = new Map<string, { label: string; count: number; priority: number }>();
@@ -390,7 +543,7 @@ function SkillsSidebar({
 	);
 
 	return (
-		<div className="flex h-full min-h-0 flex-col">
+		<div className="flex h-full min-h-0 flex-col overflow-y-auto">
 			<div className="border-b border-line px-3 py-2">
 				<div className="meta">Skills</div>
 				<div className="mt-0.5 text-xs text-ink-3">
@@ -419,13 +572,110 @@ function SkillsSidebar({
 				))}
 			</div>
 
-			<div className="min-h-0 px-3 py-2">
+			<div className="border-b border-line px-3 py-2">
 				<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">Level</div>
 				<FilterRow label="all" count={levelCounts.all} active={levelFilter === "all"} onClick={() => onLevelFilter("all")} />
 				<FilterRow label="user" count={levelCounts.user} active={levelFilter === "user"} onClick={() => onLevelFilter("user")} />
 				<FilterRow label="project" count={levelCounts.project} active={levelFilter === "project"} onClick={() => onLevelFilter("project")} />
 			</div>
+
+			{updates}
 		</div>
+	);
+}
+
+/**
+ * Marketplace plugins whose catalog is ahead of the installed copy, each with
+ * its own Upgrade button. Upgrades are per plugin and per scope; nothing here
+ * upgrades on its own.
+ */
+function UpdatesSection({
+	updates,
+	error,
+	notice,
+	checking,
+	upgrading,
+	onUpgrade,
+}: {
+	updates: MarketplaceUpdatesResponse | null;
+	error: string | undefined;
+	notice: string | undefined;
+	checking: boolean;
+	upgrading: string | undefined;
+	onUpgrade: (u: MarketplacePluginUpdate) => void;
+}) {
+	const busy = checking || upgrading !== undefined;
+	const checkedAt = updates ? new Date(updates.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+	return (
+		<div className="min-h-0 px-3 py-2" data-testid="skills-updates">
+			<div className="font-mono text-2xs uppercase tracking-meta text-ink-4">Plugin updates</div>
+			{error ? <div className="mt-1 break-words font-mono text-2xs text-danger">{error}</div> : null}
+			{notice ? <div className="mt-1 text-xs text-success">{notice}</div> : null}
+			{!updates ? (
+				<div className="mt-1 text-xs text-ink-3">{checking ? "Checking..." : "Not checked yet."}</div>
+			) : updates.updates.length === 0 ? (
+				<div className="mt-1 text-xs text-ink-3">
+					Installed plugins match their{" "}
+					{!updates.refreshed ? "cached catalogs" : updates.refreshErrors.length > 0 ? "catalogs" : "sources"} ({checkedAt}).
+					{updates.refreshed ? null : " Check for updates to fetch the sources."}
+				</div>
+			) : (
+				<ul className="mt-1 space-y-1">
+					{updates.updates.map((u) => (
+						<li key={updateKey(u)} className="flex items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-paper-3">
+							<div className="min-w-0 flex-1">
+								<div className="truncate text-ink" title={u.pluginId}>
+									{u.name}
+									<span className="text-ink-4">@{u.marketplace}</span>
+								</div>
+								<div className="font-mono text-2xs text-ink-3">
+									{u.from} → {u.to} <span className="uppercase tracking-meta text-ink-4">{u.scope}</span>
+								</div>
+							</div>
+							<UpgradeButton update={u} busy={upgrading === updateKey(u)} disabled={busy} onUpgrade={onUpgrade} />
+						</li>
+					))}
+				</ul>
+			)}
+			{updates && updates.updates.length > 0 && !updates.refreshed ? (
+				<div className="mt-1 text-2xs text-ink-4">From cached catalogs ({checkedAt}); check for updates to fetch the sources.</div>
+			) : null}
+			{(updates?.refreshErrors ?? []).map((e) => (
+				<div key={e.marketplace} className="mt-1 break-words text-2xs text-danger" title={e.error}>
+					Couldn't fetch {e.marketplace}; compared its cached catalog instead.
+				</div>
+			))}
+		</div>
+	);
+}
+
+function UpgradeButton({
+	update,
+	busy,
+	disabled,
+	onUpgrade,
+	className,
+}: {
+	update: MarketplacePluginUpdate;
+	busy: boolean;
+	disabled: boolean;
+	onUpgrade: (u: MarketplacePluginUpdate) => void;
+	className?: string;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => onUpgrade(update)}
+			disabled={disabled}
+			aria-label={`Upgrade ${update.pluginId} (${update.scope}) to ${update.to}`}
+			className={cn(
+				"flex shrink-0 items-center gap-1 rounded-md border border-accent/40 px-2 py-0.5 text-2xs font-medium text-accent transition-colors hover:bg-accent-soft/40 disabled:opacity-50",
+				className,
+			)}
+		>
+			{busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <ArrowUpCircle className="h-3 w-3" />}
+			{busy ? "Upgrading..." : "Upgrade"}
+		</button>
 	);
 }
 
