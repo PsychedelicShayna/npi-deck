@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowUpCircle, Loader2, RefreshCw, Search, Sparkles } from "lucide-react";
+import { ArrowLeft, ArrowUpCircle, Loader2, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
 import type {
 	ListSkillsResponse,
 	MarketplacePluginUpdate,
@@ -9,6 +9,7 @@ import type {
 } from "@npi-deck/protocol";
 
 import { Layout } from "@/components/Layout";
+import { Button } from "@/components/ui/Button";
 import { Markdown } from "@/lib/markdown";
 import { marketplaceApi } from "@/lib/marketplace-api";
 import { skillsApi } from "@/lib/skills-api";
@@ -19,6 +20,9 @@ type LevelFilter = "all" | "user" | "project";
 
 /** Upgrade key: a plugin can be installed (and outdated) in both scopes. */
 const updateKey = (u: Pick<MarketplacePluginUpdate, "pluginId" | "scope">) => `${u.pluginId}:${u.scope}`;
+
+/** The authoring form in the detail column: a new skill, or an edit of the selected one. */
+type EditorState = { mode: "create" } | { mode: "edit"; detail: SkillDetailResponse };
 
 /**
  * Cockpit for every skill `omp` discovers — across `native`, `claude-plugins`,
@@ -49,6 +53,10 @@ export function SkillsView() {
 	const [upgrading, setUpgrading] = useState<string | undefined>();
 	const [updateError, setUpdateError] = useState<string | undefined>();
 	const [upgradeNotice, setUpgradeNotice] = useState<string | undefined>();
+	const [editor, setEditor] = useState<EditorState | null>(null);
+	// Bumped after a save so the detail refetches even when no watcher event arrives.
+	const [detailNonce, setDetailNonce] = useState(0);
+	const [actionError, setActionError] = useState<string | undefined>();
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -181,7 +189,40 @@ export function SkillsView() {
 		return () => {
 			cancelled = true;
 		};
-	}, [selected?.id, skillsChangeCounter]);
+	}, [selected?.id, skillsChangeCounter, detailNonce]);
+
+	const openCreate = (): void => {
+		setActionError(undefined);
+		setEditor({ mode: "create" });
+		setMobileDetailOpen(true);
+	};
+
+	const deleteSelected = async (skill: SkillSummary): Promise<void> => {
+		const dir = skill.skillPath.replace(/[\\/]SKILL\.md$/, "");
+		if (!window.confirm(`Delete skill "${skill.name}"? This removes ${dir} and everything in it.`)) return;
+		setActionError(undefined);
+		try {
+			await skillsApi.remove(skill.id);
+			setSelectedId(undefined);
+			setMobileDetailOpen(false);
+			await refresh();
+		} catch (e) {
+			setActionError(String((e as Error).message ?? e));
+		}
+	};
+
+	const saved = async (summary: SkillSummary, created: boolean): Promise<void> => {
+		setEditor(null);
+		if (created) {
+			// Show the new skill even if the current filters would hide it.
+			setSearch("");
+			setProviderFilter("all");
+			setLevelFilter("all");
+		}
+		setSelectedId(summary.id);
+		setDetailNonce((n) => n + 1);
+		await refresh();
+	};
 
 	return (
 		<Layout
@@ -231,6 +272,9 @@ export function SkillsView() {
 							{checking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
 							<span className="hidden sm:inline">{checking ? "Checking..." : "Check for updates"}</span>
 						</button>
+						<Button variant="outline" size="sm" onClick={openCreate} disabled={editor?.mode === "create"}>
+							<Plus className="h-3.5 w-3.5" /> New skill
+						</Button>
 						<div className="flex items-center gap-2 rounded-md border border-line bg-paper-2 px-2 py-1 text-xs">
 							<Search className="h-3.5 w-3.5 text-ink-3" />
 							<input
@@ -242,9 +286,9 @@ export function SkillsView() {
 						</div>
 					</div>
 
-					{error ? (
+					{error || actionError ? (
 						<div className="mx-3 mt-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
-							{error}
+							{error ?? actionError}
 						</div>
 					) : null}
 
@@ -268,6 +312,8 @@ export function SkillsView() {
 									active={selected?.id === s.id}
 									update={s.pluginId ? updateByPlugin.get(s.pluginId) : undefined}
 									onClick={() => {
+										if (editor && !window.confirm("Discard the skill you are editing?")) return;
+										setEditor(null);
 										setSelectedId(s.id);
 										setMobileDetailOpen(true);
 									}}
@@ -281,7 +327,17 @@ export function SkillsView() {
 								mobileDetailOpen ? "block" : "hidden",
 							)}
 						>
-							{!selected ? null : (
+							{editor ? (
+								<SkillEditor
+									key={editor.mode === "edit" ? editor.detail.id : "new"}
+									editor={editor}
+									onCancel={() => {
+										setEditor(null);
+										if (editor.mode === "create") setMobileDetailOpen(false);
+									}}
+									onSaved={(summary) => void saved(summary, editor.mode === "create")}
+								/>
+							) : !selected ? null : (
 								<SkillDetailPane
 									skill={selected}
 									detail={detail}
@@ -292,6 +348,15 @@ export function SkillsView() {
 									upgradeDisabled={updateBusy}
 									onUpgrade={(u) => void upgrade(u)}
 									onBack={() => setMobileDetailOpen(false)}
+									onEdit={
+										selected.editable && detail?.id === selected.id
+											? () => {
+													setActionError(undefined);
+													setEditor({ mode: "edit", detail });
+												}
+											: undefined
+									}
+									onDelete={selected.editable ? () => void deleteSelected(selected) : undefined}
 								/>
 							)}
 						</div>
@@ -377,6 +442,8 @@ function SkillDetailPane({
 	upgradeDisabled,
 	onUpgrade,
 	onBack,
+	onEdit,
+	onDelete,
 }: {
 	skill: SkillSummary;
 	detail: SkillDetailResponse | null;
@@ -387,6 +454,9 @@ function SkillDetailPane({
 	upgradeDisabled: boolean;
 	onUpgrade: (u: MarketplacePluginUpdate) => void;
 	onBack?: () => void;
+	/** Present only for editable skills once their detail has loaded. */
+	onEdit?: () => void;
+	onDelete?: () => void;
 }) {
 	return (
 		<div className="flex h-full flex-col">
@@ -405,10 +475,28 @@ function SkillDetailPane({
 					<Sparkles className="h-4 w-4 text-accent" />
 					<h1 className="text-base font-medium text-ink">{skill.name}</h1>
 					<div className="ml-auto flex items-center gap-2">
+						{onEdit ? (
+							<Button variant="ghost" size="sm" onClick={onEdit} aria-label={`Edit ${skill.name}`}>
+								<Pencil className="h-3.5 w-3.5" /> Edit
+							</Button>
+						) : null}
+						{onDelete ? (
+							<Button variant="ghost" size="sm" onClick={onDelete} aria-label={`Delete ${skill.name}`} className="text-danger">
+								<Trash2 className="h-3.5 w-3.5" /> Delete
+							</Button>
+						) : null}
 						<ProviderBadge provider={skill.provider} label={skill.providerLabel} />
 						<span className="font-mono text-2xs uppercase tracking-meta text-ink-3">
 							{skill.level}
 						</span>
+						{!skill.editable ? (
+							<span
+								className="font-mono text-2xs uppercase tracking-meta text-ink-4"
+								title="The deck edits OMP user skills under the agent dir only. Edit this one where it lives."
+							>
+								read-only
+							</span>
+						) : null}
 					</div>
 				</div>
 				<div className="mt-1 font-mono text-2xs text-ink-3">
@@ -474,6 +562,111 @@ function SkillDetailPane({
 	);
 }
 
+/**
+ * Create or edit form. A new skill's name becomes its directory under the
+ * agent dir's `skills/` and cannot change afterwards; the server validates
+ * name and description with NeoPi's own rules and reports the first problem.
+ */
+function SkillEditor({
+	editor,
+	onCancel,
+	onSaved,
+}: {
+	editor: EditorState;
+	onCancel: () => void;
+	onSaved: (summary: SkillSummary) => void;
+}) {
+	const editing = editor.mode === "edit" ? editor.detail : undefined;
+	const [name, setName] = useState(editing?.name ?? "");
+	const [description, setDescription] = useState(editing?.frontmatter.description ?? "");
+	const [body, setBody] = useState(editing ? editing.body.replace(/^\n+/, "") : "");
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+
+	const save = async (e: React.FormEvent): Promise<void> => {
+		e.preventDefault();
+		setSaving(true);
+		setError(undefined);
+		try {
+			const summary = editing
+				? await skillsApi.update(editing.id, { description, body, revision: editing.revision })
+				: await skillsApi.create({ name, description, body });
+			onSaved(summary);
+		} catch (err) {
+			setError(String((err as Error).message ?? err));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<form className="flex h-full flex-col" onSubmit={(e) => void save(e)} aria-label={editing ? `Edit ${editing.name}` : "New skill"}>
+			<div className="flex items-center gap-2 border-b border-line px-4 py-3">
+				<Sparkles className="h-4 w-4 text-accent" />
+				<h1 className="text-base font-medium text-ink">{editing ? `Edit ${editing.name}` : "New skill"}</h1>
+				<div className="ml-auto flex items-center gap-2">
+					<Button type="button" variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
+						Cancel
+					</Button>
+					<Button type="submit" variant="primary" size="sm" disabled={saving || !name.trim() || !description.trim()}>
+						{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+						{editing ? "Save" : "Create"}
+					</Button>
+				</div>
+			</div>
+			<div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3 text-sm">
+				{error ? (
+					<div role="alert" className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+						{error}
+					</div>
+				) : null}
+				<label className="block">
+					<span className="font-mono text-2xs uppercase tracking-meta text-ink-4">name</span>
+					<input
+						className="field mt-1 w-full px-2 py-1 font-mono"
+						value={name}
+						onChange={(e) => setName(e.target.value)}
+						readOnly={Boolean(editing)}
+						placeholder="my-skill"
+						autoFocus={!editing}
+						spellCheck={false}
+					/>
+					<span className="mt-1 block text-2xs text-ink-3">
+						{editing
+							? `Fixed: the skill lives in ${editing.skillPath.replace(/[\\/]SKILL\.md$/, "")}.`
+							: "Lowercase letters, digits and single hyphens, up to 64 characters. It becomes the skill's directory under the agent dir's skills/."}
+					</span>
+				</label>
+				<label className="block">
+					<span className="font-mono text-2xs uppercase tracking-meta text-ink-4">description</span>
+					<textarea
+						className="field mt-1 min-h-20 w-full p-2"
+						value={description}
+						onChange={(e) => setDescription(e.target.value)}
+						placeholder="What the skill does and when the agent should reach for it."
+					/>
+					<span className={cn("mt-1 block text-2xs", description.length > 1024 ? "text-danger" : "text-ink-3")}>
+						{description.length} / 1024. The agent sees this in its skill list at session start.
+					</span>
+				</label>
+				<label className="block">
+					<span className="font-mono text-2xs uppercase tracking-meta text-ink-4">SKILL.md body (markdown)</span>
+					<textarea
+						className="field mt-1 min-h-80 w-full p-2 font-mono text-xs"
+						value={body}
+						onChange={(e) => setBody(e.target.value)}
+						placeholder="Instructions the agent receives when it invokes the skill."
+						spellCheck={false}
+					/>
+					{editing ? (
+						<span className="mt-1 block text-2xs text-ink-3">Other frontmatter keys in SKILL.md are kept as they are.</span>
+					) : null}
+				</label>
+			</div>
+		</form>
+	);
+}
+
 function TagRow({ label, values }: { label: string; values: readonly string[] }) {
 	return (
 		<div className="mt-2 flex flex-wrap items-center gap-1">
@@ -499,7 +692,7 @@ function EmptyState({ total }: { total: number }) {
 			</div>
 			<div className="mt-1 max-w-xs text-xs text-ink-3">
 				{total === 0
-					? "Drop a SKILL.md into ~/.omp/agent/skills/<name>/, or install a marketplace plugin."
+					? "Author one with New skill, drop a SKILL.md into ~/.omp/agent/skills/<name>/, or install a marketplace plugin."
 					: "Try clearing the source / level filters or the search box."}
 			</div>
 		</div>

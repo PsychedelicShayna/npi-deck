@@ -51,6 +51,8 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/mcp/client": typeof import("@oh-my-pi/pi-coding-agent/mcp/client");
 	"@oh-my-pi/pi-coding-agent/mcp/manager": typeof import("@oh-my-pi/pi-coding-agent/mcp/manager");
 	"@oh-my-pi/pi-coding-agent/capability/fs": typeof import("@oh-my-pi/pi-coding-agent/capability/fs");
+	// #32 authors user skills with NeoPi's own frontmatter parser and skill validator.
+	"@oh-my-pi/pi-coding-agent/discovery/agent-plugin-format": typeof import("@oh-my-pi/pi-coding-agent/discovery/agent-plugin-format");
 	"@oh-my-pi/pi-coding-agent/discovery": typeof import("@oh-my-pi/pi-coding-agent/discovery");
 	"@oh-my-pi/pi-coding-agent/discovery/helpers": typeof import("@oh-my-pi/pi-coding-agent/discovery/helpers");
 	"@oh-my-pi/pi-coding-agent/extensibility/settings": typeof import("@oh-my-pi/pi-coding-agent/extensibility/settings");
@@ -330,6 +332,21 @@ export const MANIFEST = {
 			loadAllMCPConfigs: op("@oh-my-pi/pi-coding-agent/mcp/config", "loadAllMCPConfigs"),
 			validateServerConfig: op("@oh-my-pi/pi-coding-agent/mcp/config", "validateServerConfig"),
 			cfgMcpEnableProjectConfig: op("@oh-my-pi/pi-coding-agent/mcp/settings", "cfgMcpEnableProjectConfig"),
+			clearFsCache: op("@oh-my-pi/pi-coding-agent/capability/fs", "clearCache"),
+		},
+	},
+	/**
+	 * #32: author OMP user skills from the Skills view. NeoPi's Agent Skills
+	 * validator checks the name and description the deck writes, NeoPi's
+	 * frontmatter parser proves the written SKILL.md reads back as written,
+	 * and the capability read cache is dropped so listings see the change.
+	 */
+	"skill-authoring": {
+		tier: "optional-feature",
+		consumers: ["skill-authoring.ts", "skills-service.ts", "skills-watcher.ts"],
+		exports: {
+			validateAgentSkillFrontmatter: op("@oh-my-pi/pi-coding-agent/discovery/agent-plugin-format", "validateAgentSkillFrontmatter"),
+			parseFrontmatter: op("@oh-my-pi/pi-utils", "parseFrontmatter"),
 			clearFsCache: op("@oh-my-pi/pi-coding-agent/capability/fs", "clearCache"),
 		},
 	},

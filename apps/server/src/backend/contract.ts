@@ -254,6 +254,38 @@ await check("model-roles: RPC catalog lists built-in then custom roles; role fil
 	return `${roles.length} roles (${ids.filter(id => roles.find(r => r.id === id)!.source === "builtin").length} built-in); slow chain ${slow.patterns.length} patterns; ${levels.length} thinking levels`;
 });
 
+await check("skill-authoring: validator judges names, parser reads a SKILL.md back, cache clear shows an edit to the native listing", [
+	"validateAgentSkillFrontmatter", "parseFrontmatter", "clearFsCache",
+], async () => {
+	const authoring = feature("skill-authoring");
+	const ok = authoring.validateAgentSkillFrontmatter({ name: "notes", description: "Takes notes." }, "notes");
+	assert(ok === null, `valid skill rejected: ${ok}`);
+	const refusals = ["../escape", "Upper", "a--b", ".hidden"].map(name => authoring.validateAgentSkillFrontmatter({ name, description: "d" }, name));
+	assert(refusals.every(r => typeof r === "string"), `accepted a bad name: ${JSON.stringify(refusals)}`);
+	const blank = authoring.validateAgentSkillFrontmatter({ name: "notes", description: "  " }, "notes");
+	assert(blank === 'missing required "description"', `blank description: ${blank}`);
+	const { frontmatter, body } = authoring.parseFrontmatter("---\nname: notes\ndescription: 'Takes: notes'\nhide: true\n---\n\nBody\n", { level: "off" });
+	assert(frontmatter.name === "notes" && frontmatter.description === "Takes: notes" && frontmatter.hide === true && body === "Body", `parsed ${JSON.stringify({ frontmatter, body })}`);
+	const skillDir = path.join(agentDir, "skills", "contract-notes");
+	mkdirSync(skillDir, { recursive: true });
+	const file = path.join(skillDir, "SKILL.md");
+	const listed = async () => (await core.loadCapability<{ path: string; frontmatter?: { description?: unknown } }>(core.skillCapability.id, { cwd: tmp }))
+		.items.find(item => item.path === file)?.frontmatter?.description;
+	try {
+		writeFileSync(file, "---\nname: contract-notes\ndescription: first\n---\nBody\n");
+		assert(await listed() === "first", "native provider did not list the new skill");
+		writeFileSync(file, "---\nname: contract-notes\ndescription: second\n---\nBody\n");
+		const stale = await listed();
+		authoring.clearFsCache();
+		const fresh = await listed();
+		assert(fresh === "second", `listing after clearFsCache shows ${String(fresh)}`);
+		return `4 bad names refused; parser keeps quoted colons and extra keys; listing ${String(stale)} → ${fresh} after clearFsCache`;
+	} finally {
+		rmSync(skillDir, { recursive: true, force: true });
+		authoring.clearFsCache();
+	}
+});
+
 await check("mixtures: workspaces register only their own MIXTURES.toml models", ["MixtureWorkspace"], async () => {
 	const mixture = (name: string, prompt: string) => [
 		"[[mixtures]]",

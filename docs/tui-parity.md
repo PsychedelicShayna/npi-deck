@@ -35,7 +35,7 @@ parity on. Updated alongside SDK upgrades.
 | Plan mode | ✓ | Shift+Tab in composer (or `/plan [on\|off]`) toggles plan mode. Agent gets the SDK's plan-mode system prompt + the `resolve` tool. `PlanApproval` inline card surfaces in the chat on `resolve apply`; Reject / Approve / Edit-and-approve. Status pills in composer border, header, and sidebar. |
 | Queued-prompt edit / cancel | ✓ | Hover a queued bubble to reveal Pencil/X. Edit opens an inline textarea (Enter saves, Esc discards, empty saves = cancel). Bridge rebuilds the SDK queue preserving order + ids. |
 | Model fallback chain editing | ✓ | The model picker's **Fallbacks** row shows the chain that covers the active model and where it comes from; expanding it adds, removes and reorders the model's own `retry.fallbackChains` entry, saved through the Settings config write path and reloaded into open chats. |
-| Skill management UI | — | Read-only `/skills` view shipped (provider grouping + frontmatter inspector). Author-from-deck flow still backlog. |
+| Skill management UI | ✓ | `/skills` lists every provider's skills (provider grouping + frontmatter inspector). **New skill**, **Edit** and **Delete** author OMP user skills under the agent dir's `skills/`, validated with NeoPi's Agent Skills rules; project, plugin and other providers' skills stay read-only. |
 | `/marketplace` slash command | — | TUI-only in the SDK; deck filters it out and exposes the same functionality via the Marketplace nav entry instead. |
 | `/model` slash command | — | TUI-only in the SDK; deck filters it out and exposes the same functionality via the chat-header model picker. |
 | `/copy` family (clipboard) | — | TUI-only in the SDK. The deck's per-codeblock Copy buttons cover the most-common case. |

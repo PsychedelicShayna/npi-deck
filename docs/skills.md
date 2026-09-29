@@ -1,10 +1,10 @@
 # Skills
 
-The `/skills` view is the cockpit's read-only inventory of every skill `omp`
+The `/skills` view is the cockpit's inventory of every skill `omp`
 discovers — across its native location, the marketplace plugins it has
 installed, and every sibling agent-tool config dir it shares with Claude Code,
-Codex, OpenCode, and so on. It complements `/marketplace`, which answers "what
-can I install?"
+Codex, OpenCode, and so on — and the place to author your own OMP user
+skills. It complements `/marketplace`, which answers "what can I install?"
 
 ## How omp loads skills
 
@@ -25,9 +25,9 @@ that returns the union across every provider, each entry tagged with
 `_source: { provider, providerName }` plus `level: "user" | "project"`.
 
 **`native` is omp's own.** If you want to author a skill that's "yours" rather
-than borrowed from another agent tool, drop a `SKILL.md` under
-`~/.omp/agent/skills/<name>/` (user) or `<project>/.omp/skills/<name>/`
-(project). The cockpit shows it immediately.
+than borrowed from another agent tool, use **New skill** in the Skills view,
+or drop a `SKILL.md` under `~/.omp/agent/skills/<name>/` (user) or
+`<project>/.omp/skills/<name>/` (project). The cockpit shows it immediately.
 
 ## What you see
 
@@ -55,7 +55,8 @@ triggers, or tags.
 
 ### Detail pane
 
-- Header: skill name, provider badge, level.
+- Header: skill name, provider badge, level. **Edit** and **Delete** appear
+  on OMP user skills; every other skill shows `read-only`.
 - Sub-line: source — owning plugin id if `claude-plugins`, otherwise
   provider + dir name.
 - Description, triggers, tags.
@@ -113,7 +114,8 @@ flags risky installs at a glance.
 ## Lifecycle
 
 - **Install / uninstall** for marketplace plugins lives on the
-  [Marketplace](./marketplaces.md) view.
+  [Marketplace](./marketplaces.md) view. The Skills view creates, edits and
+  deletes OMP user skills only (see [Authoring](#authoring-an-omp-user-skill)).
 - **Updates**: the Skills view's **Check for updates** fetches every
   marketplace from its source and lists outdated plugins under **Plugin
   updates**, each with its own **Upgrade** button; skills of an outdated
@@ -126,10 +128,12 @@ flags risky installs at a glance.
 - **Live updates**: the deck broadcasts a `skills_changed` WebSocket frame
   whenever any watched root mutates. Watched roots:
   `~/.omp/agent/skills/`, `<defaultCwd>/.omp/skills/`,
-  `~/.omp/plugins/cache/plugins/`. Missing roots are skipped silently;
-  others (`~/.claude/skills/`, etc.) get refreshed manually on next refetch.
-- The watcher is debounced 250 ms to coalesce filesystem bursts during
-  install.
+  `~/.omp/plugins/cache/plugins/`. A root that doesn't exist yet is watched
+  through its nearest existing parent and armed when it appears, so the
+  first skill in a fresh agent dir shows up too. Other roots
+  (`~/.claude/skills/`, etc.) get refreshed manually on next refetch.
+- Before each broadcast the deck drops NeoPi's capability read cache, which
+  would otherwise keep listing a SKILL.md's old description after an edit.
 
 ## Environment
 
@@ -145,21 +149,22 @@ flags risky installs at a glance.
   resolve project-scoped providers correctly.
 - `GET /api/skills/:id?cwd=<abs>` → `SkillSummary` + `body` (SKILL.md,
   frontmatter stripped) + `files` (recursive walk, capped at 500 entries
-  and depth 6).
+  and depth 6) + `revision` (hash of the SKILL.md bytes).
+- `POST /api/skills` `{ name, description, body }` → `201 SkillSummary`.
+  Creates `~/.omp/agent/skills/<name>/SKILL.md`.
+- `PUT /api/skills/:id` `{ description, body, revision }` → `SkillSummary`.
+  `409` when SKILL.md changed since `revision`.
+- `DELETE /api/skills/:id` → `{ ok: true }`. Removes the skill's directory.
 
 `id` is server-issued and opaque to clients (base64url of the absolute
-SKILL.md path). Always pass back the value returned in the list.
+SKILL.md path). Always pass back the value returned in the list. Every
+`SkillSummary` carries `editable`; `PUT` and `DELETE` answer `403` for any
+skill that isn't an OMP user skill.
 
-## Authoring a new omp-native skill
+## Authoring an OMP user skill
 
-For now, by hand:
-
-```sh
-mkdir -p ~/.omp/agent/skills/my-skill
-$EDITOR ~/.omp/agent/skills/my-skill/SKILL.md
-```
-
-Required frontmatter:
+**New skill** in the Skills header opens a form with a name, a description
+and the SKILL.md body. The deck writes:
 
 ```yaml
 ---
@@ -169,8 +174,28 @@ description: One line, used both for /skill:my-skill matching and for the
 ---
 ```
 
-The deck shows it instantly; no restart needed.
+followed by the body, to `~/.omp/agent/skills/<name>/SKILL.md` (the agent dir
+NeoPi resolves). **Edit** replaces the description and body of an existing
+OMP user skill and keeps every other frontmatter key and its comments. The
+name is fixed once the skill exists. **Delete** removes the skill's
+directory.
 
-A first-class **"New skill" → chat-session-prefilled-with-authoring-prompt**
-flow plus a deck-native eval loop targeting native-provider skills lands in
-Phase 3 of the [Skills Cockpit proposal](./proposals/skills-cockpit.md).
+Rules the deck enforces:
+
+- The name must pass NeoPi's Agent Skills validator: lowercase letters,
+  digits and single hyphens, at most 64 characters. That rules out `/`,
+  `..` and dot names, so a name can't leave the skills root.
+- The description is required and at most 1024 characters (same validator).
+- A name is refused when anything already occupies its directory (including
+  a dangling symlink) or another OMP skill, user or project, already uses it.
+- `~/.omp/agent/skills/` must resolve inside the agent dir, and each skill
+  directory must resolve to a direct child of it. A skill symlinked in from
+  elsewhere, or whose SKILL.md is a symlink, is listed `read-only`.
+- Every write is read back through NeoPi's frontmatter parser before it
+  counts; an edit is refused when SKILL.md changed since the editor loaded it.
+- Project skills (`<project>/.omp/skills/`), marketplace plugins and other
+  providers' skills stay read-only.
+
+The deck lists the new skill at once. A deck-native eval loop targeting
+native-provider skills is still Phase 3 of the
+[Skills Cockpit proposal](./proposals/skills-cockpit.md).

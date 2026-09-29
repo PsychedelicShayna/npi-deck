@@ -12,7 +12,8 @@
  * among many.
  *
  * Watcher fan-out (broadcasting `skills_changed`) lives in `skills-watcher.ts`
- * next to the other server-level wiring.
+ * next to the other server-level wiring. Creating, editing and deleting OMP
+ * user skills (#32) goes through `skill-authoring.ts`, which owns the guards.
  */
 
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -22,17 +23,33 @@ import type { Skill as SdkSkill } from "@oh-my-pi/pi-coding-agent/capability/ski
 import { sdk } from "./backend/runtime.ts";
 
 import type {
+	CreateSkillRequest,
 	ListSkillsResponse,
 	SkillDetailResponse,
 	SkillFile,
 	SkillFrontmatter,
 	SkillProvider,
 	SkillSummary,
+	UpdateSkillRequest,
 } from "@npi-deck/protocol";
 
 import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
+import {
+	SkillAuthoringError,
+	checkDescription,
+	checkNewSkill,
+	createUserSkill,
+	deleteUserSkill,
+	isEditableUserSkill,
+	renderEditedSkill,
+	renderNewSkill,
+	resolveUserSkill,
+	skillRevision,
+	updateUserSkill,
+	type UserSkillTarget,
+} from "./skill-authoring.ts";
 
 const log = logger("skills");
 
@@ -91,6 +108,14 @@ export class SkillsService {
 			const summary = this.toSummary(item, pluginIndex);
 			if (summary) skills.push(summary);
 		}
+		const agentDir = sdk().getAgentDir();
+		await Promise.all(
+			skills
+				.filter((s) => s.provider === "native" && s.level === "user")
+				.map(async (s) => {
+					s.editable = await isEditableUserSkill(agentDir, s.skillPath);
+				}),
+		);
 
 		// Stable order: provider priority, then by displayed name, then dirName
 		// as a final tiebreaker. The UI can re-sort, but native-first is the
@@ -134,7 +159,60 @@ export class SkillsService {
 		const skillDir = path.dirname(skillPath);
 		const files = await walkSkillFiles(skillDir);
 
-		return { ...summary, body, files };
+		return { ...summary, body, files, revision: skillRevision(raw) };
+	}
+
+	/**
+	 * Author a new OMP user skill. Refuses a name another OMP skill already
+	 * uses (user or project) and any name whose directory is occupied.
+	 */
+	async createSkill(request: CreateSkillRequest, cwd?: string): Promise<SkillSummary> {
+		const { name, description } = checkNewSkill(request.name, request.description);
+		const content = renderNewSkill(name, description, request.body);
+		const clash = (await this.listSkills(cwd)).skills.find((s) => s.provider === "native" && s.name === name);
+		if (clash) {
+			throw new SkillAuthoringError(`an OMP ${clash.level} skill named "${name}" already exists at ${clash.skillPath}`, 409);
+		}
+		const skillPath = await createUserSkill(sdk().getAgentDir(), name, content);
+		return await this.listedAfterWrite(skillPath, cwd);
+	}
+
+	/** Replace an editable skill's description and body. */
+	async updateSkill(id: string, request: UpdateSkillRequest, cwd?: string): Promise<SkillSummary> {
+		const { target, summary } = await this.editableTarget(id, cwd);
+		const description = checkDescription(request.description);
+		await updateUserSkill(target, request.revision, (raw) => renderEditedSkill(raw, description, request.body));
+		return await this.listedAfterWrite(summary.skillPath, cwd);
+	}
+
+	/** Delete an editable skill's directory. */
+	async deleteSkill(id: string, cwd?: string): Promise<void> {
+		const { target } = await this.editableTarget(id, cwd);
+		await deleteUserSkill(target);
+	}
+
+	private async editableTarget(id: string, cwd?: string): Promise<{ target: UserSkillTarget; summary: SkillSummary }> {
+		const skillPath = decodeIdToPath(id);
+		const summary = skillPath ? (await this.listSkills(cwd)).skills.find((s) => s.skillPath === skillPath) : undefined;
+		if (!summary) throw new SkillAuthoringError("skill not found", 404);
+		if (summary.provider !== "native" || summary.level !== "user") {
+			throw new SkillAuthoringError(
+				`${summary.providerLabel} ${summary.level} skills are read-only here; the deck edits OMP user skills only`,
+				403,
+			);
+		}
+		// resolveUserSkill throws the containment reason for a listed user skill it refuses.
+		const target = await resolveUserSkill(sdk().getAgentDir(), summary.skillPath);
+		if (!target) throw new SkillAuthoringError(`${summary.skillPath} is not under the agent dir's skills root`, 403);
+		return { target, summary };
+	}
+
+	private async listedAfterWrite(skillPath: string, cwd?: string): Promise<SkillSummary> {
+		const summary = (await this.listSkills(cwd)).skills.find((s) => s.skillPath === skillPath);
+		if (!summary) {
+			throw new SkillAuthoringError(`saved ${skillPath}, but NeoPi does not list it; check that OMP user skills are enabled`, 500);
+		}
+		return summary;
 	}
 
 	/**
@@ -177,6 +255,7 @@ export class SkillsService {
 			skillPath,
 			frontmatter,
 			enabled: !(item.frontmatter?.hide === true),
+			editable: false,
 		};
 
 		if (provider === "claude-plugins") {

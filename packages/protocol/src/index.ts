@@ -823,6 +823,12 @@ export interface SkillSummary {
 	frontmatter: SkillFrontmatter;
 	/** False only when the owning provider's enable-flag is off, or hide=true. */
 	enabled: boolean;
+	/**
+	 * True when the deck can edit and delete this skill: an OMP user skill
+	 * whose directory resolves to a direct child of the agent dir's `skills/`.
+	 * Plugin, marketplace, project and other providers' skills stay read-only.
+	 */
+	editable: boolean;
 	/** Plugin attribution — set only when `provider === "claude-plugins"`. */
 	pluginId?: string;
 	pluginName?: string;
@@ -831,6 +837,28 @@ export interface SkillSummary {
 
 export interface ListSkillsResponse {
 	skills: SkillSummary[];
+}
+
+/**
+ * `POST /api/skills`: author an OMP user skill at `<agentDir>/skills/<name>/SKILL.md`.
+ * `name` must satisfy the Agent Skills name rules (lowercase letters, digits,
+ * single hyphens, at most 64 characters) and becomes the directory name.
+ */
+export interface CreateSkillRequest {
+	name: string;
+	description: string;
+	body: string;
+}
+
+/**
+ * `PUT /api/skills/:id`: replace an editable skill's description and body.
+ * Other frontmatter keys are kept. `revision` is the detail's revision; a
+ * SKILL.md that changed since then is refused with 409.
+ */
+export interface UpdateSkillRequest {
+	description: string;
+	body: string;
+	revision: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1018,6 +1046,8 @@ export interface SkillFile {
 export interface SkillDetailResponse extends SkillSummary {
 	body: string;
 	files: SkillFile[];
+	/** Hash of the SKILL.md bytes this detail was read from; `UpdateSkillRequest.revision`. */
+	revision: string;
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // WebSocket frames
