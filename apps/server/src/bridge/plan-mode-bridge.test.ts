@@ -48,6 +48,17 @@ function fixture(timeouts?: { reconnectGraceMs?: number; approvalTimeoutMs?: num
 	return { bridge, manager, planUrl, planPath, get handler() { return handler; }, get state() { return state; }, get tools() { return tools; }, get reference() { return reference; } };
 }
 
+/** Resolves once the bridge emits plan_proposed, i.e. once preparation has installed the pending decision. */
+function proposed(bridge: PlanModeBridge): Promise<void> {
+	return new Promise(resolve => {
+		const unsubscribe = bridge.subscribeFrames(frame => {
+			if (frame.type !== "plan_proposed") return;
+			unsubscribe();
+			resolve();
+		});
+	});
+}
+
 test("xd://propose exposes content, rejection feedback revises, approval exits and preserves artifact", async () => {
 	const f = fixture();
 	await f.bridge.enter();
@@ -56,8 +67,9 @@ test("xd://propose exposes content, rejection feedback revises, approval exits a
 	await writeFile(f.planPath, "# First\n\nOld plan\n");
 	const propose = feature("plan-mode").dispatchResolutionDevice;
 	const toolSession = { peekPlanProposalHandler: () => f.handler } as Parameters<typeof propose>[0];
+	const firstProposed = proposed(f.bridge);
 	const first = propose(toolSession, "propose", "test");
-	await Bun.sleep(10);
+	await firstProposed;
 	const pending = f.bridge.getPendingPlanApproval()!;
 	expect(pending.planContent).toContain("Old plan");
 	expect(f.bridge.getReplayFrames().some(frame => frame.type === "plan_proposed")).toBe(true);
@@ -66,8 +78,9 @@ test("xd://propose exposes content, rejection feedback revises, approval exits a
 	expect(JSON.stringify(await first)).toContain("Add a verification step.");
 	expect(f.bridge.isEnabled()).toBe(true);
 	await writeFile(f.planPath, "# Revised\n\nVerification step\n");
+	const secondProposed = proposed(f.bridge);
 	const second = propose(toolSession, "propose", "test");
-	await Bun.sleep(10);
+	await secondProposed;
 	const next = f.bridge.getPendingPlanApproval()!;
 	expect(next.planContent).toContain("Verification step");
 	expect(f.bridge.respond(next.proposalId, { approved: true, editedContent: "# Approved\n\nVerification step\n" })).toBe("settled");
@@ -85,8 +98,9 @@ test("resume restores plan state and cancel releases an outstanding proposal", a
 	expect(f.state?.planFilePath).toBe(f.planUrl);
 	await mkdir(path.dirname(f.planPath), { recursive: true });
 	await writeFile(f.planPath, "# Draft\n");
+	const installed = proposed(f.bridge);
 	const proposal = f.handler!("test");
-	await Bun.sleep(10);
+	await installed;
 	await f.bridge.exit();
 	expect(JSON.stringify(await proposal)).toContain("cancelled");
 	expect(f.bridge.getPendingPlanApproval()).toBeUndefined();
@@ -98,8 +112,9 @@ test("disposing a root settles its pending plan before waiting for the SDK turn"
 	await f.bridge.enter();
 	await mkdir(path.dirname(f.planPath), { recursive: true });
 	await writeFile(f.planPath, "# Awaiting review\n");
+	const installed = proposed(f.bridge);
 	const proposal = f.handler!("test");
-	for (let i = 0; i < 50 && !f.bridge.getPendingPlanApproval(); i++) await Bun.sleep(10);
+	await installed;
 	expect(f.bridge.getPendingPlanApproval()).toBeDefined();
 
 	let disposed = false;
@@ -128,20 +143,17 @@ test("abandoned plan approval expires without approving or deleting its artifact
 	await mkdir(path.dirname(f.planPath), { recursive: true });
 	await writeFile(f.planPath, "# Unapproved\n");
 	const unsubscribe = f.bridge.subscribeFrames(() => {});
+	const installed = proposed(f.bridge);
 	const proposal = f.handler!("test");
-	for (let i = 0; i < 50 && !f.bridge.getPendingPlanApproval(); i++) await Bun.sleep(10);
+	await installed;
 	expect(f.bridge.getPendingPlanApproval()).toBeDefined();
 	unsubscribe();
-	const outcome = await Promise.race([
-		proposal.then(value => ({ settled: true, value })),
-		Bun.sleep(500).then(() => ({ settled: false, value: undefined })),
-	]);
+	const value = await proposal;
 	expect(f.bridge.getPendingPlanApproval()?.proposalId).toBeUndefined();
 	expect(f.bridge.isEnabled()).toBe(true);
 	expect(await readFile(f.planPath, "utf8")).toBe("# Unapproved\n");
 	f.bridge.dispose();
-	expect(outcome.settled).toBe(true);
-	expect(JSON.stringify(outcome.value)).toContain("expired");
+	expect(JSON.stringify(value)).toContain("expired");
 });
 
 test("another reviewer or a timely reconnect preserves the pending decision", async () => {
@@ -151,8 +163,9 @@ test("another reviewer or a timely reconnect preserves the pending decision", as
 	await writeFile(f.planPath, "# Reviewable\n");
 	const disconnectFirst = f.bridge.subscribeFrames(() => {});
 	const disconnectSecond = f.bridge.subscribeFrames(() => {});
+	const installed = proposed(f.bridge);
 	const proposal = f.handler!("test");
-	for (let i = 0; i < 50 && !f.bridge.getPendingPlanApproval(); i++) await Bun.sleep(10);
+	await installed;
 	const id = f.bridge.getPendingPlanApproval()!.proposalId;
 	disconnectFirst();
 	await Bun.sleep(150);
@@ -177,12 +190,8 @@ test("a connected but unattended reviewer cannot hold a proposal indefinitely", 
 	await writeFile(f.planPath, "# Still unapproved\n");
 	const disconnect = f.bridge.subscribeFrames(() => {});
 	const proposal = f.handler!("test");
-	const outcome = await Promise.race([
-		proposal.then(value => ({ settled: true, value })),
-		Bun.sleep(500).then(() => ({ settled: false, value: undefined })),
-	]);
-	expect(outcome.settled).toBe(true);
-	expect(JSON.stringify(outcome.value)).toContain("approval timed out");
+	const value = await proposal;
+	expect(JSON.stringify(value)).toContain("approval timed out");
 	expect(f.bridge.hasPendingApproval()).toBe(false);
 	expect(f.bridge.isEnabled()).toBe(true);
 	expect(await readFile(f.planPath, "utf8")).toBe("# Still unapproved\n");
@@ -195,12 +204,27 @@ test("concurrent proposal preparation cannot overwrite and strand a decision", a
 	await f.bridge.enter();
 	await mkdir(path.dirname(f.planPath), { recursive: true });
 	await writeFile(f.planPath, "# One decision\n");
+	const installed = proposed(f.bridge);
 	const first = f.handler!("test");
 	await expect(f.handler!("test")).rejects.toThrow("not ready for another proposal");
-	for (let i = 0; i < 50 && !f.bridge.getPendingPlanApproval(); i++) await Bun.sleep(10);
+	await installed;
 	const id = f.bridge.getPendingPlanApproval()!.proposalId;
 	expect(f.bridge.respond(id, { approved: false, feedback: "One answer." })).toBe("settled");
 	expect(JSON.stringify(await first)).toContain("One answer.");
+	f.bridge.dispose();
+});
+
+test("exiting plan mode while a proposal is being prepared cancels it, even across re-entry", async () => {
+	const f = fixture();
+	await f.bridge.enter();
+	await mkdir(path.dirname(f.planPath), { recursive: true });
+	await writeFile(f.planPath, "# Superseded\n");
+	const proposal = f.handler!("test");
+	await f.bridge.exit();
+	await f.bridge.enter();
+	expect(JSON.stringify(await proposal)).toContain("Plan review cancelled: plan mode was exited.");
+	expect(f.bridge.hasPendingApproval()).toBe(false);
+	expect(f.state?.planFilePath).toBe("local://PLAN.md");
 	f.bridge.dispose();
 });
 

@@ -8,6 +8,7 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 
 const log = logger("bridge:plan-mode");
 const DEFAULT_PLAN = "local://PLAN.md";
+const EXIT_CANCELLATION: PlanApprovalResponse = { approved: false, feedback: "Plan review cancelled: plan mode was exited." };
 type PlanModeFrame = Extract<ServerFrame, { type: "plan_mode_changed" | "plan_proposed" | "plan_proposal_resolved" }>;
 type FrameListener = (frame: PlanModeFrame) => void;
 type PlanState = NonNullable<ReturnType<AgentSession["getPlanModeState"]>>;
@@ -35,6 +36,8 @@ export class PlanModeBridge {
 	private disposed = false;
 	private sequence = 0;
 	private preparing = false;
+	/** Bumped by every exit so a proposal still being prepared knows it was cancelled. */
+	private activation = 0;
 	private planFilePath = DEFAULT_PLAN;
 	private readonly reconnectGraceMs: number;
 	private readonly approvalTimeoutMs: number;
@@ -122,7 +125,8 @@ export class PlanModeBridge {
 
 	async exit(): Promise<void> {
 		if (!this.enabled) return;
-		this.settlePending({ approved: false, feedback: "Plan review cancelled: plan mode was exited." }, "rejected");
+		this.activation++;
+		this.settlePending(EXIT_CANCELLATION, "rejected");
 		this.session.setPlanModeState(undefined);
 		try { if (this.previousTools) await this.session.setActiveToolsByName(this.previousTools); }
 		catch (error) {
@@ -174,6 +178,7 @@ export class PlanModeBridge {
 		const { resolveApprovedPlan } = feature("plan-mode");
 		if (this.disposed || !this.enabled || this.pending || this.preparing) throw new Error("Plan mode is not ready for another proposal.");
 		this.preparing = true;
+		const activation = this.activation;
 		let plan: Awaited<ReturnType<typeof resolveApprovedPlan>>;
 		try {
 			plan = await resolveApprovedPlan({
@@ -188,7 +193,20 @@ export class PlanModeBridge {
 		} finally {
 			this.preparing = false;
 		}
-		if (this.disposed || !this.enabled || this.pending) throw new Error("Plan mode is no longer ready for this proposal.");
+		if (this.disposed || this.pending) throw new Error("Plan mode is no longer ready for this proposal.");
+		// An exit during preparation cancels this proposal exactly as it cancels an
+		// installed one; it must not surface later in a re-entered plan mode.
+		const response = activation === this.activation ? await this.awaitDecision(plan) : EXIT_CANCELLATION;
+		const details = { planFilePath: plan.planFilePath, title: plan.title, planExists: true };
+		if (!response.approved) return { content: [{ type: "text", text: `Plan refinement requested. ${response.feedback?.trim() || "Please revise the plan."} Update ${plan.planFilePath}, then write the slug to xd://propose again.` }], details };
+		if (response.editedContent !== undefined) await writeFile(this.localPath(plan.planFilePath), response.editedContent, "utf8");
+		this.session.setPlanReferencePath(plan.planFilePath);
+		await this.exit();
+		return { content: [{ type: "text", text: `Plan approved at ${plan.planFilePath}. Plan mode exited; proceed with the implementation.` }], details };
+	}
+
+	/** Record the prepared plan as this activation's pending decision and wait for the reviewer. */
+	private awaitDecision(plan: { planFilePath: string; planContent: string; title: string }): Promise<PlanApprovalResponse> {
 		this.planFilePath = plan.planFilePath;
 		const state = this.session.getPlanModeState();
 		if (state) this.session.setPlanModeState({ ...state, planFilePath: plan.planFilePath });
@@ -205,13 +223,7 @@ export class PlanModeBridge {
 		}, this.approvalTimeoutMs);
 		if (this.listeners.size === 0) this.scheduleReconnectExpiry();
 		this.emit({ type: "plan_proposed", sessionId: this.sessionId, ...this.getPendingPlanApproval()! });
-		const response = await decision;
-		const details = { planFilePath: plan.planFilePath, title: plan.title, planExists: true };
-		if (!response.approved) return { content: [{ type: "text", text: `Plan refinement requested. ${response.feedback?.trim() || "Please revise the plan."} Update ${plan.planFilePath}, then write the slug to xd://propose again.` }], details };
-		if (response.editedContent !== undefined) await writeFile(this.localPath(plan.planFilePath), response.editedContent, "utf8");
-		this.session.setPlanReferencePath(plan.planFilePath);
-		await this.exit();
-		return { content: [{ type: "text", text: `Plan approved at ${plan.planFilePath}. Plan mode exited; proceed with the implementation.` }], details };
+		return decision;
 	}
 
 	dispose(): void {
