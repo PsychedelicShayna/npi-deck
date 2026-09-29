@@ -7,7 +7,7 @@
 	"scripts": {
 		"dev": "bun --hot src/index.ts",
 		"start": "bun src/index.ts",
-		"build": "bun build src/index.ts --target=bun --outdir=dist --minify",
+		"build": "bun build src/index.ts src/routines/steps/structured-output-worker.ts --target=bun --outdir=dist --minify --entry-naming '[name].[ext]'",
 		"typecheck": "bun ../../scripts/check-sdk-imports.ts && bun ../../scripts/check-owned-spawns.ts && bun ../../scripts/tsgo.ts --noEmit -p .",
 		"test": "bun test"
 	},

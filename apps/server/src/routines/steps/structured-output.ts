@@ -50,6 +50,13 @@ export function checkStructuredOutputSync(schema: unknown, answer: string): Stru
 }
 
 /**
+ * From source this module sits beside `structured-output-worker.ts`. In the
+ * bundle it is inlined into `dist/index.js`, and the `build` script emits the
+ * worker as a second entrypoint, `dist/structured-output-worker.js`.
+ */
+const WORKER_URL = new URL(import.meta.url.endsWith(".ts") ? "./structured-output-worker.ts" : "./structured-output-worker.js", import.meta.url);
+
+/**
  * {@link checkStructuredOutputSync} on a fresh worker thread, terminated after
  * `timeoutMs` so a pathological schema cannot stall the server's event loop.
  */
@@ -58,7 +65,7 @@ export function checkStructuredOutput(schema: unknown, answer: string, timeoutMs
 		return Promise.resolve({ ok: false, kind: "size", error: `structured_output answer is ${answer.length} characters; the limit is ${MAX_STRUCTURED_ANSWER_CHARS}` });
 	}
 	return new Promise(resolve => {
-		const worker = new Worker(new URL("./structured-output-worker.ts", import.meta.url));
+		const worker = new Worker(WORKER_URL);
 		let settled = false;
 		const finish = (check: StructuredOutputCheck) => {
 			if (settled) return;

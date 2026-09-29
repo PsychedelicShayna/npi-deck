@@ -176,8 +176,10 @@ Chat is fully store-driven because it needs cross-session state.
 
 - `apps/web/dist/` — production static bundle. Served by the deck server
   when `NPI_DECK_WEB_DIST` resolves to it (auto-detected).
-- `apps/server/dist/` — bundled server (`bun build --target=bun`). Dev
-  mode (`bun run dev` with `bun --hot`) is the supported workflow during
+- `apps/server/dist/` — bundled server (`bun build --target=bun`):
+  `index.js` plus `structured-output-worker.js`, the worker thread that
+  validates routine structured output, which must stay beside `index.js`.
+  Dev mode (`bun run dev` with `bun --hot`) is the supported workflow during
   iteration; production deployments run the bundle via `bun start`.
 
 ## Where omp lives
