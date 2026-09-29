@@ -101,6 +101,18 @@ test("disabled webhook does not execute, successful webhook persists payload", a
 	expect(JSON.parse(listRuns(enabled.id)[0]!.triggerPayload!)).toEqual({ key: "accepted" });
 });
 
+test("disabled routine ignores cron and event triggers but still runs manually", async () => {
+	setup();
+	const marker = path.join(home, "disabled");
+	const r = routine(spec([{ id: "write", type: "run", command: `echo ran >> '${marker}'` }]), false);
+	for (const trigger of ["cron", "event"] as const) await runner!.fire(r.id, trigger, { source: "deck_inbox" });
+	expect(fs.existsSync(marker)).toBe(false);
+	expect(listRuns(r.id)).toHaveLength(0);
+	await runner!.fire(r.id, "manual", { key: "by-hand" });
+	expect(fs.existsSync(marker)).toBe(true);
+	expect(listRuns(r.id).map((run) => run.trigger)).toEqual(["manual"]);
+});
+
 test("abort and continue run only once despite a retained retry block", async () => {
 	setup();
 	for (const mode of ["abort", "continue"] as const) {

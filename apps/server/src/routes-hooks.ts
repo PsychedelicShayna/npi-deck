@@ -3,6 +3,11 @@
  * main router. Looks up the routine by path slug, verifies the presented
  * secret against the stored sha256 hash, and fires the routine.
  *
+ * A disabled routine refuses correctly signed deliveries with 409 Conflict:
+ * the request is valid, but the routine's current state forbids running it,
+ * and the sender can retry once the routine is enabled again. The signature
+ * is checked first so an unauthenticated caller cannot probe that state.
+ *
  * Security note (V1 local-only): the deck has no user auth and runs loopback-
  * only. Webhook secret verification is sha256-hash-compare via timing-safe
  * comparison; sufficient for V1's threat model. Managed hosting (Layer 2)
@@ -14,6 +19,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 
 import { getWebhookSecretByPath, insertAbortedRun, touchWebhookSecret } from "./db/routine-step-runs.ts";
+import { getRoutine } from "./db/routines.ts";
 import { logger } from "./log.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 
@@ -41,6 +47,11 @@ export function buildHooksRouter(runner: RoutinesRunner): Hono {
 				error: `bad ${SIG_HEADER} on ${path}`,
 			});
 			return c.json({ error: "signature invalid" }, 401);
+		}
+
+		if (getRoutine(record.routine_id)?.enabled === false) {
+			log.info(`refused webhook ${path}: routine ${record.routine_id} is disabled`);
+			return c.json({ error: "routine disabled" }, 409);
 		}
 
 		// Parse body as JSON when possible; otherwise pass through as raw string.
