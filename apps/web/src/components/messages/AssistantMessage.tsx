@@ -3,14 +3,19 @@ import { Markdown } from "@/lib/markdown";
 import { formatCost, formatDurationMs, formatTokens } from "@/lib/utils";
 import { reasoningBlockView, reasoningBlockViews, unreportedReasoningView } from "@/lib/reasoning";
 import { ReasoningBlock } from "./ThinkingBlock";
-import { ToolCallCard } from "../tools/ToolCallCard";
+import { ToolCallCard, ToolWorkingLine } from "../tools/ToolCallCard";
+import { toolCallWorking } from "@/lib/tool-visibility";
 
 interface Props {
 	msg: AssistantMsg;
 	toolCalls: Record<string, ToolCallStream>;
+	/** Hide tool cards; a running tool shows as a one-line working row (#62). */
+	toolCallsHidden?: boolean;
+	/** This is the live reply of a busy session (see `liveReplyId`). */
+	live?: boolean;
 }
 
-export function AssistantMessage({ msg, toolCalls }: Props) {
+export function AssistantMessage({ msg, toolCalls, toolCallsHidden = false, live = false }: Props) {
 	const lastBlockIdx = msg.blocks.length - 1;
 	const unreportedReasoning = unreportedReasoningView(msg);
 	const reasoningViews = reasoningBlockViews(msg);
@@ -63,6 +68,11 @@ export function AssistantMessage({ msg, toolCalls }: Props) {
 					}
 					if (b.type === "toolCall") {
 						const stream = toolCalls[b.id];
+						if (toolCallsHidden) {
+							return toolCallWorking(msg, stream, live) ? (
+								<ToolWorkingLine key={b.id || i} name={b.name} args={b.arguments} intent={b.intent} />
+							) : null;
+						}
 						return (
 							<ToolCallCard
 								key={b.id || i}

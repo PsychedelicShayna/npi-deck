@@ -50,3 +50,26 @@ export function windowRange(
 	if (start < 0) start = Math.max(0, len - anchor.fromEnd);
 	return { start, end: Math.min(len, start + Math.min(anchor.count, MAX_RENDERED)) };
 }
+
+/**
+ * The anchor that keeps the same stretch of the transcript mounted when the
+ * rendered list switches to another view of `all` (hiding or showing tool
+ * calls): it starts at the first message of `next` at or after
+ * `prev[start]` and holds through `prev[end - 1]`, at least a page.
+ */
+export function carryAnchor(
+	all: readonly Pick<ChatMessage, "id">[],
+	prev: readonly Pick<ChatMessage, "id">[],
+	{ start, end }: { start: number; end: number },
+	next: readonly Pick<ChatMessage, "id">[],
+): WindowAnchor {
+	const order = new Map(all.map((m, i) => [m.id, i]));
+	const at = (m: Pick<ChatMessage, "id"> | undefined) => (m ? (order.get(m.id) ?? -1) : -1);
+	const first = at(prev[start]);
+	const last = at(prev[end - 1]);
+	let from = next.findIndex((m) => at(m) >= first);
+	if (from < 0) from = Math.max(0, next.length - 1);
+	let to = from;
+	while (to < next.length && at(next[to]) <= last) to++;
+	return { id: next[from]?.id, fromEnd: next.length - from, count: Math.max(to - from, MESSAGE_PAGE) };
+}

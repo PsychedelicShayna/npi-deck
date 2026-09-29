@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { MAX_RENDERED, MESSAGE_PAGE, windowRange } from "./transcript-window";
+import { carryAnchor, MAX_RENDERED, MESSAGE_PAGE, windowRange } from "./transcript-window";
 
 const msgs = (n: number, prefix = "m") => Array.from({ length: n }, (_, i) => ({ id: `${prefix}${i}` }));
 
@@ -26,5 +26,36 @@ describe("windowRange", () => {
 		expect(windowRange(msgs(5000, "full"), { fromEnd: 240, count: 240 })).toEqual({ start: 4760, end: 5000 });
 		// A resumed chat's live snapshot is shorter than the anchor's reach.
 		expect(windowRange(msgs(100, "live"), { id: "m0", fromEnd: 240, count: 240 })).toEqual({ start: 0, end: 100 });
+	});
+});
+
+describe("carryAnchor across hiding tool calls (#62)", () => {
+	// 1000 messages; every message not divisible by 4 is a tool-only reply.
+	const all = msgs(1000);
+	const prose = all.filter((_, i) => i % 4 === 0);
+	const ids = (list: Array<{ id: string }>, r: { start: number; end: number }) => list.slice(r.start, r.end).map((m) => m.id);
+
+	test("hiding keeps the reader's stretch of the transcript, a page at least", () => {
+		// Scrolled up to m401..m480, which starts on a tool-only reply.
+		const shown = { start: 401, end: 481 };
+		const r = windowRange(prose, carryAnchor(all, all, shown, prose));
+		expect(ids(prose, r)[0]).toBe("m404");
+		expect(ids(prose, r)).toContain("m480");
+		expect(r.end - r.start).toBe(MESSAGE_PAGE);
+	});
+
+	test("showing again mounts the tool-only replies inside the same stretch", () => {
+		const shown = windowRange(prose, { id: "m400", fromEnd: 150, count: 60 });
+		const r = windowRange(all, carryAnchor(all, prose, shown, all));
+		expect(ids(all, r)[0]).toBe("m400");
+		expect(ids(all, r).at(-1)).toBe("m636");
+		// New messages below stay counted, not mounted.
+		expect(all.length - r.end).toBe(363);
+	});
+
+	test("a stretch with nothing left to show falls back to the next shown message, else the newest", () => {
+		const toolOnly = { start: 401, end: 404 };
+		expect(carryAnchor(all, all, toolOnly, prose).id).toBe("m404");
+		expect(carryAnchor(all, all, { start: 997, end: 1000 }, prose).id).toBe("m996");
 	});
 });

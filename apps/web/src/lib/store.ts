@@ -57,6 +57,14 @@ function readBool(key: string, fallback: boolean): boolean {
 	return raw === "1";
 }
 
+/** localStorage key for the hide-tool-calls chat mode. */
+const TOOL_CALLS_HIDDEN_KEY = "npi-deck:tool-calls-hidden";
+
+/** This browser's saved hide-tool-calls choice; the store starts from it. */
+export function toolCallsHiddenPreference(): boolean {
+	return readBool(TOOL_CALLS_HIDDEN_KEY, false);
+}
+
 /** Matches the Tailwind `lg` breakpoint (1024px) used by `Layout`. Below this
  * width the sidebar and inspector behave as overlay drawers, so persisting
  * "open" state would auto-open them on every mobile load and bury the main
@@ -141,6 +149,12 @@ interface StoreState {
 		allCollapsed: boolean;
 		perCard: Record<string, boolean>;
 	};
+
+	/**
+	 * Chat shows prose only: tool cards are hidden and a running tool is a
+	 * one-line "working" row (#62). Persisted per browser; chat view only.
+	 */
+	toolCallsHidden: boolean;
 
 	/** Composer pre-fill used by `Open in chat` from the Tasks view. */
 	pendingDraft?: { text: string };
@@ -241,6 +255,7 @@ interface StoreState {
 	renameSession(id: string, name: string): Promise<void>;
 	toggleAllToolCards(): void;
 	setToolCardOpen(id: string, open: boolean): void;
+	setToolCallsHidden(hidden: boolean): void;
 	setPendingDraft(draft: { text: string } | undefined): void;
 	setSidebarOpen(open: boolean): void;
 	setInspectorOpen(open: boolean): void;
@@ -282,6 +297,7 @@ export const useStore = create<StoreState>()(
 		subagentsBySession: {},
 		subscribed: new Set<string>(),
 		toolView: { allCollapsed: false, perCard: {} },
+		toolCallsHidden: toolCallsHiddenPreference(),
 		tasksChangeCounter: 0,
 		skillsChangeCounter: 0,
 		kbChangeCounter: 0,
@@ -524,6 +540,13 @@ export const useStore = create<StoreState>()(
 					perCard: { ...s.toolView.perCard, [id]: open },
 				},
 			}));
+		},
+
+		setToolCallsHidden(hidden) {
+			try {
+				localStorage.setItem(TOOL_CALLS_HIDDEN_KEY, hidden ? "1" : "0");
+			} catch {}
+			set({ toolCallsHidden: hidden });
 		},
 
 		setPendingDraft(draft) {

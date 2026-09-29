@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { NavRail } from "./NavRail";
-import { FoldVertical, Menu, PanelRight, UnfoldVertical, X } from "lucide-react";
+import { Eye, EyeOff, FoldVertical, Menu, PanelRight, UnfoldVertical, X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { ConnectionIndicator } from "./ConnectionIndicator";
@@ -53,6 +53,7 @@ export function Layout({ sidebar, main, inspector, topBar }: Props) {
 					<div className="hidden min-w-0 truncate sm:block">{topBar}</div>
 					<ConnectionIndicator />
 					<ToolCardsToggle />
+					<ToolCallsHiddenToggle />
 					<button
 						type="button"
 						className={cn("btn-ghost h-7 w-7 p-0", inspectorOpen && "lg:bg-paper-3")}
@@ -145,15 +146,42 @@ function MobileCloseBar({ onClose, side }: { onClose: () => void; side: "left" |
 
 function ToolCardsToggle() {
 	const allCollapsed = useStore((s) => s.toolView.allCollapsed);
+	const toolCallsHidden = useStore((s) => s.toolCallsHidden);
 	const toggle = useStore((s) => s.toggleAllToolCards);
 	const Icon = allCollapsed ? UnfoldVertical : FoldVertical;
+	const label = toolCallsHidden
+		? "Tool calls are hidden"
+		: allCollapsed
+			? "Expand all tool cards"
+			: "Collapse all tool cards";
 	return (
 		<button
 			type="button"
-			className={cn("btn-ghost h-7 w-7 p-0", allCollapsed && "lg:bg-paper-3")}
+			className={cn("btn-ghost h-7 w-7 p-0 disabled:opacity-40", allCollapsed && "lg:bg-paper-3")}
 			onClick={toggle}
-			aria-label={allCollapsed ? "Expand all tool cards" : "Collapse all tool cards"}
-			title={allCollapsed ? "Expand all tool cards" : "Collapse all tool cards"}
+			disabled={toolCallsHidden}
+			aria-label={label}
+			title={label}
+		>
+			<Icon className="h-4 w-4" />
+		</button>
+	);
+}
+
+/** Chat-only display mode: prose with running tools as one-line rows (#62). */
+function ToolCallsHiddenToggle() {
+	const hidden = useStore((s) => s.toolCallsHidden);
+	const setHidden = useStore((s) => s.setToolCallsHidden);
+	const Icon = hidden ? EyeOff : Eye;
+	const label = hidden ? "Show tool calls" : "Hide tool calls";
+	return (
+		<button
+			type="button"
+			className={cn("btn-ghost h-7 w-7 p-0", hidden && "lg:bg-paper-3")}
+			onClick={() => setHidden(!hidden)}
+			aria-pressed={hidden}
+			aria-label={label}
+			title={label}
 		>
 			<Icon className="h-4 w-4" />
 		</button>

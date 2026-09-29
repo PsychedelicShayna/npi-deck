@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useStore, selectActiveSession } from "@/lib/store";
-import { MAX_RENDERED, MESSAGE_PAGE, windowRange, type WindowAnchor } from "@/lib/transcript-window";
+import { carryAnchor, MAX_RENDERED, MESSAGE_PAGE, windowRange, type WindowAnchor } from "@/lib/transcript-window";
+import { liveReplyId, messagesWithToolsHidden } from "@/lib/tool-visibility";
 import type { ChatMessage, SessionUi } from "@/lib/types";
 import { ChatHeader } from "./chat/ChatHeader";
 import { SessionPicker } from "./chat/SessionPicker";
@@ -57,6 +58,7 @@ function nearBottom(el: HTMLElement): boolean {
 
 function ChatTranscript({ session }: { session: SessionUi }) {
 	const loadEarlierTranscript = useStore((s) => s.loadEarlierTranscript);
+	const toolCallsHidden = useStore((s) => s.toolCallsHidden);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const stickyRef = useRef(true);
 	/** Viewport to restore once the window change has mounted. */
@@ -69,12 +71,24 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 	const settlingRef = useRef(false);
 	const [anchor, setAnchor] = useState<WindowAnchor | undefined>(undefined);
 	const [loadingEarlier, setLoadingEarlier] = useState(false);
+	/**
+	 * The tool-call mode the rendered list follows. It trails the store's
+	 * toggle by one layout pass, in which the window is carried over to the
+	 * other list while the old one is still mounted and measurable.
+	 */
+	const [hideTools, setHideTools] = useState(toolCallsHidden);
 
 	const { messages, toolCalls, queuedPrompts } = session;
-	const { start, end } = windowRange(messages, anchor);
-	const shown = useMemo(() => messages.slice(start, end), [messages, start, end]);
+	const live = liveReplyId(session);
+	/** The messages the chat renders, which the window pages through. */
+	const list = useMemo(
+		() => (hideTools ? messagesWithToolsHidden(session) : messages),
+		[hideTools, messages, toolCalls, session.status],
+	);
+	const { start, end } = windowRange(list, anchor);
+	const shown = useMemo(() => list.slice(start, end), [list, start, end]);
 	const notLoaded = session.readOnly?.earlier ?? 0;
-	const newer = messages.length - end;
+	const newer = list.length - end;
 
 	function settle(): void {
 		requestAnimationFrame(() => {
@@ -85,6 +99,20 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 	}
 
 	useLayoutEffect(() => {
+		if (toolCallsHidden === hideTools) return;
+		const el = scrollRef.current;
+		const next = toolCallsHidden ? messagesWithToolsHidden(session) : messages;
+		// Following the newest message: keep following it in the other list.
+		// A reader scrolled up keeps the same stretch of the transcript.
+		if (el && anchor?.id !== undefined) {
+			const kept = new Set(next.map((m) => m.id));
+			beginRestore(el, (m) => kept.has(m.getAttribute("data-message-id") ?? ""));
+			setAnchor(carryAnchor(messages, list, { start, end }, next));
+		}
+		setHideTools(toolCallsHidden);
+	}, [toolCallsHidden]);
+
+	useLayoutEffect(() => {
 		const el = scrollRef.current;
 		const mark = restoreRef.current;
 		if (!el || !mark) return;
@@ -92,7 +120,7 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 		if (mark.el?.isConnected) el.scrollTop += mark.el.getBoundingClientRect().top - mark.top;
 		else el.scrollTop = el.scrollHeight - mark.fromBottom;
 		settle();
-	}, [start, end, messages]);
+	}, [start, end, list]);
 
 	useEffect(() => {
 		const el = scrollRef.current;
@@ -100,7 +128,7 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 		if (stickyRef.current) {
 			el.scrollTop = el.scrollHeight;
 		}
-	}, [messages, toolCalls, queuedPrompts, start, end]);
+	}, [list, toolCalls, queuedPrompts, start, end]);
 
 	function handleScroll(): void {
 		const el = scrollRef.current;
@@ -109,7 +137,7 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 		if (!stickyRef.current) {
 			// A reader who scrolls up keeps the messages above them; new ones
 			// are then counted below instead of sliding the window.
-			if (anchor?.id === undefined && shown[0]) setAnchor({ id: shown[0].id, fromEnd: messages.length - start, count: end - start });
+			if (anchor?.id === undefined && shown[0]) setAnchor({ id: shown[0].id, fromEnd: list.length - start, count: end - start });
 		} else if (anchor?.id !== undefined && newer === 0) {
 			// Back at the newest message: follow new ones again, keeping as
 			// many messages mounted as the reader had.
@@ -117,8 +145,18 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 		}
 	}
 
-	function beginRestore(el: HTMLElement): void {
-		const first = el.querySelector("[data-message-id]");
+	/**
+	 * Remember where the reader is: the first mounted message. With `keep`,
+	 * the first one it accepts that reaches into the viewport, since the
+	 * others may be about to unmount.
+	 */
+	function beginRestore(el: HTMLElement, keep?: (m: Element) => boolean): void {
+		let first = el.querySelector("[data-message-id]");
+		if (keep) {
+			const top = el.getBoundingClientRect().top;
+			const candidates = [...el.querySelectorAll("[data-message-id]")].filter(keep);
+			first = candidates.find((m) => m.getBoundingClientRect().bottom > top) ?? candidates[0] ?? null;
+		}
 		stickyRef.current = false;
 		settlingRef.current = true;
 		restoreRef.current = { el: first, top: first ? first.getBoundingClientRect().top : 0, fromBottom: el.scrollHeight - el.scrollTop };
@@ -130,14 +168,14 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 		if (start > 0) {
 			const earlier = Math.max(0, start - MESSAGE_PAGE);
 			beginRestore(el);
-			setAnchor({ id: messages[earlier]!.id, fromEnd: messages.length - earlier, count: Math.min(end - earlier, MAX_RENDERED) });
+			setAnchor({ id: list[earlier]!.id, fromEnd: list.length - earlier, count: Math.min(end - earlier, MAX_RENDERED) });
 			return;
 		}
 		// Everything loaded is shown; fetch the rest of a read-only
 		// transcript. Its messages are rebuilt, so the window keeps its place
 		// by distance from the newest message.
 		beginRestore(el);
-		const reach = messages.length + MESSAGE_PAGE;
+		const reach = list.length + MESSAGE_PAGE;
 		setAnchor({ fromEnd: reach, count: reach });
 		setLoadingEarlier(true);
 		try {
@@ -186,7 +224,7 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 
 				{shown.map((m) => (
 					<div key={m.id} data-message-id={m.id}>
-						<ChatMessageView msg={m} toolCalls={toolCalls} />
+						<ChatMessageView msg={m} toolCalls={toolCalls} toolCallsHidden={hideTools} live={m.id === live} />
 					</div>
 				))}
 
@@ -211,12 +249,22 @@ function ChatTranscript({ session }: { session: SessionUi }) {
 	);
 }
 
-function ChatMessageView({ msg, toolCalls }: { msg: ChatMessage; toolCalls: SessionUi["toolCalls"] }) {
+function ChatMessageView({
+	msg,
+	toolCalls,
+	toolCallsHidden,
+	live,
+}: {
+	msg: ChatMessage;
+	toolCalls: SessionUi["toolCalls"];
+	toolCallsHidden: boolean;
+	live: boolean;
+}) {
 	switch (msg.role) {
 		case "user":
 			return <UserMessage msg={msg} />;
 		case "assistant":
-			return <AssistantMessage msg={msg} toolCalls={toolCalls} />;
+			return <AssistantMessage msg={msg} toolCalls={toolCalls} toolCallsHidden={toolCallsHidden} live={live} />;
 		case "notice":
 			return <Notice msg={msg} />;
 		case "compaction":

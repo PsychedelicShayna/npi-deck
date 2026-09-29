@@ -86,6 +86,19 @@ export function ToolCallCard(props: ToolRendererProps) {
 	);
 }
 
+/** A running tool while tool calls are hidden: one slim row, no card. */
+export function ToolWorkingLine({ name, args, intent }: Pick<ToolRendererProps, "name" | "args" | "intent">) {
+	const summary = summarizeArgs(name, args, intent);
+	return (
+		<div role="status" className="flex min-w-0 items-center gap-2 font-mono text-2xs text-ink-3">
+			<Loader2 className="h-3 w-3 shrink-0 animate-spin text-accent" aria-hidden="true" />
+			<span>working</span>
+			<span className="text-ink-2">{name}</span>
+			{summary ? <span className="truncate text-ink-4">{summary}</span> : null}
+		</div>
+	);
+}
+
 /** Collapsed-header summary and expanded body for one tool. */
 interface ToolCard {
 	summary?: (args: Record<string, unknown>) => string;
