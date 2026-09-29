@@ -12,6 +12,7 @@ import { SettingsView } from "./views/SettingsView";
 import { IntegrationsView } from "./views/IntegrationsView";
 import { OnboardingView } from "./views/OnboardingView";
 import { AdvisorsView } from "./views/AdvisorsView";
+import { MixturesView } from "./views/MixturesView";
 import { onboardingApi } from "./lib/onboarding-api";
 
 /**
@@ -56,6 +57,7 @@ const router = createBrowserRouter([
 			{ path: "/kb", element: <KbView /> },
 			{ path: "/integrations", element: <IntegrationsView /> },
 			{ path: "/advisors", element: <AdvisorsView /> },
+			{ path: "/mixtures", element: <MixturesView /> },
 			{ path: "/settings", element: <SettingsView /> },
 			{ path: "/onboarding", element: <OnboardingView /> },
 		],

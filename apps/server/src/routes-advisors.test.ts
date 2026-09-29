@@ -2,21 +2,23 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
-import { feature, loadBackend, resolveBackendSelection } from "./backend/runtime.ts";
+import { feature, loadBackend, resolveBackendSelection, sdk } from "./backend/runtime.ts";
 import { buildAdvisorsRouter } from "./routes-advisors.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
 
 const root = await mkdtemp(path.join(tmpdir(), "deck-advisor-test-"));
-const agentDir = path.join(root, "agent");
 const project = path.join(root, "project");
-await mkdir(agentDir); await mkdir(project);
-process.env.PI_CODING_AGENT_DIR = agentDir;
+await mkdir(path.join(root, "agent")); await mkdir(project);
+process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
 process.env.OMP_DECK_INSTALL_STARTER_SKILLS = "0";
 process.env.OMP_DECK_INSTALL_STARTER_EXTENSIONS = "0";
 const backend = resolveBackendSelection();
 if (!backend) throw new Error("advisor tests require a configured NeoPi backend");
 await loadBackend(backend);
+// NeoPi fixes its agent dir when first loaded; another test file may have loaded it first.
+const agentDir = sdk().getAgentDir();
+if (!agentDir.startsWith(tmpdir())) throw new Error(`refusing to edit a non-temporary agent dir: ${agentDir}`);
 const config: Config = { defaultCwd: project, extraWorkspaces: [], host: "127.0.0.1", port: 0, devMode: true, idleTimeoutMs: 0, dbPath: path.join(root, "db"), uploadsRoot: path.join(root, "uploads") };
 let roster: Array<{ name: string; enabled?: boolean }> = [];
 let model = "";

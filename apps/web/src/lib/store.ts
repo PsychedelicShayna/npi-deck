@@ -39,6 +39,7 @@ export interface NotificationItem {
 const MAX_NOTIFICATIONS = 50;
 
 import { api } from "./api";
+import { emptyMixtureUi, reconcileMixtureResubscribe } from "./mixture-reducer";
 import { applyEvent, initSession } from "./reducer";
 import { TRANSCRIPT_TAIL } from "./transcript-window";
 import type { SessionUi } from "./types";
@@ -604,17 +605,28 @@ function handleFrame(
 		}
 
 		case "subscribed":
-			set((s) => ({
-				sessionsById: {
-					...s.sessionsById,
-					[frame.sessionId]: { ...initSession(frame.snapshot), backendLastRan: s.backend
-						? { path: s.backend.path, commit: s.backend.commit }
-						: s.sessionsById[frame.sessionId]?.backendLastRan,
-						// Advisor events sent while this client was away are not replayed;
-						// every (re)subscribe tells the advisor panel to refetch.
-						advisorActivity: (s.sessionsById[frame.sessionId]?.advisorActivity ?? 0) + 1 },
-				},
-			}));
+			set((s) => {
+				const previous = s.sessionsById[frame.sessionId];
+				const next = initSession(frame.snapshot);
+				// A read-only transcript becoming live is a first subscribe, not a reconnect.
+				const live = previous && !previous.readOnly ? previous : undefined;
+				return {
+					sessionsById: {
+						...s.sessionsById,
+						[frame.sessionId]: { ...next, backendLastRan: s.backend
+							? { path: s.backend.path, commit: s.backend.commit }
+							: previous?.backendLastRan,
+							// Advisor events sent while this client was away are not replayed;
+							// every (re)subscribe tells the advisor panel to refetch.
+							advisorActivity: (previous?.advisorActivity ?? 0) + 1,
+							// Mixture events are not replayed either; keep what was seen live.
+							mixture: reconcileMixtureResubscribe(live?.mixture, next.mixture ?? emptyMixtureUi(), {
+								at: Date.now(),
+								conversationReplaced: !!live?.sessionFile && live.sessionFile !== frame.snapshot.sessionFile,
+							}) },
+					},
+				};
+			});
 			return;
 
 		case "subagents_snapshot":

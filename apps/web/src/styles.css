@@ -346,11 +346,13 @@
 }
 
 /* ─── React Flow / canvas overrides ─────────────────────────────────────────
-   The V2 routine canvas builder uses `@xyflow/react`. Its CSS exposes the
-   token names below; we re-bind them to deck paper/ink/line/accent so the
-   canvas inherits whichever theme is active. Scoped under .routine-canvas so
-   nothing else on the page is affected. */
-.routine-canvas .react-flow {
+   The routine canvas builder and the mixture editor use `@xyflow/react`. Its
+   CSS exposes the token names below; we re-bind them to deck
+   paper/ink/line/accent so the canvas inherits whichever theme is active.
+   Scoped under .routine-canvas / .graph-canvas so nothing else on the page is
+   affected. */
+.routine-canvas .react-flow,
+.graph-canvas .react-flow {
 	--xy-background-color-default: rgb(var(--paper));
 	--xy-background-pattern-color-default: rgb(var(--ink-4) / 0.35);
 	--xy-background-pattern-dots-color-default: rgb(var(--ink-4) / 0.4);
@@ -375,9 +377,11 @@
 /* React Flow's default Controls icons are SVG <path>s with currentColor;
    the wrapper's text-ink class on the parent doesn't propagate, so set it
    explicitly on the buttons. */
-.routine-canvas .react-flow__controls-button svg {
+.routine-canvas .react-flow__controls-button svg,
+.graph-canvas .react-flow__controls-button svg {
 	fill: rgb(var(--ink-2));
 }
-.routine-canvas .react-flow__controls-button:hover svg {
+.routine-canvas .react-flow__controls-button:hover svg,
+.graph-canvas .react-flow__controls-button:hover svg {
 	fill: rgb(var(--ink));
 }

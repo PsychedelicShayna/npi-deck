@@ -23,11 +23,6 @@
  */
 
 import {
-	Background,
-	BackgroundVariant,
-	Controls,
-	MiniMap,
-	ReactFlow,
 	ReactFlowProvider,
 	useEdgesState,
 	useNodesState,
@@ -38,7 +33,7 @@ import {
 	type NodePositionChange,
 	type OnSelectionChangeParams,
 } from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
+import { GraphCanvasSurface } from "@/components/graph/GraphCanvasSurface";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
@@ -425,7 +420,7 @@ function RoutineCanvasInner({
 	return (
 		<div className="routine-canvas relative flex h-full w-full">
 			<div className="relative h-full flex-1 min-w-0">
-				<ReactFlow
+				<GraphCanvasSurface
 					nodes={nodes}
 					edges={edges}
 					onNodesChange={handleNodesChange}
@@ -436,33 +431,10 @@ function RoutineCanvasInner({
 					edgeTypes={EDGE_TYPES}
 					fitView
 					fitViewOptions={FIT_VIEW_OPTIONS}
-					proOptions={{ hideAttribution: true }}
-					minZoom={0.25}
-					maxZoom={2}
 					nodesDraggable
 					nodesConnectable
 					elementsSelectable
-				>
-					<Background
-						variant={BackgroundVariant.Dots}
-						gap={20}
-						size={1}
-						className="!bg-paper"
-					/>
-					<Controls
-						position="bottom-right"
-						showInteractive={false}
-						className="!border !border-line !bg-paper-2 !shadow-sm"
-					/>
-					<MiniMap
-						position="bottom-left"
-						nodeStrokeWidth={2}
-						maskColor="rgb(var(--paper) / 0.7)"
-						className="!border !border-line !bg-paper-2"
-						pannable
-						zoomable
-					/>
-				</ReactFlow>
+				/>
 				<AddStepPalette onAdd={handleAddStep} />
 				{runs && runs.length > 0 && onSelectRun ? (
 					<RunOverlayPicker

@@ -15,6 +15,8 @@
 // Re-export the V1 routine spec validator. JSON Schemas live in src/schemas/.
 export { validateRoutineSpec, validateStructuredOutput } from "./validate";
 export type { ValidationError, ValidationResult } from "./validate";
+// MIXTURES.toml document, validation report and mixture trace projections (#80).
+export * from "./mixtures";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REST shapes
@@ -828,6 +830,12 @@ export interface SessionSnapshot {
 	 * queue immediately instead of waiting for the next `queue_state` event.
 	 */
 	queuedPrompts?: QueuedPromptWire[];
+	/**
+	 * The session file's persisted `mixture_trace` cards. A live session's
+	 * `messages` is the model context, which never holds these display-only
+	 * cards, so a resubscribing client rebuilds the MoA panel from this.
+	 */
+	mixtureTraces?: AgentMessageJson[];
 }
 
 /**

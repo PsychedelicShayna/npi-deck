@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Search, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { ModelInfo } from "@npi-deck/protocol";
 
 import { Badge } from "@/components/ui/Badge";
@@ -118,6 +119,9 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 					{loading ? "loading..." : `${matchCount} / ${showUnauth ? totalCount : availableCount}`}
 				</div>
 				<div className="flex-1" />
+				<Link to="/mixtures" onClick={onClose} className="text-xs text-accent underline underline-offset-2">
+					Manage mixtures
+				</Link>
 				<Button variant="ghost" size="icon" onClick={onClose} aria-label="Close">
 					<X className="h-4 w-4" />
 				</Button>

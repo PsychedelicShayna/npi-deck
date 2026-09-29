@@ -7,6 +7,7 @@
  */
 
 import type { ModelRef, PendingPlanApprovalWire, PlanModeContextWire } from "@npi-deck/protocol";
+import type { MixtureUi } from "./mixture-reducer";
 
 // ─── Content blocks ────────────────────────────────────────────────────────
 
@@ -278,6 +279,11 @@ export interface SessionUi {
 	 * panel refetches on change instead of polling while it is hidden.
 	 */
 	advisorActivity?: number;
+	/**
+	 * MoA side-panel state from the same trace events the chat cards show.
+	 * Display only: never part of `messages` usage or replay.
+	 */
+	mixture?: MixtureUi;
 
 	/** Latest provider error displayed in chrome (cleared on next turn_start). */
 	lastError?: string;

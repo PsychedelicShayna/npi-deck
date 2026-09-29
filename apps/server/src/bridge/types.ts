@@ -58,8 +58,17 @@ export interface AgentBridge {
 	 * pretending the change applied.
 	 */
 	liveMcpSessions(): LiveMcpSession[];
-	/** Catalog of models the SDK knows about, plus a marker on the current one when sessionId is given. */
-	listModels(opts?: { sessionId?: string }): Promise<ModelInfo[]>;
+	/**
+	 * Catalog of models the SDK knows about, plus a marker on the current one when sessionId is given.
+	 * Mixtures are those the session's workspace (else `cwd`, else the server's cwd) defines and can run.
+	 */
+	listModels(opts?: { sessionId?: string; cwd?: string }): Promise<ModelInfo[]>;
+	/**
+	 * Re-discover the mixtures `cwd`'s MIXTURES.toml search path may register
+	 * and replace the picker roster with them, after the Mixtures view saved a
+	 * file. The only place the deck replaces a mixture roster.
+	 */
+	refreshMixtureRoster(cwd: string): Promise<void>;
 	/**
 	 * Subscribe to extension-UI dialog frames for `sessionId` (open + cancel).
 	 * Returns an unsubscribe function. Implementations MAY immediately replay

@@ -110,6 +110,7 @@ const planMode = feature("plan-mode");
 const subagents = feature("subagent-tree");
 const advisors = feature("advisors");
 const mixtures = feature("mixtures");
+const mixtureConfig = feature("mixture-config");
 const mcp = feature("mcp-allowlist");
 const multiRoot = feature("multi-root");
 const build = feature("build-identity");
@@ -244,6 +245,36 @@ await check("mixtures: workspaces register only their own MIXTURES.toml models",
 	assert(!registry.find("mixture", "deck-contract-a") && !registry.find("mixture", "deck-contract-b"), "mixtures still registered after the last release");
 	return "two workspaces register their own mixture, each scope finds only its own, both unregister on release";
 });
+
+await check(
+	"mixture-config: parse, serialize, resolve, validate, save and rediscover a MIXTURES.toml",
+	["mixturesConfigFilePath", "loadMixturesConfigFile", "parseMixturesDoc", "saveMixturesConfigFile", "serializeMixturesConfig", "resolveMixture", "validateMixture", "discoverRegistrableMixtures"],
+	async () => {
+		const cwd = mkdir("mixture-config");
+		const file = mixtureConfig.mixturesConfigFilePath("project", { projectDir: cwd, agentDir });
+		assert(file === path.join(cwd, "MIXTURES.toml"), `project path = ${file}`);
+		const member = (id: string) => ({ id, model: "openrouter/openai/gpt-4o-mini", systemPrompt: "Answer.", tools: false });
+		const chain = { name: "deck-chain", entry: "writer", members: [member("writer"), member("editor")], edges: [{ from: "writer", to: "editor", x: { output: true as const } }], limits: { maxHops: 4 } };
+		const gated = { ...chain, name: "deck-gated", limits: { maxHops: 4, budgetUsd: 1 } };
+		const roundTrip = mixtureConfig.parseMixturesDoc(Bun.TOML.parse(mixtureConfig.serializeMixturesConfig({ mixtures: [chain, gated] })), "contract draft");
+		assert(!roundTrip.warnings?.length, `round-trip warnings: ${roundTrip.warnings?.join("; ")}`);
+		assert(roundTrip.mixtures[1]?.limits?.budgetUsd === 1, "serialize/parse dropped limits.budget_usd");
+		const settings = await core.Settings.loadIsolated({ cwd, agentDir });
+		const names = roundTrip.mixtures.map(mixture => mixture.name);
+		const [ok, refused] = roundTrip.mixtures.map(definition =>
+			mixtureConfig.validateMixture(mixtureConfig.resolveMixture(definition, { registry, settings }), { settings, names }),
+		);
+		assert(ok && ok.errors.length === 0, `linear chain refused: ${ok?.errors.map(issue => issue.code).join(",")}`);
+		const gate = refused?.errors.find(issue => issue.code === "unsupported.feature");
+		assert(gate?.path === "limits.budget_usd", `budget gate = ${JSON.stringify(refused?.errors)}`);
+		await mixtureConfig.saveMixturesConfigFile(file, roundTrip);
+		const loaded = await mixtureConfig.loadMixturesConfigFile(file);
+		assert(loaded.mixtures.map(mixture => mixture.name).join(",") === "deck-chain,deck-gated", "saved file does not load back");
+		const registrable = await mixtureConfig.discoverRegistrableMixtures({ cwd, agentDir, registry, settings });
+		assert(registrable.map(mixture => mixture.definition.name).join(",") === "deck-chain", `registrable = ${registrable.map(mixture => mixture.definition.name)}`);
+		return `project file round-trips; ${gate.message}; discovery registers mixture/deck-chain only`;
+	},
+);
 
 async function newSession(cwd: string, extra: Partial<CreateAgentSessionOptions> = {}) {
 	return core.createAgentSession({

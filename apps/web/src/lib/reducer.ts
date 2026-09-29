@@ -7,6 +7,7 @@
  */
 
 import type { AgentSessionEventJson, SessionSnapshot } from "@npi-deck/protocol";
+import { applyMixtureTrace, emptyMixtureUi, hydrateMixtureTraces } from "./mixture-reducer";
 
 import type {
 	AssistantContentBlock,
@@ -69,6 +70,8 @@ export function initSession(snapshot: SessionSnapshot, priorUsage: readonly unkn
 	for (const m of snapshot.messages) {
 		ingestMessage(state, m);
 	}
+	// Live snapshots carry trace cards beside the model context; transcripts inline them.
+	state.mixture = hydrateMixtureTraces([...snapshot.messages, ...(snapshot.mixtureTraces ?? [])]);
 	return state;
 }
 
@@ -325,11 +328,17 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 		// snapshot for config warnings. Advisor cost is read by the visible panel.
 		case "config_warnings_changed":
 		case "advisor_cost_changed":
+			return state;
+		// One trace feeds both surfaces: the chat card (#43) and the MoA panel (#80).
 		case "mixture_hop_end":
 		case "mixture_checkpoint":
 		case "mixture_limit":
-		case "mixture_run_end":
-			return appendMixtureTrace(state, (event as { details?: unknown }).details);
+		case "mixture_run_end": {
+			const details = (event as { details?: unknown }).details;
+			const withCard = appendMixtureTrace(state, details);
+			const mixture = applyMixtureTrace(state.mixture ?? emptyMixtureUi(), details);
+			return withCard === state && mixture === state.mixture ? state : { ...withCard, mixture };
+		}
 		case "irc_message": {
 			const msg = (event as any).message;
 			if (!msg) return state;

@@ -48,7 +48,11 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime": typeof import("@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime");
 	"@oh-my-pi/pi-utils/file-lock": typeof import("@oh-my-pi/pi-utils/file-lock");
 	"@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents": typeof import("@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents");
+	"@oh-my-pi/pi-coding-agent/moa/config": typeof import("@oh-my-pi/pi-coding-agent/moa/config");
 	"@oh-my-pi/pi-coding-agent/moa/registration": typeof import("@oh-my-pi/pi-coding-agent/moa/registration");
+	"@oh-my-pi/pi-coding-agent/moa/resolve": typeof import("@oh-my-pi/pi-coding-agent/moa/resolve");
+	"@oh-my-pi/pi-coding-agent/moa/toml": typeof import("@oh-my-pi/pi-coding-agent/moa/toml");
+	"@oh-my-pi/pi-coding-agent/moa/validate": typeof import("@oh-my-pi/pi-coding-agent/moa/validate");
 	"@oh-my-pi/pi-coding-agent/plan-mode/approved-plan": typeof import("@oh-my-pi/pi-coding-agent/plan-mode/approved-plan");
 	"@oh-my-pi/pi-coding-agent/registry/agent-lifecycle": typeof import("@oh-my-pi/pi-coding-agent/registry/agent-lifecycle");
 	"@oh-my-pi/pi-coding-agent/registry/agent-registry": typeof import("@oh-my-pi/pi-coding-agent/registry/agent-registry");
@@ -192,6 +196,25 @@ export const MANIFEST = {
 		consumers: ["bridge/in-process.ts"],
 		exports: {
 			MixtureWorkspace: op("@oh-my-pi/pi-coding-agent/moa/registration", "MixtureWorkspace"),
+		},
+	},
+	/**
+	 * #80: author MIXTURES.toml in the Mixtures view. NeoPi parses, resolves,
+	 * validates (including its milestone capability gate) and writes; the deck
+	 * re-discovers the picker roster after a save.
+	 */
+	"mixture-config": {
+		tier: "optional-feature",
+		consumers: ["mixtures-service.ts", "bridge/in-process.ts (roster refresh, run-settings check)"],
+		exports: {
+			mixturesConfigFilePath: op("@oh-my-pi/pi-coding-agent/moa/config", "mixturesConfigFilePath"),
+			loadMixturesConfigFile: op("@oh-my-pi/pi-coding-agent/moa/config", "loadMixturesConfigFile"),
+			parseMixturesDoc: op("@oh-my-pi/pi-coding-agent/moa/config", "parseMixturesDoc"),
+			saveMixturesConfigFile: op("@oh-my-pi/pi-coding-agent/moa/config", "saveMixturesConfigFile"),
+			serializeMixturesConfig: op("@oh-my-pi/pi-coding-agent/moa/toml", "serializeMixturesConfig"),
+			resolveMixture: op("@oh-my-pi/pi-coding-agent/moa/resolve", "resolveMixture"),
+			validateMixture: op("@oh-my-pi/pi-coding-agent/moa/validate", "validateMixture"),
+			discoverRegistrableMixtures: op("@oh-my-pi/pi-coding-agent/moa/registration", "discoverRegistrableMixtures"),
 		},
 	},
 	/** #86: enumerate, validate and write every registered NeoPi setting from the Settings view. */

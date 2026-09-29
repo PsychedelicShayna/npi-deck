@@ -1,4 +1,4 @@
-import type { AgentSession, CreateAgentSessionResult, MCPManager, ModelRegistry, SessionManager } from "@oh-my-pi/pi-coding-agent";
+import type { AgentSession, CreateAgentSessionResult, MCPManager, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { feature, hasFeature, sdk } from "../backend/runtime.ts";
 // `Model` is owned by `@oh-my-pi/pi-ai`, a transitive dep we don't bring in
 // directly. Treat it as opaque at the bridge boundary — we only ever pass it
@@ -11,8 +11,9 @@ type SdkModel = {
 	input?: unknown[];
 	api?: string;
 };
-/** One workspace's registered mixtures, as the deck needs them. */
-type MixtureRoster = { find(name: string): unknown; release(): void };
+type MixtureScope = Awaited<ReturnType<ReturnType<typeof feature<"mixtures">>["MixtureWorkspace"]["retain"]>>["scope"];
+/** One workspace's registered mixtures for one request. */
+type MixtureRoster = { find: MixtureScope["find"]; roster: MixtureScope["roster"]; release(): void };
 import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
@@ -77,6 +78,24 @@ function firstAuthenticatedModel(registry: ModelRegistry, candidates: readonly M
 
 type DiscoveredAdvisors = Awaited<ReturnType<ReturnType<typeof feature<"advisors">>["discoverAdvisorConfigs"]>>;
 
+/**
+ * NeoPi's run-start check (`resolveRun`) under the settings a chat runs with:
+ * resolve the workspace's registered definition afresh and validate it. A
+ * mixture those settings invalidate (an excluded member model, hops over the
+ * hard cap) is neither listed nor accepted. Undefined means runnable.
+ */
+function mixtureRefusal(lease: MixtureRoster | undefined, name: string, registry: ModelRegistry, settings: Settings, workspace: string): string | undefined {
+	const registered = lease?.find(name);
+	if (!lease || !registered) return `mixture/${name} is not defined in ${workspace}`;
+	// Without the authoring API the session still refuses at run start.
+	if (!hasFeature("mixture-config")) return undefined;
+	const api = feature("mixture-config");
+	const fresh = api.resolveMixture(registered.definition, { registry, settings, preparedPresets: registered.presets });
+	const { errors } = api.validateMixture(fresh, { settings, names: lease.roster().map((mixture) => mixture.definition.name) });
+	if (errors.length === 0) return undefined;
+	return `mixture/${name} does not validate under this chat's settings: ${errors.map((issue) => `${issue.code} (${issue.message})`).join("; ")}`;
+}
+
 interface Active {
 	handle: InProcessSessionHandle;
 	session: AgentSession;
@@ -123,6 +142,7 @@ export class InProcessAgentBridge implements AgentBridge {
 	/** Shared SDK model registry, lazily constructed on first session create. */
 	private modelRegistry: ModelRegistry | undefined;
 	private modelRegistryPromise: Promise<ModelRegistry> | undefined;
+
 	/** Bumped per SDK session this bridge creates; makes every live generation's agentId unique. */
 	private generation = 0;
 
@@ -216,9 +236,10 @@ export class InProcessAgentBridge implements AgentBridge {
 		let mixtureLease: MixtureRoster | undefined;
 		if (model?.provider === "mixture") {
 			mixtureLease = await this.leaseMixtures(modelRegistry, cwd);
-			if (!mixtureLease?.find(model.id)) {
+			const refusal = mixtureRefusal(mixtureLease, model.id, modelRegistry, settings, cwd);
+			if (refusal) {
 				mixtureLease?.release();
-				throw new Error(`mixture/${model.id} is not defined in ${cwd}`);
+				throw new Error(refusal);
 			}
 		}
 		let result: CreateAgentSessionResult;
@@ -457,16 +478,19 @@ export class InProcessAgentBridge implements AgentBridge {
 		return this.modelRegistryPromise;
 	}
 
-	async listModels(opts: { sessionId?: string } = {}): Promise<ModelInfo[]> {
+	async listModels(opts: { sessionId?: string; cwd?: string } = {}): Promise<ModelInfo[]> {
 		const registry = await this.ensureModelRegistry();
-		const handle = opts.sessionId ? this.active.get(opts.sessionId)?.handle : undefined;
-		const lease = await this.leaseMixtures(registry, handle?.mixtureCwd() ?? process.cwd());
+		const entry = opts.sessionId ? this.active.get(opts.sessionId) : undefined;
+		const handle = entry?.handle;
+		const workspace = handle?.mixtureCwd() ?? (opts.cwd ? path.resolve(opts.cwd) : process.cwd());
+		const lease = await this.leaseMixtures(registry, workspace);
 		try {
 			const current = handle?.snapshot().model;
 			// The shared registry lists the union of every held workspace's mixtures;
-			// show only the ones this workspace defines (and can run).
+			// show only the ones this workspace defines and this chat's settings can run.
+			const settings = entry?.session.settings ?? await sdk().Settings.loadReadOnly({ cwd: workspace, agentDir: sdk().getAgentDir() });
 			return registry.getAll()
-				.filter((model) => model.api !== "mixture" || lease?.find(model.id) !== undefined)
+				.filter((model) => model.api !== "mixture" || mixtureRefusal(lease, model.id, registry, settings, workspace) === undefined)
 				.map((model) => modelInfoFromSdk(model as unknown as SdkModel, registry, current));
 		} finally {
 			lease?.release();
@@ -490,11 +514,30 @@ export class InProcessAgentBridge implements AgentBridge {
 			const settings = await sdk().Settings.loadReadOnly({ cwd: key, agentDir });
 			// A unique owner per request: concurrent requests must not release each other's hold.
 			const workspace = await feature("mixtures").MixtureWorkspace.retain(`npi-deck:request:${crypto.randomUUID()}`, { cwd: key, agentDir, registry, settings });
-			return { find: (name: string) => workspace.scope.find(name), release: () => workspace.release() };
+			return { find: (name: string) => workspace.scope.find(name), roster: () => workspace.scope.roster(), release: () => workspace.release() };
 		} catch (err) {
 			// retain drops its own hold when discovery fails.
 			log.warn(`mixture discovery failed for ${key}; no mixtures listed there`, err);
 			return undefined;
+		}
+	}
+
+	/**
+	 * The Mixtures view saved a MIXTURES.toml: hold `cwd`'s scope, replace its
+	 * roster with what that workspace may register now, and release. A live
+	 * chat's scope keeps the new roster; with no holder the next lease
+	 * rediscovers anyway.
+	 */
+	async refreshMixtureRoster(cwd: string): Promise<void> {
+		if (!hasFeature("mixtures") || !hasFeature("mixture-config")) throw new Error("this NeoPi backend cannot re-register mixtures");
+		const registry = await this.ensureModelRegistry();
+		const agentDir = sdk().getAgentDir();
+		const ctx = { cwd: path.resolve(cwd), agentDir, registry, settings: await sdk().Settings.loadReadOnly({ cwd: path.resolve(cwd), agentDir }) };
+		const workspace = await feature("mixtures").MixtureWorkspace.retain(`npi-deck:refresh:${crypto.randomUUID()}`, ctx);
+		try {
+			workspace.scope.setRoster(await feature("mixture-config").discoverRegistrableMixtures(ctx));
+		} finally {
+			workspace.release();
 		}
 	}
 
@@ -1058,6 +1101,11 @@ export class InProcessSessionHandle implements SessionHandle {
 		const pendingPlan = this.planBridge.getPendingPlanApproval();
 		if (pendingPlan) snap.pendingPlanApproval = pendingPlan;
 		if (this.shadowQueue.length > 0) snap.queuedPrompts = [...this.shadowQueue];
+		// The model context never holds display-only trace cards; the session file does.
+		const traces = this.sessionManager
+			.buildSessionContext({ transcript: true })
+			.messages.filter((message) => (message as { role?: string; customType?: string }).role === "custom" && (message as { customType?: string }).customType === "mixture_trace");
+		if (traces.length > 0) snap.mixtureTraces = traces as unknown as AgentMessageJson[];
 		// Legacy backends limit async jobs to their first root. On multi-root
 		// backends each root owns its own manager, including later chats.
 		if (!hasFeature("multi-root") && "asyncJobManager" in s && s.asyncJobManager === undefined) snap.backgroundJobsUnavailable = true;
@@ -1100,8 +1148,9 @@ export class InProcessSessionHandle implements SessionHandle {
 		const workspace = this.mixtureCwd();
 		const lease = ref.provider === "mixture" ? await this.mixtureLease(registry, workspace) : undefined;
 		try {
-			if (ref.provider === "mixture" && !lease?.find(ref.id)) {
-				throw new Error(`mixture/${ref.id} is not defined in ${workspace}`);
+			if (ref.provider === "mixture") {
+				const refusal = mixtureRefusal(lease, ref.id, registry, this.session.settings, workspace);
+				if (refusal) throw new Error(refusal);
 			}
 			await this.applyModel(registry, ref);
 		} finally {
