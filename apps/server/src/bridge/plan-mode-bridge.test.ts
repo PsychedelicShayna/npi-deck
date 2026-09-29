@@ -45,7 +45,7 @@ function fixture(timeouts?: { reconnectGraceMs?: number; approvalTimeoutMs?: num
 	const bridge = new PlanModeBridge("test-session", session, manager, timeouts);
 	const planUrl = feature("plan-mode").planFileUrlForSlug("test");
 	const planPath = feature("plan-mode").resolveLocalUrlToPath(planUrl, manager);
-	return { bridge, manager, planUrl, planPath, get handler() { return handler; }, get state() { return state; }, get tools() { return tools; }, get reference() { return reference; } };
+	return { bridge, manager, session, planUrl, planPath, get handler() { return handler; }, get state() { return state; }, get tools() { return tools; }, get reference() { return reference; } };
 }
 
 /** Resolves once the bridge emits plan_proposed, i.e. once preparation has installed the pending decision. */
@@ -225,6 +225,35 @@ test("exiting plan mode while a proposal is being prepared cancels it, even acro
 	expect(JSON.stringify(await proposal)).toContain("Plan review cancelled: plan mode was exited.");
 	expect(f.bridge.hasPendingApproval()).toBe(false);
 	expect(f.state?.planFilePath).toBe("local://PLAN.md");
+	f.bridge.dispose();
+});
+
+test("a proposal made while exit restores tools cannot install after plan mode is off", async () => {
+	const f = fixture();
+	await f.bridge.enter();
+	await mkdir(path.dirname(f.planPath), { recursive: true });
+	await writeFile(f.planPath, "# Late\n");
+	const frames: string[] = [];
+	f.bridge.subscribeFrames(frame => frames.push(frame.type));
+	let release!: () => void;
+	const restoring = new Promise<void>(resolve => { release = resolve; });
+	const setTools = f.session.setActiveToolsByName;
+	f.session.setActiveToolsByName = async names => { await restoring; await setTools(names); };
+	const exiting = f.bridge.exit();
+	const installed = proposed(f.bridge);
+	// exit() has not removed the handler yet: its tool restoration is still pending.
+	const late = f.handler!("test");
+	const outcome = await Promise.race([
+		late.then(() => "resolved", (error: Error) => error.message),
+		installed.then(() => "installed"),
+	]);
+	release();
+	await exiting;
+	expect(outcome).toContain("not ready for another proposal");
+	expect(f.bridge.isEnabled()).toBe(false);
+	expect(f.bridge.hasPendingApproval()).toBe(false);
+	expect(f.manager.buildSessionContext().mode).toBe("none");
+	expect(frames).not.toContain("plan_proposed");
 	f.bridge.dispose();
 });
 

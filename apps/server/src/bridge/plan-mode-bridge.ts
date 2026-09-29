@@ -38,6 +38,8 @@ export class PlanModeBridge {
 	private preparing = false;
 	/** Bumped by every exit so a proposal still being prepared knows it was cancelled. */
 	private activation = 0;
+	/** True from the start of exit() until it settles; no proposal may begin meanwhile. */
+	private exiting = false;
 	private planFilePath = DEFAULT_PLAN;
 	private readonly reconnectGraceMs: number;
 	private readonly approvalTimeoutMs: number;
@@ -126,18 +128,23 @@ export class PlanModeBridge {
 	async exit(): Promise<void> {
 		if (!this.enabled) return;
 		this.activation++;
-		this.settlePending(EXIT_CANCELLATION, "rejected");
-		this.session.setPlanModeState(undefined);
-		try { if (this.previousTools) await this.session.setActiveToolsByName(this.previousTools); }
-		catch (error) {
-			this.session.setPlanModeState({ enabled: true, planFilePath: this.planFilePath, workflow: "parallel" });
-			throw error;
+		this.exiting = true;
+		try {
+			this.settlePending(EXIT_CANCELLATION, "rejected");
+			this.session.setPlanModeState(undefined);
+			try { if (this.previousTools) await this.session.setActiveToolsByName(this.previousTools); }
+			catch (error) {
+				this.session.setPlanModeState({ enabled: true, planFilePath: this.planFilePath, workflow: "parallel" });
+				throw error;
+			}
+			this.session.setPlanProposalHandler(null);
+			this.previousTools = undefined;
+			this.enabled = false;
+			this.sessionManager.appendModeChange("none");
+			this.emit({ type: "plan_mode_changed", sessionId: this.sessionId, enabled: false });
+		} finally {
+			this.exiting = false;
 		}
-		this.session.setPlanProposalHandler(null);
-		this.previousTools = undefined;
-		this.enabled = false;
-		this.sessionManager.appendModeChange("none");
-		this.emit({ type: "plan_mode_changed", sessionId: this.sessionId, enabled: false });
 	}
 
 	respond(proposalId: string, response: PlanApprovalResponse): "settled" | "unknown" {
@@ -176,7 +183,7 @@ export class PlanModeBridge {
 	}
 	private async propose(title: string): Promise<{ content: Array<{ type: "text"; text: string }>; details: { planFilePath: string; title: string; planExists: boolean } }> {
 		const { resolveApprovedPlan } = feature("plan-mode");
-		if (this.disposed || !this.enabled || this.pending || this.preparing) throw new Error("Plan mode is not ready for another proposal.");
+		if (this.disposed || !this.enabled || this.exiting || this.pending || this.preparing) throw new Error("Plan mode is not ready for another proposal.");
 		this.preparing = true;
 		const activation = this.activation;
 		let plan: Awaited<ReturnType<typeof resolveApprovedPlan>>;
@@ -194,9 +201,11 @@ export class PlanModeBridge {
 			this.preparing = false;
 		}
 		if (this.disposed || this.pending) throw new Error("Plan mode is no longer ready for this proposal.");
-		// An exit during preparation cancels this proposal exactly as it cancels an
-		// installed one; it must not surface later in a re-entered plan mode.
-		const response = activation === this.activation ? await this.awaitDecision(plan) : EXIT_CANCELLATION;
+		// An exit that began during preparation cancels this proposal exactly as it
+		// cancels an installed one; it must not surface after plan mode is off or
+		// in a re-entered plan mode.
+		const current = activation === this.activation && this.enabled && !this.exiting;
+		const response = current ? await this.awaitDecision(plan) : EXIT_CANCELLATION;
 		const details = { planFilePath: plan.planFilePath, title: plan.title, planExists: true };
 		if (!response.approved) return { content: [{ type: "text", text: `Plan refinement requested. ${response.feedback?.trim() || "Please revise the plan."} Update ${plan.planFilePath}, then write the slug to xd://propose again.` }], details };
 		if (response.editedContent !== undefined) await writeFile(this.localPath(plan.planFilePath), response.editedContent, "utf8");
