@@ -2,7 +2,8 @@
  * Closing a live chat answers at once even while NeoPi's dispose is slow. On a
  * large resumed session the chronicler drains model work for up to 20 s,
  * longer than Bun's 10 s idle timeout, so a DELETE that waited got an empty
- * reply (#110). Its subscribers hear `session_disposed` when the close ends.
+ * reply (#110). Its subscribers hear `session_disposed` when the close ends,
+ * and resumes and closes of one chat racing each other leave one outcome.
  */
 import { expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -21,12 +22,29 @@ import { WsHub } from "./ws.ts";
 // isolated home and agent dir.
 const fixtureRoot = process.env.NPI_DECK_SESSION_CLOSE_ROOT;
 
-/** Shared with the fixture extension, which runs in this process. */
-type ShutdownGate = { entered: () => void; release: Promise<void> };
-const GATE = "__npiDeckSessionCloseGate";
+/**
+ * The fixture extension, which runs in this process, holds the named session
+ * event until the test releases it. It stands in for a slow part of NeoPi's
+ * dispose (`session_shutdown`) or of opening a chat (`session_start`).
+ */
+const GATES = "__npiDeckSessionCloseGates";
+type Gate = { entered: () => void; release: Promise<void> };
+function hold(event: "session_shutdown" | "session_start") {
+	const entered = Promise.withResolvers<void>();
+	const release = Promise.withResolvers<void>();
+	const gates = ((globalThis as Record<string, unknown>)[GATES] ??= {}) as Record<string, Gate | undefined>;
+	gates[event] = { entered: entered.resolve, release: release.promise };
+	return {
+		entered: entered.promise,
+		release: () => {
+			gates[event] = undefined;
+			release.resolve();
+		},
+	};
+}
 
 if (!fixtureRoot) {
-	test("closing a chat answers before its slow dispose ends and tells its subscribers", () => {
+	test("closing a chat answers before its slow dispose ends and races resumes cleanly", () => {
 		const selection = resolveBackendSelection();
 		if (!selection) throw new Error("session close test requires a configured NeoPi backend");
 		const root = mkdtempSync(path.join(os.tmpdir(), "deck-session-close-"));
@@ -54,32 +72,33 @@ if (!fixtureRoot) {
 			const output = `${child.stdout.toString()}${child.stderr.toString()}`;
 			if (child.exitCode !== 0) console.error(output);
 			expect(child.exitCode).toBe(0);
-			expect(output).toContain("1 pass");
+			expect(output).toContain("2 pass");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
-	}, 180_000);
+	}, 240_000);
 } else {
-	test("DELETE answers 202 while dispose runs; session_disposed reaches only subscribers when it ends", async () => {
-		const agentDir = process.env.PI_CODING_AGENT_DIR!;
-		const project = path.join(fixtureRoot, "project");
-		mkdirSync(project, { recursive: true });
-		// Stands in for any slow part of NeoPi's dispose: holds `session_shutdown`
-		// until the test lets it go.
-		const extensionDir = path.join(agentDir, "extensions", "hold-shutdown");
-		mkdirSync(extensionDir, { recursive: true });
-		writeFileSync(path.join(extensionDir, "index.ts"), `export default function (pi) {
-	pi.on("session_shutdown", async () => {
-		const gate = globalThis.${GATE};
-		if (!gate) return;
-		gate.entered();
-		await gate.release;
-	});
+	const agentDir = process.env.PI_CODING_AGENT_DIR!;
+	const project = path.join(fixtureRoot, "project");
+	const extensionDir = path.join(agentDir, "extensions", "hold-events");
+	mkdirSync(project, { recursive: true });
+	mkdirSync(extensionDir, { recursive: true });
+	writeFileSync(path.join(extensionDir, "index.ts"), `export default function (pi) {
+	for (const event of ["session_shutdown", "session_start"]) {
+		pi.on(event, async () => {
+			const gate = globalThis.${GATES}?.[event];
+			if (!gate) return;
+			gate.entered();
+			await gate.release;
+		});
+	}
 }
 `);
+
+	/** A persisted two-message chat, a bridge, a hub and the router around them. */
+	async function fixture(id: string) {
 		const sessionDir = path.join(agentDir, "sessions", "--project--");
 		mkdirSync(sessionDir, { recursive: true });
-		const id = "01a0ea00-0000-7000-8000-000000000110";
 		const file = path.join(sessionDir, `2026-01-01T00-00-00-000Z_${id}.jsonl`);
 		const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 		const lines = [
@@ -91,18 +110,32 @@ if (!fixtureRoot) {
 
 		await loadBackend(resolveBackendSelection()!);
 		const bridge = new InProcessAgentBridge({ idleTimeoutMs: 0 });
-		const hub = new WsHub(bridge, "session-close-test");
-		try {
-			const config: Config = { defaultCwd: project, extraWorkspaces: [], host: "127.0.0.1", port: 0, devMode: true, idleTimeoutMs: 0, dbPath: path.join(fixtureRoot, "db"), uploadsRoot: path.join(fixtureRoot, "uploads") };
-			const app = buildRouter(bridge, config, {} as never, {} as never, {} as never, {} as never, {} as never);
-			const request = (method: string, url: string) => app.request(`http://127.0.0.1${url}`, { method });
-			const connect = () => {
+		const hub = new WsHub(bridge, `session-close-${id}`);
+		const config: Config = { defaultCwd: project, extraWorkspaces: [], host: "127.0.0.1", port: 0, devMode: true, idleTimeoutMs: 0, dbPath: path.join(fixtureRoot!, "db"), uploadsRoot: path.join(fixtureRoot!, "uploads") };
+		const app = buildRouter(bridge, config, {} as never, {} as never, {} as never, {} as never, {} as never);
+		return {
+			file,
+			bridge,
+			hub,
+			request: (method: string, url: string, body?: unknown) =>
+				app.request(`http://127.0.0.1${url}`, body === undefined ? { method } : { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+			connect: () => {
 				const frames: ServerFrame[] = [];
 				const ws = { data: hub.createConnectionData(), send: (raw: string) => frames.push(JSON.parse(raw) as ServerFrame) } as unknown as Parameters<WsHub["onOpen"]>[0];
 				hub.onOpen(ws);
 				return { ws, frames, disposed: () => frames.filter((f) => f.type === "session_disposed") };
-			};
+			},
+			close: async () => {
+				hub.dispose();
+				await bridge.dispose();
+			},
+		};
+	}
 
+	test("DELETE answers 202 while dispose runs; session_disposed reaches only subscribers when it ends", async () => {
+		const id = "01a0ea00-0000-7000-8000-000000000110";
+		const { file, bridge, hub, request, connect, close } = await fixture(id);
+		try {
 			const first = await bridge.resumeSession({ sessionPath: file });
 			expect(first.sessionId).toBe(id);
 			const subscriber = connect();
@@ -110,15 +143,12 @@ if (!fixtureRoot) {
 			await hub.onMessage(subscriber.ws, JSON.stringify({ type: "subscribe", sessionId: id }));
 			expect(subscriber.frames.map((f) => f.type)).toContain("subscribed");
 
-			const entered = Promise.withResolvers<void>();
-			const release = Promise.withResolvers<void>();
-			(globalThis as Record<string, unknown>)[GATE] = { entered: entered.resolve, release: release.promise } satisfies ShutdownGate;
-
+			const shutdown = hold("session_shutdown");
 			const closed = await request("DELETE", `/sessions/${id}`);
 			expect(closed.status).toBe(202);
 			expect(await closed.json()).toEqual({ ok: true });
 			// The answer came while NeoPi's dispose is still held in session_shutdown.
-			await entered.promise;
+			await shutdown.entered;
 
 			// Closing: no longer live, a repeated close is the same close, nobody told yet.
 			expect(bridge.getSession(id)).toBeUndefined();
@@ -126,27 +156,52 @@ if (!fixtureRoot) {
 			expect((await request("DELETE", `/sessions/${id}`)).status).toBe(202);
 			expect(subscriber.disposed()).toEqual([]);
 
-			// Resuming the same file waits for the close instead of returning the closing chat.
-			const reopening = bridge.resumeSession({ sessionPath: file });
-			release.resolve();
+			// Resuming the same file waits for the close instead of returning the
+			// closing chat, and two resumes at once open it once.
+			const reopening = [bridge.resumeSession({ sessionPath: file }), bridge.resumeSession({ sessionPath: file })];
+			shutdown.release();
 			const deadline = Date.now() + 30_000;
 			while (subscriber.disposed().length === 0 && Date.now() < deadline) await Bun.sleep(20);
 			expect(subscriber.disposed()).toEqual([{ type: "session_disposed", sessionId: id }]);
 			expect(subscriber.ws.data.subscriptions.has(id)).toBe(false);
 			expect(bystander.disposed()).toEqual([]);
 
-			const reopened = await reopening;
+			const [reopened, again] = await Promise.all(reopening);
 			expect(reopened).not.toBe(first);
+			expect(again).toBe(reopened!);
 			expect(bridge.getSession(id)).toBe(reopened);
-			expect(reopened.snapshot().messages.length).toBe(2);
+			expect(reopened!.snapshot().messages.length).toBe(2);
 			// The dropped subscription does not swallow a fresh subscribe to the reopened chat.
 			await hub.onMessage(subscriber.ws, JSON.stringify({ type: "subscribe", sessionId: id }));
 			expect(subscriber.frames.at(-1)?.type).toBe("subscribed");
 
 			expect((await request("DELETE", "/sessions/01a0ea00-0000-7000-8000-00000000dead")).status).toBe(404);
 		} finally {
-			hub.dispose();
-			await bridge.dispose();
+			await close();
 		}
-	}, 120_000);
+	}, 90_000);
+
+	test("a close sent while the chat is still opening wins: the resume answers 409 and the chat never goes live", async () => {
+		const id = "01a0ea00-0000-7000-8000-000000000111";
+		const { file, bridge, request, close } = await fixture(id);
+		try {
+			const start = hold("session_start");
+			const resuming = request("POST", "/sessions", { resumeFromPath: file });
+			await start.entered;
+
+			const closed = await request("DELETE", `/sessions/${id}`);
+			expect(closed.status).toBe(202);
+			start.release();
+			const refused = await resuming;
+			expect(refused.status).toBe(409);
+			expect(bridge.getSession(id)).toBeUndefined();
+
+			// A resume after that opens the file afresh once the refused chat is disposed.
+			const reopened = await bridge.resumeSession({ sessionPath: file });
+			expect(bridge.getSession(id)).toBe(reopened);
+			expect(reopened.snapshot().messages.length).toBe(2);
+		} finally {
+			await close();
+		}
+	}, 90_000);
 }

@@ -13,7 +13,7 @@ import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
 import { getBuildInfo, getUptimeSecs } from "./build-info.ts";
 import { deriveLabel } from "./workspace-label.ts";
-import { McpAllowlistError, type AgentBridge } from "./bridge/types.ts";
+import { McpAllowlistError, SessionClosedError, type AgentBridge } from "./bridge/types.ts";
 import { listSessionBackends, recordSessionBackend, sessionBackend } from "./backend/session-metadata.ts";
 
 const log = logger("routes");
@@ -171,6 +171,7 @@ export function buildRouter(
 			return c.json(resp);
 		} catch (err) {
 			if (err instanceof McpAllowlistError) return c.json({ error: err.message }, 400);
+			if (err instanceof SessionClosedError) return c.json({ error: err.message }, 409);
 			log.error(`createSession failed`, err);
 			return c.json({ error: String(err) }, 500);
 		}

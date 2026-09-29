@@ -24,6 +24,11 @@ import type {
  */
 export interface AgentBridge {
 	createSession(opts: CreateSessionOpts): Promise<SessionHandle>;
+	/**
+	 * Resumes of one file run one at a time: a concurrent resume gets the same
+	 * live session. Rejects with {@link SessionClosedError} when the session
+	 * was closed while it was opening.
+	 */
 	resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle>;
 	getSession(sessionId: string): SessionHandle | undefined;
 	/**
@@ -32,8 +37,9 @@ export interface AgentBridge {
 	 * updates skip it. NeoPi's dispose can take tens of seconds (its chronicler
 	 * drains in-flight model work for up to 20 s), so it runs in the background
 	 * and `session_disposed` reaches the session's subscribers when it ends.
-	 * Resuming the same file meanwhile waits for the close. False when no
-	 * session with this id is live or closing.
+	 * Resuming the same file meanwhile waits for the close. A session still
+	 * opening is closed as soon as it has opened and never becomes live. False
+	 * when no session with this id is opening, live or closing.
 	 */
 	closeSession(sessionId: string): boolean;
 	listSessions(opts: { cwd?: string }): Promise<SessionSummary[]>;
@@ -152,6 +158,11 @@ export interface LiveMcpSession {
 /** Invalid per-session MCP selection; callers can return a client error. */
 export class McpAllowlistError extends Error {
 	override name = "McpAllowlistError";
+}
+
+/** The session was closed while it was opening; it never became live. */
+export class SessionClosedError extends Error {
+	override name = "SessionClosedError";
 }
 
 export interface CreateSessionOpts {

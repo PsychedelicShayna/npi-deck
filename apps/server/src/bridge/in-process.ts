@@ -44,7 +44,7 @@ import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import { SubagentTree } from "./subagent-tree.ts";
 import { transcriptTail } from "./transcript-tail.ts";
 import { latestErrorTerminal, mixtureSnapshotTraces } from "./mixture-snapshot.ts";
-import { McpAllowlistError } from "./types.ts";
+import { McpAllowlistError, SessionClosedError } from "./types.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
@@ -139,6 +139,10 @@ export class InProcessAgentBridge implements AgentBridge {
 	private active = new Map<string, Active>();
 	/** Sessions whose dispose is still running; no longer live. See {@link closeSession}. */
 	private closing = new Map<string, { sessionFile: string | undefined; done: Promise<void> }>();
+	/** Sessions being opened; a close asked for meanwhile is applied when the open finishes. */
+	private opening = new Map<string, { closeRequested: boolean }>();
+	/** Tail of each session file's resume queue, keyed by absolute path. */
+	private resumes = new Map<string, Promise<void>>();
 	private disposed = false;
 	private reaperTimer: ReturnType<typeof setInterval> | null = null;
 	private idleTimeoutMs: number;
@@ -172,16 +176,30 @@ export class InProcessAgentBridge implements AgentBridge {
 		} finally { release(); }
 	}
 
-	async resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
+	resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle> {
+		// One resume of a file at a time, so concurrent requests reuse the first
+		// one's session instead of each opening the file (also across a close).
+		const key = path.resolve(opts.sessionPath);
+		const run = (this.resumes.get(key) ?? Promise.resolve()).then(() => this.resumeLocked(key, opts));
+		const settled = run.then(() => {}, () => {});
+		this.resumes.set(key, settled);
+		void settled.then(() => {
+			if (this.resumes.get(key) === settled) this.resumes.delete(key);
+		});
+		return run;
+	}
+
+	private async resumeLocked(key: string, opts: ResumeSessionOpts): Promise<SessionHandle> {
 		const release = workRegistry.admit("session", `resume:${crypto.randomUUID()}`);
 		try {
+			const sameFile = (file: string | undefined) => file !== undefined && path.resolve(file) === key;
 			// A close of this file still holds its session lease; open it once that ends.
 			for (const c of this.closing.values()) {
-				if (c.sessionFile === opts.sessionPath) await c.done;
+				if (sameFile(c.sessionFile)) await c.done;
 			}
 			// A live session is reused rather than opening the same file twice.
 			for (const a of this.active.values()) {
-				if (a.handle.sessionFile === opts.sessionPath) return a.handle;
+				if (sameFile(a.handle.sessionFile)) return a.handle;
 			}
 			const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
 			// Absolute, like createSession: the SDK session and the deck's mixture
@@ -194,7 +212,28 @@ export class InProcessAgentBridge implements AgentBridge {
 		} finally { release(); }
 	}
 
+	/**
+	 * Start an SDK session and make it live. A close requested while it opens
+	 * wins: the new session is disposed without ever becoming live.
+	 */
 	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed?: string[], fresh = false): Promise<InProcessSessionHandle> {
+		const sessionId = sessionManager.getSessionId();
+		const pending = { closeRequested: false };
+		this.opening.set(sessionId, pending);
+		try {
+			const { handle, entry } = await this.start(cwd, sessionManager, model, mcpServersAllowed, fresh);
+			if (pending.closeRequested) {
+				this.beginClose(sessionId, handle);
+				throw new SessionClosedError(`session ${sessionId} was closed while it was opening`);
+			}
+			this.active.set(sessionId, entry);
+			return handle;
+		} finally {
+			if (this.opening.get(sessionId) === pending) this.opening.delete(sessionId);
+		}
+	}
+
+	private async start(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed: string[] | undefined, fresh: boolean): Promise<{ handle: InProcessSessionHandle; entry: Active }> {
 		const modelRegistry = await this.ensureModelRegistry();
 		const sessionId = sessionManager.getSessionId();
 		// Keep each root's settings isolated; these overrides never write the
@@ -306,12 +345,11 @@ export class InProcessAgentBridge implements AgentBridge {
 			log.info(`extension paths: ${ext.extensions.map(e => (e as { path?: string }).path ?? "<unknown>").join(" | ")}`);
 		}
 		await this.wireExtensionRunner(session);
-		const handle = this.attach(session, cwd, sessionManager, result.setToolUIContext, hasFeature("subagent-tree") ? result.subagentEventBus : undefined, result.mcpManager);
+		const attached = this.attach(session, cwd, sessionManager, result.setToolUIContext, hasFeature("subagent-tree") ? result.subagentEventBus : undefined, result.mcpManager);
 		// A new or resumed chat starts with an empty selection: nothing may run.
-		const entry = this.active.get(sessionId);
-		if (entry) this.enforceAdvisorSelection(entry);
-		await handle.restorePlanMode();
-		return handle;
+		this.enforceAdvisorSelection(attached.entry);
+		await attached.handle.restorePlanMode();
+		return attached;
 	}
 
 
@@ -320,18 +358,27 @@ export class InProcessAgentBridge implements AgentBridge {
 	}
 
 	closeSession(sessionId: string): boolean {
+		const pending = this.opening.get(sessionId);
+		if (pending) {
+			pending.closeRequested = true;
+			return true;
+		}
 		if (this.closing.has(sessionId)) return true;
 		const entry = this.active.get(sessionId);
 		if (!entry) return false;
 		this.active.delete(sessionId);
-		const done = entry.handle
+		this.beginClose(sessionId, entry.handle);
+		return true;
+	}
+
+	private beginClose(sessionId: string, handle: InProcessSessionHandle): void {
+		const done = handle
 			.dispose()
 			.catch((err) => log.warn(`dispose failed`, err))
 			.finally(() => {
 				if (this.closing.get(sessionId)?.done === done) this.closing.delete(sessionId);
 			});
-		this.closing.set(sessionId, { sessionFile: entry.handle.sessionFile, done });
-		return true;
+		this.closing.set(sessionId, { sessionFile: handle.sessionFile, done });
 	}
 
 	/**
@@ -749,7 +796,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		setToolUIContext: CreateAgentSessionResult["setToolUIContext"],
 		subagentEventBus?: CreateAgentSessionResult["subagentEventBus"],
 		mcpManager?: MCPManager,
-	): InProcessSessionHandle {
+	): { handle: InProcessSessionHandle; entry: Active } {
 		const sessionId = (session as any).sessionId as string;
 		const uiBridge = new ExtensionUIBridge(sessionId);
 		// Wire the per-session UI context into the SDK's tool-context store so
@@ -883,8 +930,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			advisorSelection: [],
 			advisorsRunnable: false,
 		};
-		this.active.set(sessionId, entry);
-		return handle;
+		return { handle, entry };
 	}
 
 	// ─── Extension UI dialog bridge surface ──────────────────────────────
