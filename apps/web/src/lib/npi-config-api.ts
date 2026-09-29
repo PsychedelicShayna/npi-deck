@@ -1,7 +1,7 @@
-import type { NpiConfigPatchRequest, NpiConfigPatchResponse, NpiConfigResponse } from "@npi-deck/protocol";
+import type { NpiConfigPatchRequest, NpiConfigPatchResponse, NpiConfigResponse, NpiModelRolesResponse } from "@npi-deck/protocol";
 
-async function request<T>(method: string, body?: NpiConfigPatchRequest): Promise<T> {
-	const response = await fetch("/api/npi-config", {
+async function request<T>(method: string, body?: NpiConfigPatchRequest, url = "/api/npi-config"): Promise<T> {
+	const response = await fetch(url, {
 		method,
 		...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
 	});
@@ -19,4 +19,5 @@ export const npiConfigApi = {
 	/** Set single record keys (null deletes one); the other keys are kept. */
 	setEntries: (id: string, entries: Record<string, unknown>) => request<NpiConfigPatchResponse>("PATCH", { id, entries }),
 	reset: (id: string) => request<NpiConfigPatchResponse>("PATCH", { id, unset: true }),
+	modelRoles: () => request<NpiModelRolesResponse>("GET", undefined, "/api/npi-config/model-roles"),
 };

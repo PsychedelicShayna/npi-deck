@@ -240,6 +240,64 @@ export interface NpiConfigResponse {
 	settings: NpiConfigSetting[];
 }
 
+/** The model a role resolves to among the models the deck has credentials for. */
+export interface NpiModelRoleResolution {
+	provider: string;
+	modelId: string;
+	thinkingLevel?: string;
+}
+
+/**
+ * One NeoPi model role: every built-in role in NeoPi's display order, then any
+ * role `cycleOrder`, `modelRoles` or `modelTags` introduces. Edit a role with
+ * `PATCH /api/npi-config { id: "modelRoles", entries: { [role]: selector | null } }`,
+ * which keeps every other role, including ones this list does not know.
+ */
+export interface NpiModelRole {
+	id: string;
+	/** NeoPi's display name (`smol` is "Fast"); `modelTags` can rename a role. */
+	name: string;
+	/** Built-in short tag such as `SMOL`; absent for custom roles. */
+	tag?: string;
+	/** `chat` roles take chat models; `kind` roles take image, search, speech, dictation or judge models. */
+	section: "chat" | "kind";
+	builtin: boolean;
+	/** `modelTags` hides the role from NeoPi's role carousel. */
+	hidden: boolean;
+	/** Selector the global config file assigns; null when it does not assign one. A list is joined with commas. */
+	value: string | null;
+	/** Selector NeoPi uses for the deck's default workspace, any layer; null when no layer assigns one. */
+	effectiveValue: string | null;
+	/** Layer supplying `effectiveValue`; `default` means unset, so NeoPi's built-in chain applies. */
+	provenance: NpiConfigProvenance;
+	/** Effective pattern chain `@<id>` expands to, built-in fallbacks included. */
+	patterns: string[];
+	/** First pattern that matches an available model; absent when none does. */
+	resolved?: NpiModelRoleResolution;
+	/** Index into `NpiModelRolesResponse.pools`. */
+	pool: number;
+}
+
+/** Models one or more roles accept, judged by NeoPi's own per-role filter. */
+export interface NpiModelRolePool {
+	/** `provider/id` of every model NeoPi counts as available that the roles accept, keyless runners (`local/…`, `web/…`) included. */
+	models: string[];
+	/** The roles also accept mixture-of-agents models (`mixture/<name>`), which exist per workspace. */
+	mixtures: boolean;
+}
+
+export interface NpiModelRolesResponse {
+	/** Workspace whose project layer the provenance reflects. */
+	cwd: string;
+	configPath: string;
+	/** The `modelRoles` setting itself: lock and invalid-value state. */
+	setting: NpiConfigSetting;
+	roles: NpiModelRole[];
+	pools: NpiModelRolePool[];
+	/** Thinking suffixes a chat role's selector may end with (`provider/model:high`), in NeoPi's display order. */
+	thinkingLevels: string[];
+}
+
 /**
  * Exactly one of: `value` to set (strings go through the setting's own text parser),
  * `unset: true` to remove the key from the config file, or `entries` to edit single

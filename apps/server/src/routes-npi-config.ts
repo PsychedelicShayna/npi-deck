@@ -9,9 +9,14 @@ import type {
 	NpiConfigResponse,
 	NpiConfigSetting,
 	NpiConfigTab,
+	NpiModelRole,
+	NpiModelRolePool,
+	NpiModelRolesResponse,
 } from "@npi-deck/protocol";
 
-import { feature, sdk } from "./backend/runtime.ts";
+import { getDeckModelRegistry } from "./auth-singleton.ts";
+import type { FeatureExports } from "./backend/manifest.ts";
+import { feature, hasFeature, sdk } from "./backend/runtime.ts";
 import type { AgentBridge } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
 import { logger } from "./log.ts";
@@ -192,6 +197,72 @@ class RequestError extends Error {
 	}
 }
 
+type RolesApi = FeatureExports<"model-roles">;
+type Registry = Awaited<ReturnType<typeof getDeckModelRegistry>>;
+type RoleCatalogSession = ConstructorParameters<RolesApi["RpcRoles"]>[0];
+type RoleModel = Parameters<ReturnType<RolesApi["getRoleInfo"]>["accepts"]>[0];
+
+// What NeoPi's role filters read of a mixture-of-agents model: it declares no
+// kind (so it is a chat model) and no web-search capability. Mixtures register
+// per workspace, so the shared registry may not hold any when this runs.
+const MIXTURE_SHAPE = { api: "mixture", provider: "mixture", id: "", name: "" } as unknown as RoleModel;
+
+/** A role's selector in one raw layer; NeoPi joins a list of selectors with commas. */
+function roleValue(layer: RawLayer, role: string): string | null {
+	const value = layerValue(layer, ["modelRoles", role]);
+	if (typeof value === "string") return value;
+	return Array.isArray(value) && value.every(entry => typeof entry === "string") ? value.join(",") : null;
+}
+
+/**
+ * NeoPi's `get_roles` catalog for `settings`, with the per-role model pools.
+ * The catalog needs a session only for its active role, which a settings view
+ * has none of, so it gets an empty branch.
+ */
+function modelRoles(settings: Settings, registry: Registry): Pick<NpiModelRolesResponse, "roles" | "pools"> {
+	const api = feature("model-roles");
+	const session = { settings, modelRegistry: registry, sessionManager: { getBranch: () => [] }, sessionId: "" } as unknown as RoleCatalogSession;
+	const globalLayer = settings.getGlobalSettings();
+	const available = registry.getAvailable("all");
+	const pools: NpiModelRolePool[] = [];
+	// Roles judged by the same filter function share a pool.
+	const poolFor = new Map<(model: RoleModel) => boolean, number>();
+	const roles = new api.RpcRoles(session).list().roles.map((role): NpiModelRole => {
+		const accepts = api.getRoleInfo(role.id, settings).accepts;
+		let pool = poolFor.get(accepts);
+		if (pool === undefined) {
+			pool = pools.push({
+				models: available.filter(model => accepts(model as RoleModel)).map(model => `${model.provider}/${model.id}`),
+				mixtures: accepts(MIXTURE_SHAPE),
+			}) - 1;
+			poolFor.set(accepts, pool);
+		}
+		return {
+			id: role.id,
+			name: role.name,
+			...(role.tag ? { tag: role.tag } : {}),
+			section: role.section,
+			builtin: role.source === "builtin",
+			hidden: role.hidden,
+			value: roleValue(globalLayer, role.id),
+			effectiveValue: role.configured ?? null,
+			provenance: settings.getModelRoleProvenance(role.id),
+			patterns: role.patterns,
+			...(role.resolved
+				? {
+						resolved: {
+							provider: role.resolved.provider,
+							modelId: role.resolved.modelId,
+							...(role.resolved.thinkingLevel !== undefined ? { thinkingLevel: String(role.resolved.thinkingLevel) } : {}),
+						},
+					}
+				: {}),
+			pool,
+		};
+	});
+	return { roles, pools };
+}
+
 export function buildNpiConfigRouter(bridge: AgentBridge, config: Config): Hono {
 	const app = new Hono();
 	const load = () => sdk().Settings.loadReadOnly({ cwd: config.defaultCwd, agentDir: sdk().getAgentDir() });
@@ -210,6 +281,27 @@ export function buildNpiConfigRouter(bridge: AgentBridge, config: Config): Hono 
 			return c.json(body);
 		} catch (err) {
 			log.warn("read NeoPi config failed", err);
+			return c.json({ error: LOAD_FAILED }, 500);
+		}
+	});
+
+	app.get("/npi-config/model-roles", async c => {
+		if (!hasFeature("model-roles") || !hasFeature("npi-config"))
+			return c.json({ error: "This NeoPi backend does not expose its model-role catalog; edit modelRoles under Settings → NeoPi." }, 501);
+		try {
+			const settings = await load();
+			const setting = lookup("modelRoles");
+			if (!setting) return c.json({ error: "This NeoPi backend does not register modelRoles." }, 501);
+			const body: NpiModelRolesResponse = {
+				cwd: config.defaultCwd,
+				configPath: globalConfigFile(),
+				setting: describe(setting, settings, settings.getGlobalSettings()),
+				...modelRoles(settings, await getDeckModelRegistry()),
+				thinkingLevels: [...feature("model-roles").CLI_THINKING_LEVELS],
+			};
+			return c.json(body);
+		} catch (err) {
+			log.warn("read NeoPi model roles failed", err);
 			return c.json({ error: LOAD_FAILED }, 500);
 		}
 	});

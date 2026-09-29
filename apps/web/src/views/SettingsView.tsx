@@ -25,6 +25,7 @@ import { Modal } from "@/components/ui/Modal";
 import { OAuthFlowModal } from "@/components/settings/OAuthFlowModal";
 import { ModelsConfigSection } from "@/components/settings/ModelsConfigSection";
 import { NpiConfigSection } from "@/components/settings/NpiConfigSection";
+import { ModelRolesSection } from "@/components/settings/ModelRolesSection";
 import { McpServersSection } from "@/components/settings/McpServersSection";
 import { WorkspacesSection } from "@/components/settings/WorkspacesSection";
 import { AboutSection } from "@/components/settings/AboutSection";
@@ -44,6 +45,7 @@ const SECTIONS = [
 	{ id: "env", label: "Env", description: "Process and deck-managed variables" },
 	{ id: "backend", label: "Backend", description: "Source trees and worker switching" },
 	{ id: "models", label: "Models & providers", description: "Custom providers and models in models.yml" },
+	{ id: "roles", label: "Model roles", description: "Which model NeoPi uses for each role" },
 	{ id: "neopi", label: "NeoPi", description: "Every NeoPi setting in config.yml" },
 	{ id: "mcp", label: "MCP servers", description: "Model Context Protocol servers and scopes" },
 	{ id: "providers", label: "Providers", description: "OAuth sign-in and API-key state" },
@@ -103,6 +105,8 @@ export function SettingsView() {
 								<BackendSection />
 							) : selected === "models" ? (
 								<ModelsConfigSection />
+							) : selected === "roles" ? (
+								<ModelRolesSection />
 							) : selected === "neopi" ? (
 								<NpiConfigSection />
 							) : selected === "mcp" ? (

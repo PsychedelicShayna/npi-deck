@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
-import type { NpiConfigPatchResponse, NpiConfigResponse } from "@npi-deck/protocol";
+import type { NpiConfigPatchResponse, NpiConfigResponse, NpiModelRolesResponse } from "@npi-deck/protocol";
 import { loadBackend, resolveBackendSelection, sdk } from "./backend/runtime.ts";
 import { buildNpiConfigRouter } from "./routes-npi-config.ts";
 import type { AgentBridge } from "./bridge/types.ts";
@@ -37,6 +37,13 @@ const app = buildNpiConfigRouter(bridge, config);
 const request = (url: string, init?: RequestInit) => app.request(`http://127.0.0.1${url}`, init);
 const patch = (body: unknown) => request("/npi-config", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const list = async () => await (await request("/npi-config")).json() as NpiConfigResponse;
+
+const roles = async () => {
+	const response = await request("/npi-config/model-roles");
+	expect(response.status).toBe(200);
+	return await response.json() as NpiModelRolesResponse;
+};
+const BUILTIN_ROLES = ["default", "smol", "slow", "vision", "plan", "commit", "tiny", "memory", "task", "advisor", "chronicler", "prose", "image", "web", "speech", "dictation", "judge"];
 
 beforeEach(async () => {
 	await writeFile(configFile, "theme:\n  dark: titanium\n");
@@ -196,4 +203,48 @@ test("an environment override locks its key with the reason and refuses writes",
 	expect(response.status).toBe(409);
 	expect(((await response.json()) as { error: string }).error).toContain("$PI_EDIT_FUZZY_THRESHOLD");
 	expect(await readFile(configFile, "utf8")).toBe(before);
+});
+
+test("model roles: every built-in role in NeoPi's order, then custom roles, each with its own layer and model filter", async () => {
+	await writeFile(configFile, "modelRoles:\n  smol: openrouter/openai/gpt-4o-mini\n  review: anthropic/claude-opus-5-5:high\n  sweep:\n    - openai/gpt-5\n    - \"@smol\"\n");
+	const projectDir = path.join(project, ".omp");
+	await mkdir(projectDir, { recursive: true });
+	await writeFile(path.join(projectDir, "config.yml"), "modelRoles:\n  plan: openai/gpt-5:high\n");
+	try {
+		const body = await roles();
+		expect(body.roles.map(r => r.id)).toEqual([...BUILTIN_ROLES, "review", "sweep"]);
+		const role = (id: string) => body.roles.find(r => r.id === id)!;
+		expect(role("smol")).toMatchObject({ name: "Fast", tag: "SMOL", section: "chat", builtin: true, value: "openrouter/openai/gpt-4o-mini", effectiveValue: "openrouter/openai/gpt-4o-mini", provenance: "global" });
+		// Unset: no layer assigns it, so NeoPi's built-in chain is what applies.
+		expect(role("slow")).toMatchObject({ value: null, effectiveValue: null, provenance: "default" });
+		expect(role("slow").patterns.length).toBeGreaterThan(0);
+		// A project layer shadows the global file for this workspace.
+		expect(role("plan")).toMatchObject({ value: null, effectiveValue: "openai/gpt-5:high", provenance: "project" });
+		expect(role("review")).toMatchObject({ builtin: false, section: "chat", value: "anthropic/claude-opus-5-5:high", provenance: "global" });
+		expect(role("sweep")).toMatchObject({ value: "openai/gpt-5,@smol" });
+		// Chat roles share one filter, which admits mixtures; model-kind roles each have their own.
+		expect(role("review").pool).toBe(role("default").pool);
+		expect(body.pools[role("default").pool]!.mixtures).toBe(true);
+		expect(new Set(["default", "image", "web", "speech", "dictation"].map(id => role(id).pool)).size).toBe(5);
+		expect(body.pools[role("image").pool]!.mixtures).toBe(false);
+		expect(body.setting).toMatchObject({ id: "modelRoles", type: "record" });
+		expect(body.thinkingLevels).toEqual(expect.arrayContaining(["low", "medium", "high"]));
+	} finally {
+		await rm(projectDir, { recursive: true, force: true });
+	}
+});
+
+test("model roles: assigning or unsetting one role keeps every other role, including unknown ones", async () => {
+	await writeFile(configFile, "modelRoles:\n  smol: openrouter/openai/gpt-4o-mini\n  review: anthropic/claude-opus-5-5:high\n");
+	const saved = await patch({ id: "modelRoles", entries: { slow: "anthropic/claude-opus-5-5:high" } });
+	expect(saved.status).toBe(200);
+	expect((await saved.json() as NpiConfigPatchResponse).live[0]?.effectiveValue).toMatchObject({ slow: "anthropic/claude-opus-5-5:high", review: "anthropic/claude-opus-5-5:high" });
+	expect((await patch({ id: "modelRoles", entries: { smol: null } })).status).toBe(200);
+	const body = await roles();
+	const role = (id: string) => body.roles.find(r => r.id === id);
+	expect(role("slow")).toMatchObject({ value: "anthropic/claude-opus-5-5:high", provenance: "global" });
+	expect(role("smol")).toMatchObject({ value: null, provenance: "default" });
+	expect(role("review")).toMatchObject({ builtin: false, value: "anthropic/claude-opus-5-5:high" });
+	const saved2 = Bun.YAML.parse(await readFile(configFile, "utf8")) as { modelRoles: Record<string, string> };
+	expect(saved2.modelRoles).toEqual({ review: "anthropic/claude-opus-5-5:high", slow: "anthropic/claude-opus-5-5:high" });
 });

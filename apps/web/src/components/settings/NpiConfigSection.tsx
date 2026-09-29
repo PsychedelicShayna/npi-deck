@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
+import { Link } from "react-router-dom";
 import { ArrowDown, ArrowUp, RotateCcw, Save, Search, X } from "lucide-react";
 import type { NpiConfigPatchResponse, NpiConfigProvenance, NpiConfigResponse, NpiConfigSetting } from "@npi-deck/protocol";
 
@@ -16,6 +17,11 @@ type Draft =
 type EditorProps = { setting: NpiConfigSetting; disabled: boolean; onChange: (draft: Draft) => void };
 
 const CLEAN: Draft = { dirty: false };
+
+/** Settings with a dedicated Settings section; their row links there instead of offering the generic editor. */
+const DEDICATED_SECTIONS: Readonly<Record<string, { section: string; label: string }>> = {
+	modelRoles: { section: "roles", label: "Model roles" },
+};
 
 /**
  * Every setting NeoPi registers, grouped by the registry's own tabs and groups.
@@ -168,6 +174,7 @@ function SettingRow({ setting, cwd, onSaved }: { setting: NpiConfigSetting; cwd:
 	}
 
 	const invalid = draft.dirty && "error" in draft ? draft.error : undefined;
+	const dedicated = DEDICATED_SECTIONS[setting.id];
 	const Editor = editorFor(setting);
 	return (
 		<div className="grid grid-cols-1 gap-3 px-3 py-3 text-sm lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)]">
@@ -184,37 +191,47 @@ function SettingRow({ setting, cwd, onSaved }: { setting: NpiConfigSetting; cwd:
 				{notes(setting, cwd).map(note => <p key={note} className="text-xs text-ink-3">{note}</p>)}
 			</div>
 			<div className="min-w-0 space-y-2">
-				{locked ? <p role="note" className="rounded-md border border-warn/30 bg-warn/10 px-2 py-1 text-xs text-warn">{setting.lockedReason}</p> : null}
-				<Editor key={generation} setting={setting} disabled={locked || busy} onChange={setDraft} />
-				{invalid ? <p className="font-mono text-2xs text-danger">{invalid}</p> : null}
-				{error ? <p role="alert" className="font-mono text-2xs text-danger">{error}</p> : null}
-				{status ? <p role="status" className={cn("text-2xs", status.complete ? "text-success" : "text-warn")}>{status.text}</p> : null}
-				<div className="flex flex-wrap items-center gap-2">
-					<Button
-						variant="primary"
-						size="sm"
-						disabled={locked || busy || !draft.dirty || invalid !== undefined}
-						onClick={() => {
-							if (!draft.dirty || "error" in draft) return;
-							void run(() => "entries" in draft ? npiConfigApi.setEntries(setting.id, draft.entries) : npiConfigApi.set(setting.id, draft.value));
-						}}
-					>
-						<Save className="h-3.5 w-3.5" />
-						Save
-					</Button>
-					{draft.dirty ? <Button variant="ghost" size="sm" disabled={busy} onClick={discard}>Discard</Button> : null}
-					<Button
-						variant="outline"
-						size="sm"
-						disabled={locked || busy || !setting.inGlobalConfig}
-						title={setting.inGlobalConfig ? "Remove this key from config.yml" : "config.yml does not set this key"}
-						onClick={() => void run(() => npiConfigApi.reset(setting.id))}
-					>
-						<RotateCcw className="h-3.5 w-3.5" />
-						Reset to default
-					</Button>
-					{!setting.secret ? <span className="truncate font-mono text-2xs text-ink-4">default {preview(setting.defaultValue)}</span> : null}
-				</div>
+				{dedicated ? (
+					<p className="text-xs text-ink-3">
+						Edited per role in{" "}
+						<Link to={`?section=${dedicated.section}`} className="text-accent underline underline-offset-2">Settings → {dedicated.label}</Link>,
+						which changes one key at a time and keeps the rest.
+					</p>
+				) : (
+					<>
+					{locked ? <p role="note" className="rounded-md border border-warn/30 bg-warn/10 px-2 py-1 text-xs text-warn">{setting.lockedReason}</p> : null}
+					<Editor key={generation} setting={setting} disabled={locked || busy} onChange={setDraft} />
+					{invalid ? <p className="font-mono text-2xs text-danger">{invalid}</p> : null}
+					{error ? <p role="alert" className="font-mono text-2xs text-danger">{error}</p> : null}
+					{status ? <p role="status" className={cn("text-2xs", status.complete ? "text-success" : "text-warn")}>{status.text}</p> : null}
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							variant="primary"
+							size="sm"
+							disabled={locked || busy || !draft.dirty || invalid !== undefined}
+							onClick={() => {
+								if (!draft.dirty || "error" in draft) return;
+								void run(() => "entries" in draft ? npiConfigApi.setEntries(setting.id, draft.entries) : npiConfigApi.set(setting.id, draft.value));
+							}}
+						>
+							<Save className="h-3.5 w-3.5" />
+							Save
+						</Button>
+						{draft.dirty ? <Button variant="ghost" size="sm" disabled={busy} onClick={discard}>Discard</Button> : null}
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={locked || busy || !setting.inGlobalConfig}
+							title={setting.inGlobalConfig ? "Remove this key from config.yml" : "config.yml does not set this key"}
+							onClick={() => void run(() => npiConfigApi.reset(setting.id))}
+						>
+							<RotateCcw className="h-3.5 w-3.5" />
+							Reset to default
+						</Button>
+						{!setting.secret ? <span className="truncate font-mono text-2xs text-ink-4">default {preview(setting.defaultValue)}</span> : null}
+					</div>
+					</>
+				)}
 			</div>
 		</div>
 	);
@@ -250,7 +267,7 @@ function liveSummary(result: NpiConfigPatchResponse): { text: string; complete: 
 	return { text: parts.join(" "), complete: failed.length === 0 && held === 0 };
 }
 
-function provenanceTone(provenance: NpiConfigProvenance): "accent" | "default" | "muted" | "warn" {
+export function provenanceTone(provenance: NpiConfigProvenance): "accent" | "default" | "muted" | "warn" {
 	if (provenance === "env") return "accent";
 	if (provenance === "global") return "default";
 	if (provenance === "default") return "muted";
@@ -610,7 +627,7 @@ function recordOf(entries: Entry[]): { value: Record<string, unknown> } | { erro
 }
 
 /**
- * Key → value rows. Each value is text (model roles), a list (fallback chains)
+ * Key → value rows. Each value is text (selectors), a list (fallback chains)
  * or JSON; a JSON mode edits the whole record at once.
  */
 function RecordEditor({ setting, disabled, onChange }: EditorProps) {

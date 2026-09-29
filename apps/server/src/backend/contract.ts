@@ -116,6 +116,7 @@ const multiRoot = feature("multi-root");
 const build = feature("build-identity");
 const npiConfig = feature("npi-config");
 const models = feature("models-config");
+const modelRoles = feature("model-roles");
 
 await check("manifest: every feature available", [], () => {
 	const missing = Object.entries(backend.features).flatMap(([, f]) => f.diagnostics);
@@ -231,6 +232,26 @@ await check("models-config: NeoPi validates a models.yml copy and a registry rel
 	const rejected = models.ModelsConfigFile.relocate(file).tryLoad();
 	assert(rejected.status === "error" && rejected.error.message.includes("invalid contextWindow"), `invalid copy accepted: ${rejected.status}`);
 	return `relocated load ok; reload lists added model; rejects with "${rejected.error.message.split("\n")[0]}"`;
+});
+
+await check("model-roles: RPC catalog lists built-in then custom roles; role filters split model kinds", ["RpcRoles", "getRoleInfo", "CLI_THINKING_LEVELS"], async () => {
+	const settings = await core.Settings.loadReadOnly({ cwd: agentDir, agentDir });
+	// A runtime override introduces a custom role without writing config.yml.
+	settings.overrideModelRoles({ review: "openrouter/openai/gpt-4o-mini" });
+	const session = { settings, modelRegistry: registry, sessionManager: { getBranch: () => [] }, sessionId: "" };
+	const roles = new modelRoles.RpcRoles(session as unknown as ConstructorParameters<typeof modelRoles.RpcRoles>[0]).list().roles;
+	const ids = roles.map(role => role.id);
+	assert(ids[0] === "default" && ids.includes("judge") && ids.at(-1) === "review", `unexpected role order ${ids.join(",")}`);
+	const review = roles.find(role => role.id === "review")!;
+	assert(review.source === "configured" && review.configured === "openrouter/openai/gpt-4o-mini", `custom role ${JSON.stringify(review)}`);
+	const slow = roles.find(role => role.id === "slow")!;
+	assert(slow.source === "builtin" && slow.configured === undefined && slow.patterns.length > 0, `unset slow has no built-in chain: ${JSON.stringify(slow)}`);
+	const chat = modelRoles.getRoleInfo("default", settings).accepts;
+	assert(modelRoles.getRoleInfo("review", settings).accepts === chat, "a custom role does not share the chat filter");
+	assert(cheapModel && chat(cheapModel) && !modelRoles.getRoleInfo("image", settings).accepts(cheapModel), "role filters do not split chat from image models");
+	const levels = modelRoles.CLI_THINKING_LEVELS;
+	assert(levels.includes("high") && levels.includes("off"), `thinking levels ${levels.join(",")}`);
+	return `${roles.length} roles (${ids.filter(id => roles.find(r => r.id === id)!.source === "builtin").length} built-in); slow chain ${slow.patterns.length} patterns; ${levels.length} thinking levels`;
 });
 
 await check("mixtures: workspaces register only their own MIXTURES.toml models", ["MixtureWorkspace"], async () => {

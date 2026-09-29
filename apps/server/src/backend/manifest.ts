@@ -29,6 +29,9 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/capability": typeof import("@oh-my-pi/pi-coding-agent/capability");
 	"@oh-my-pi/pi-coding-agent/capability/skill": typeof import("@oh-my-pi/pi-coding-agent/capability/skill");
 	"@oh-my-pi/pi-coding-agent/config/model-settings": typeof import("@oh-my-pi/pi-coding-agent/config/model-settings");
+	"@oh-my-pi/pi-coding-agent/config/model-roles": typeof import("@oh-my-pi/pi-coding-agent/config/model-roles");
+	"@oh-my-pi/pi-coding-agent/modes/rpc/rpc-roles": typeof import("@oh-my-pi/pi-coding-agent/modes/rpc/rpc-roles");
+	"@oh-my-pi/pi-tui/thinking": typeof import("@oh-my-pi/pi-tui/thinking");
 	"@oh-my-pi/pi-coding-agent/config/models-config": typeof import("@oh-my-pi/pi-coding-agent/config/models-config");
 	"@oh-my-pi/pi-coding-agent/config/all-settings": typeof import("@oh-my-pi/pi-coding-agent/config/all-settings");
 	"@oh-my-pi/pi-coding-agent/config/registry": typeof import("@oh-my-pi/pi-coding-agent/config/registry");
@@ -257,6 +260,20 @@ export const MANIFEST = {
 			TAB_METADATA: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_METADATA"),
 			TAB_GROUPS: op("@oh-my-pi/pi-tui/overlays/settings-defs", "TAB_GROUPS"),
 			MAIN_CONFIG_FILENAMES: op("@oh-my-pi/pi-utils", "MAIN_CONFIG_FILENAMES"),
+		},
+	},
+	/**
+	 * #59: the Model roles editor. NeoPi's RPC role catalog (built-in and custom
+	 * roles with their effective chains and resolved models) and the per-role
+	 * model filter; writes go through the npi-config path.
+	 */
+	"model-roles": {
+		tier: "optional-feature",
+		consumers: ["routes-npi-config.ts"],
+		exports: {
+			RpcRoles: op("@oh-my-pi/pi-coding-agent/modes/rpc/rpc-roles", "RpcRoles"),
+			getRoleInfo: op("@oh-my-pi/pi-coding-agent/config/model-roles", "getRoleInfo"),
+			CLI_THINKING_LEVELS: op("@oh-my-pi/pi-tui/thinking", "CLI_THINKING_LEVELS"),
 		},
 	},
 	/** #90: list, edit and toggle MCP server definitions in the user and project mcp.json files. */
