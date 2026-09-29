@@ -471,6 +471,8 @@ export const useStore = create<StoreState>()(
 			// Closing the chat on screen is a navigation: an open still in
 			// flight must not bring a chat back afterwards.
 			if (get().activeId === id) ++navigation;
+			// The server finishes the close in the background; a reconnect meanwhile must not resubscribe.
+			get().subscribed.delete(id);
 			set((s) => {
 				const next = { ...s.sessionsById };
 				delete next[id];
@@ -778,20 +780,25 @@ function handleFrame(
 			return;
 
 		case "session_disposed": {
-			// The server no longer runs this chat (for example the idle reaper
-			// stopped it while this client was disconnected). One with a file
-			// stays on screen read-only, so the next send resumes it instead of
-			// posting to a session that is gone.
+			// The server stopped a live generation of this chat (closed, idle
+			// reaper, or gone while this client was disconnected) and dropped
+			// this connection's subscription to it.
 			get().subscribed.delete(frame.sessionId);
+			// Only a live view shows that generation. A chat closed here and
+			// reopened read-only before the slow close finished is newer: keep it.
+			const disposed = get().sessionsById[frame.sessionId];
+			const live = disposed !== undefined && !disposed.readOnly;
 			set((s) => {
-				const prev = s.sessionsById[frame.sessionId];
-				const nextSessions = { ...s.sessionsById };
-				if (prev?.sessionFile) nextSessions[frame.sessionId] = endLive(prev, prev.sessionFile);
-				else delete nextSessions[frame.sessionId];
 				const nextDialogs = { ...s.pendingDialogs };
 				const subagentsBySession = { ...s.subagentsBySession };
 				delete subagentsBySession[frame.sessionId];
 				delete nextDialogs[frame.sessionId];
+				if (!live) return { pendingDialogs: nextDialogs, subagentsBySession };
+				// One with a file stays on screen read-only, so the next send
+				// resumes it instead of posting to a session that is gone.
+				const nextSessions = { ...s.sessionsById };
+				if (disposed.sessionFile) nextSessions[frame.sessionId] = endLive(disposed, disposed.sessionFile);
+				else delete nextSessions[frame.sessionId];
 				return {
 					sessionsById: nextSessions,
 					pendingDialogs: nextDialogs,
@@ -800,7 +807,7 @@ function handleFrame(
 				};
 			});
 			// Events missed while disconnected are in the file; show it.
-			const ro = get().sessionsById[frame.sessionId]?.readOnly;
+			const ro = live ? get().sessionsById[frame.sessionId]?.readOnly : undefined;
 			if (ro) {
 				api.getTranscript(ro.path, TRANSCRIPT_TAIL).then((t) => {
 					// Resumed, reopened or restarted meanwhile: that state wins.

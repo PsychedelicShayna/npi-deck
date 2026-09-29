@@ -171,3 +171,28 @@ test("closing a chat drops its unsent draft; other chats keep theirs", async () 
 	expect(readDraft("delta")?.text).toBe("for delta");
 	dropDraft("delta");
 });
+
+test("a chat reopened read-only after closing keeps its view when the slow close finishes", async () => {
+	useStore.getState().selectSession("alpha");
+	sockets.at(-1)!.emit("message", { type: "subscribed", sessionId: "alpha", snapshot: snapshot("alpha") });
+	// DELETE answers 202 at once; the server disposes the chat in the background.
+	const closing = useStore.getState().disposeSession("alpha");
+	answer((p) => p.method === "DELETE" && p.url.endsWith("/sessions/alpha"), { ok: true });
+	await closing;
+	expect(useStore.getState().subscribed.has("alpha")).toBe(false);
+
+	const open = useStore.getState().openTranscript("/s/alpha.jsonl");
+	answer(transcriptOf("alpha"), transcript("alpha"));
+	await open;
+	const view = useStore.getState().sessionsById.alpha;
+	expect(view?.readOnly?.path).toBe("/s/alpha.jsonl");
+
+	// The close of the old live chat finishes now.
+	sockets.at(-1)!.emit("message", { type: "session_disposed", sessionId: "alpha" });
+	await settle();
+	const state = useStore.getState();
+	expect(state.sessionsById.alpha).toBe(view!);
+	expect(state.activeId).toBe("alpha");
+	expect(state.subscribed.has("alpha")).toBe(false);
+	expect(pending.filter(transcriptOf("alpha"))).toEqual([]);
+});
