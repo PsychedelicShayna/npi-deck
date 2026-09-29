@@ -1531,10 +1531,11 @@ export interface RoutineRun {
 	/** NeoPi tree selected by this run's first agent step; absent for deck-only or historical runs. */
 	backend?: { path: string; commit: string | null; version: string | null };
 	/**
-	 * JSON-serialized trigger payload (webhook body, manual params, event payload),
-	 * at most 8 KiB. A larger payload is `{ truncated: true, bytes, preview }`.
-	 * A signature-rejected webhook stores `{ path, headers }` with credential
-	 * header values replaced by `[redacted]`.
+	 * JSON-serialized trigger payload (webhook body, manual params, event payload).
+	 * Values under credential-like keys (token, secret, auth, cookie, …) are
+	 * `"[redacted]"`; values under other keys are stored as sent. At most 8 KiB:
+	 * a larger payload is `{ truncated: true, bytes, preview }`. A
+	 * signature-rejected webhook stores `{ path, headers }`, header names only.
 	 */
 	triggerPayload?: string;
 	/** Sum of input+output LLM tokens across all agent steps in this run. */

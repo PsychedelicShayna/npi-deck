@@ -149,11 +149,19 @@ command; deck-only and historical runs have no backend field.
 
 Each run also records its trigger payload (`triggerPayload`, a JSON string):
 the webhook body, manual params, or event payload. Steps always receive the
-full payload. The stored copy is capped at 8 KiB; a larger payload is stored
-as `{ "truncated": true, "bytes": <full size>, "preview": "<head of its JSON>" }`.
-A webhook rejected for a bad signature records its path and header names,
-with every header value except `accept`, `content-encoding`, `content-length`,
-`content-type` and `user-agent` stored as `[redacted]`.
+full, unredacted payload; only the stored copy is changed.
+
+The stored copy is redacted by key name. At any depth, the value of a key
+whose name contains `token`, `secret`, `passw`, `pwd`, `api_key` / `api-key` /
+`apikey`, `auth`, `signature`, `cookie`, `credential`, `session` or `bearer`
+(any case) is stored as `"[redacted]"`. Values under any other key are stored
+as sent, so a credential under an innocuous key name is kept. Keys such as
+`author` or `session_count` match too and are redacted.
+
+After redaction the copy is capped at 8 KiB. A larger payload is stored as
+`{ "truncated": true, "bytes": <size of the redacted JSON>, "preview": "<its head>" }`.
+A webhook rejected for a bad signature records only its path and the sorted
+names of the request headers, never a header value.
 
 ## Cross-run state
 

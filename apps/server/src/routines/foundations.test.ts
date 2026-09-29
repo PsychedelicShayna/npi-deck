@@ -120,6 +120,21 @@ test("every trigger kind stores a bounded, parseable payload while its steps sti
 	}
 });
 
+test("a large payload's credential is redacted before truncation while its step still receives it", async () => {
+	setup();
+	const marker = path.join(home, "credential");
+	const r = routine(spec([{ id: "write", type: "run", command: `echo '{{ trigger.client_secret }}' > '${marker}'` }]));
+	// The credential comes first, so an unredacted preview would carry it.
+	const payload = { client_secret: "cs-live-value", blob: "z".repeat(50_000) };
+	await runner!.fire(r.id, "manual", payload);
+	expect(fs.readFileSync(marker, "utf8").trim()).toBe("cs-live-value");
+	const stored = listRuns(r.id)[0]!.triggerPayload!;
+	expect(stored).not.toContain("cs-live-value");
+	const parsed = JSON.parse(stored);
+	expect(parsed.truncated).toBe(true);
+	expect(parsed.preview.startsWith(`{"client_secret":"[redacted]","blob":"zzz`)).toBe(true);
+});
+
 test("disabled routine ignores cron and event triggers but still runs manually", async () => {
 	setup();
 	const marker = path.join(home, "disabled");

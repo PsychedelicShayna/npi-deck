@@ -97,14 +97,14 @@ test("a signed webhook for an enabled routine is accepted and runs", async () =>
 	expect(JSON.parse(listRuns(routine.id)[0]!.triggerPayload!)).toEqual({ key: "value" });
 });
 
-test("a rejected webhook's run shows which headers arrived but never a credential value", async () => {
+test("a rejected webhook's run lists which headers arrived but never a header value", async () => {
 	const { routine, hookPath } = setup(true);
-	const credentials = ["near-miss-hook-secret", "Bearer sender-token", "session=cookie-value", "api-key-value"];
+	const credentials = ["near-miss-hook-secret", "Bearer sender-token", "session=cookie-value", "api-key-value", "ua-embedded-token"];
 	const response = await buildHooksRouter(runner!).request(hookPath, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",
-			"user-agent": "sender/1.0",
+			"user-agent": `sender/1.0 (${credentials[4]!})`,
 			"x-routine-signature": credentials[0]!,
 			authorization: credentials[1]!,
 			cookie: credentials[2]!,
@@ -120,14 +120,19 @@ test("a rejected webhook's run shows which headers arrived but never a credentia
 	for (const credential of credentials) expect(runs[0]!.triggerPayload).not.toContain(credential);
 	expect(JSON.parse(runs[0]!.triggerPayload!)).toEqual({
 		path: hookPath,
-		headers: {
-			"content-type": "application/json",
-			"user-agent": "sender/1.0",
-			"x-routine-signature": "[redacted]",
-			authorization: "[redacted]",
-			cookie: "[redacted]",
-			"x-api-key": "[redacted]",
-		},
+		headers: ["authorization", "content-type", "cookie", "user-agent", "x-api-key", "x-routine-signature"],
+	});
+});
+
+test("a signed webhook's stored body redacts credential keys at any depth and keeps other values", async () => {
+	const { routine, marker, deliver } = setup(true);
+	const body = { access_token: "tok-live-1", key: "value", nested: { Password: "pw-live-2", list: [{ "api-key": "ak-live-3" }] } };
+	expect((await deliver(SECRET, JSON.stringify(body))).status).toBe(202);
+	expect(await waitFor(() => listRuns(routine.id)[0]?.endedAt !== undefined)).toBe(true);
+	expect(fs.existsSync(marker)).toBe(true);
+	const { runs } = await (await buildRoutinesRouter(runner!).request(`/routines/${routine.id}/runs`)).json() as ListRoutineRunsResponse;
+	expect(JSON.parse(runs[0]!.triggerPayload!)).toEqual({
+		access_token: "[redacted]", key: "value", nested: { Password: "[redacted]", list: [{ "api-key": "[redacted]" }] },
 	});
 });
 
