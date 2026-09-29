@@ -9,7 +9,7 @@
 import { Hono } from "hono";
 import type { MaintenanceGateState, UpdateMaintenanceGateRequest } from "@npi-deck/protocol";
 
-import { appendEnvAudit, applyManagedEnvUpdatesToProcess, writeManagedEnvUpdates } from "./env-store.ts";
+import { appendEnvAudit, commitManagedEnvUpdates } from "./env-store.ts";
 import { ENV_SCHEMA_BY_KEY, validateEnvValue } from "./env-schema.ts";
 import { MAINTENANCE_GATE_ENV_KEYS, readMaintenanceGateState } from "./maintenance-gate.ts";
 
@@ -72,8 +72,7 @@ export function buildStartersRouter(): Hono {
 			}
 		}
 
-		await writeManagedEnvUpdates(updates);
-		applyManagedEnvUpdatesToProcess(updates);
+		await commitManagedEnvUpdates(updates);
 		const set = Object.keys(updates).filter((k) => updates[k] !== null);
 		const unset = Object.keys(updates).filter((k) => updates[k] === null);
 		if (set.length > 0) await appendEnvAudit("set", set);

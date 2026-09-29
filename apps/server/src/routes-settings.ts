@@ -17,11 +17,10 @@ import { ENV_SCHEMA, ENV_SCHEMA_BY_KEY, type EnvSchemaEntry, validateEnvValue } 
 import {
 	MANAGED_ENV_KEYS_LOADED,
 	appendEnvAudit,
-	applyManagedEnvUpdatesToProcess,
+	commitManagedEnvUpdates,
 	getDataDir,
 	getManagedEnvPath,
 	readManagedEnvFile,
-	writeManagedEnvUpdates,
 } from "./env-store.ts";
 import { setLogLevel } from "./log.ts";
 import type { AgentBridge } from "./bridge/types.ts";
@@ -75,8 +74,7 @@ export function buildSettingsRouter(
 			clean[key] = value;
 		}
 
-		await writeManagedEnvUpdates(clean);
-		applyManagedEnvUpdatesToProcess(clean);
+		await commitManagedEnvUpdates(clean);
 		await appendEnvAudit("set", Object.keys(clean).filter((key) => clean[key] !== null));
 		await appendEnvAudit("unset", Object.keys(clean).filter((key) => clean[key] === null));
 

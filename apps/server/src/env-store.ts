@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -66,7 +67,7 @@ export function loadManagedEnvIntoProcess(): void {
  * launching shell — those values are tracked by their absence from
  * `MANAGED_ENV_KEYS_LOADED`.
  */
-export function applyManagedEnvUpdatesToProcess(updates: Record<string, string | null>): string[] {
+function applyManagedEnvUpdatesToProcess(updates: Record<string, string | null>): string[] {
 	const propagated: string[] = [];
 	for (const [key, value] of Object.entries(updates)) {
 		const ownedByManaged = MANAGED_ENV_KEYS_LOADED.has(key) || process.env[key] === undefined;
@@ -83,10 +84,51 @@ export function applyManagedEnvUpdatesToProcess(updates: Record<string, string |
 	return propagated;
 }
 
-export async function writeManagedEnvUpdates(
+/** Tail of the in-flight update chain per managed file (resolved path). */
+const managedEnvWrites = new Map<string, Promise<void>>();
+
+/**
+ * Run `task` after every earlier task queued for the same file has settled, so each
+ * read-modify-write starts from the previous one's result.
+ */
+async function serializeManagedEnvWrite<T>(filePath: string, task: () => Promise<T>): Promise<T> {
+	const lockKey = path.resolve(filePath);
+	const previous = managedEnvWrites.get(lockKey) ?? Promise.resolve();
+	const run = previous.then(task);
+	const tail = run.then(
+		() => undefined,
+		() => undefined,
+	);
+	managedEnvWrites.set(lockKey, tail);
+	try {
+		return await run;
+	} finally {
+		if (managedEnvWrites.get(lockKey) === tail) managedEnvWrites.delete(lockKey);
+	}
+}
+
+/** Apply `updates` to the .env at `filePath`, serialized with every other write to that file. */
+export function writeManagedEnvUpdates(
 	updates: Record<string, string | null>,
 	filePath = getManagedEnvPath(),
 ): Promise<void> {
+	return serializeManagedEnvWrite(filePath, () => rewriteManagedEnvFile(updates, filePath));
+}
+
+/**
+ * Persist `updates` to the managed .env, then mirror them into `process.env`, as one
+ * serialized step: concurrent saves keep each other's keys, and the process sees
+ * updates in the order the file received them. Returns the keys propagated into `process.env`.
+ */
+export function commitManagedEnvUpdates(updates: Record<string, string | null>): Promise<string[]> {
+	const filePath = getManagedEnvPath();
+	return serializeManagedEnvWrite(filePath, async () => {
+		await rewriteManagedEnvFile(updates, filePath);
+		return applyManagedEnvUpdatesToProcess(updates);
+	});
+}
+
+async function rewriteManagedEnvFile(updates: Record<string, string | null>, filePath: string): Promise<void> {
 	const parsed = readManagedEnvFile(filePath);
 	const pending = new Map(Object.entries(updates));
 	const nextLines: EnvLine[] = [];
@@ -169,14 +211,20 @@ function quoteEnvValue(value: string): string {
 
 async function atomicWrite(filePath: string, content: string): Promise<void> {
 	await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-	const tmp = `${filePath}.pending-${process.pid}-${Date.now()}`;
-	const handle = await fs.promises.open(tmp, "w", 0o600);
+	const tmp = `${filePath}.pending-${process.pid}-${crypto.randomUUID()}`;
+	// "wx" is O_CREAT|O_EXCL: never reuse or follow an existing path.
+	const handle = await fs.promises.open(tmp, "wx", 0o600);
 	try {
-		await handle.writeFile(content, "utf8");
-		await handle.sync();
-	} finally {
-		await handle.close();
+		try {
+			await handle.writeFile(content, "utf8");
+			await handle.sync();
+		} finally {
+			await handle.close();
+		}
+		if (process.platform !== "win32") await fs.promises.chmod(tmp, 0o600);
+		await fs.promises.rename(tmp, filePath);
+	} catch (err) {
+		await fs.promises.rm(tmp, { force: true });
+		throw err;
 	}
-	if (process.platform !== "win32") await fs.promises.chmod(tmp, 0o600);
-	await fs.promises.rename(tmp, filePath);
 }
