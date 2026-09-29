@@ -97,10 +97,11 @@ export const routinesApi = {
 		if (!res.ok) throw new Error(`HTTP ${res.status} /routines/${id}/webhook: ${await res.text().catch(() => "")}`);
 		return (await res.json()) as RoutineWebhookStatus;
 	},
-	setWebhookAcceptBareSecret(id: string, acceptBareSecret: boolean): Promise<RoutineWebhookStatus> {
+	/** One-way: the server never accepts the bare secret again once refused. */
+	refuseWebhookBareSecret(id: string): Promise<RoutineWebhookStatus> {
 		return req<RoutineWebhookStatus>(`/routines/${encodeURIComponent(id)}/webhook`, {
 			method: "PATCH",
-			body: JSON.stringify({ acceptBareSecret }),
+			body: JSON.stringify({ acceptBareSecret: false }),
 		});
 	},
 };

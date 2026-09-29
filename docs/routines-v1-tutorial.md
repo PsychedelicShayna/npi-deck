@@ -147,10 +147,20 @@ Webhooks registered before signed deliveries existed sent the bare secret as
 Settings tab shows a deprecation warning with the last such delivery. The
 first bare-secret delivery also lets the deck store that secret, so the same
 sender can switch to signing with the secret it already has; then click
-**Stop accepting the bare secret** (or
-`PATCH /api/routines/:id/webhook {"acceptBareSecret": false}`). Rotating the
-secret also ends bare-secret deliveries. New registrations never accept the
-bare secret.
+**Stop accepting the bare secret** and confirm (or
+`PATCH /api/routines/:id/webhook {"acceptBareSecret": false}`). This is
+permanent: `{"acceptBareSecret": true}` answers `409` for any registration
+that has stopped accepting it. Rotating the secret also ends bare-secret
+deliveries for good. New registrations never accept the bare secret.
+
+The checks run again when the body has arrived, against the registration
+as it is at that moment: a delivery still uploading when the secret is
+rotated or the bare secret is refused is rejected, and so is one whose
+timestamp leaves the window during the upload.
+
+Because `deck.db` holds the secrets, the deck keeps its data dir
+(`~/.npi-deck`) at `0700` and `deck.db`, `deck.db-wal` and `deck.db-shm` at
+`0600`, narrowing files left more open by earlier versions at startup.
 
 ## Concurrency
 

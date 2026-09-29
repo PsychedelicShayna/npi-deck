@@ -25,10 +25,12 @@ export function WebhookSecretPanel({
 	const [status, setStatus] = useState<RoutineWebhookStatus | null>(null);
 	const [secret, setSecret] = useState<string | undefined>();
 	const [busy, setBusy] = useState(false);
+	const [confirmingRefusal, setConfirmingRefusal] = useState(false);
 
 	useEffect(() => {
 		let live = true;
 		setSecret(undefined);
+		setConfirmingRefusal(false);
 		void routinesApi.webhookStatus(routineId).then((s) => {
 			if (live) setStatus(s);
 		}, (e: unknown) => {
@@ -53,7 +55,8 @@ export function WebhookSecretPanel({
 	async function refuseBareSecret(): Promise<void> {
 		setBusy(true);
 		try {
-			setStatus(await routinesApi.setWebhookAcceptBareSecret(routineId, false));
+			setStatus(await routinesApi.refuseWebhookBareSecret(routineId));
+			setConfirmingRefusal(false);
 		} catch (e) {
 			onError(String(e));
 		} finally {
@@ -92,14 +95,41 @@ export function WebhookSecretPanel({
 							The deck learns the secret from its next bare-secret delivery; until then only a rotated secret can sign.
 						</div>
 					)}
-					<button
-						type="button"
-						disabled={busy}
-						onClick={() => void refuseBareSecret()}
-						className="btn-ghost h-7 text-2xs"
-					>
-						Stop accepting the bare secret
-					</button>
+					{confirmingRefusal ? (
+						<div className="space-y-1">
+							<div>
+								This cannot be undone: once refused, the bare secret is never accepted again, and a sender still
+								using it gets <code>401</code>.
+							</div>
+							<div className="flex gap-1">
+								<button
+									type="button"
+									disabled={busy}
+									onClick={() => void refuseBareSecret()}
+									className="btn-ghost h-7 text-2xs"
+								>
+									Stop accepting it permanently
+								</button>
+								<button
+									type="button"
+									disabled={busy}
+									onClick={() => setConfirmingRefusal(false)}
+									className="btn-ghost h-7 text-2xs"
+								>
+									Cancel
+								</button>
+							</div>
+						</div>
+					) : (
+						<button
+							type="button"
+							disabled={busy}
+							onClick={() => setConfirmingRefusal(true)}
+							className="btn-ghost h-7 text-2xs"
+						>
+							Stop accepting the bare secret
+						</button>
+					)}
 				</div>
 			) : null}
 			<button type="button" disabled={busy} onClick={() => void rotate()} className="btn-ghost h-7 text-2xs">

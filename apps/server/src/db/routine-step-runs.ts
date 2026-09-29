@@ -285,14 +285,16 @@ function isWebhookPathClaimedByAnotherRoutine(path: string, routineId: string): 
 	return owner !== undefined && owner.routine_id !== routineId;
 }
 
-/** Turn bare-secret signatures on or off. False when the routine has no webhook registration. */
-export function setWebhookAcceptBareSecret(routineId: string, accept: boolean): boolean {
-	const result = getDb()
-		.prepare<unknown, [number, string]>(
-			"UPDATE routine_webhook_secrets SET accept_bare_secret = ? WHERE routine_id = ?",
+/**
+ * Stop accepting the bare secret. One-way: nothing turns it back on, since
+ * only registrations from before signed deliveries ever accept it.
+ */
+export function refuseWebhookBareSecret(routineId: string): void {
+	getDb()
+		.prepare<unknown, [string]>(
+			"UPDATE routine_webhook_secrets SET accept_bare_secret = 0 WHERE routine_id = ?",
 		)
-		.run(accept ? 1 : 0, routineId);
-	return result.changes > 0;
+		.run(routineId);
 }
 
 /**

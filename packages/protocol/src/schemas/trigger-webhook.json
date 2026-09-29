@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://npi-deck.app/schemas/trigger-webhook.json",
   "title": "RoutineTrigger — webhook",
-  "description": "HMAC-verified webhook trigger. Mounted at /hooks/<path> on the deck server. Each delivery carries X-Routine-Timestamp: <unix seconds> and X-Routine-Signature: sha256=<hex HMAC-SHA256(secret, \"<timestamp>.<raw body>\")>; the MAC is checked over the exact request bytes in constant time, and a timestamp more than 300 seconds from the deck's clock is refused as a replay. Registrations made before signed deliveries also accept the bare secret as X-Routine-Signature (deprecated) until that is turned off or the secret is rotated.",
+  "description": "HMAC-verified webhook trigger. Mounted at /hooks/<path> on the deck server. Each delivery carries X-Routine-Timestamp: <unix seconds> and X-Routine-Signature: sha256=<hex HMAC-SHA256(secret, \"<timestamp>.<raw body>\")>; the MAC is checked over the exact request bytes in constant time, and a timestamp more than 300 seconds from the deck's clock is refused as a replay. Registrations made before signed deliveries also accept the bare secret as X-Routine-Signature (deprecated) until that is permanently turned off or the secret is rotated.",
   "type": "object",
   "required": ["webhook"],
   "properties": {

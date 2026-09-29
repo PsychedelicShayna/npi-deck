@@ -1846,7 +1846,8 @@ export interface RoutineWebhookStatus {
 	/**
 	 * The bare secret is accepted as `X-Routine-Signature` (deprecated). Set on
 	 * registrations made before signed deliveries; cleared by rotation or
-	 * `PATCH /api/routines/:id/webhook { acceptBareSecret: false }`.
+	 * `PATCH /api/routines/:id/webhook { acceptBareSecret: false }`. Once
+	 * cleared it cannot be set again (`acceptBareSecret: true` answers 409).
 	 */
 	acceptsBareSecret: boolean;
 	/**

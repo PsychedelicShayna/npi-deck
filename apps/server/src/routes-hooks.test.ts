@@ -8,7 +8,7 @@ import { closeDb, getDb, openDb } from "./db/index.ts";
 import { getWebhookSecretByPath, hashSecretForStorage, upsertWebhookSecret } from "./db/routine-step-runs.ts";
 import { createV1Routine, deleteRoutine, listRuns, updateV1Routine } from "./db/routines.ts";
 import { initializeOwnedGeneration, stopOwnedProcesses } from "./owned-process.ts";
-import { buildHooksRouter } from "./routes-hooks.ts";
+import { buildHooksRouter, REPLAY_WINDOW_SECS } from "./routes-hooks.ts";
 import { buildRoutinesRouter } from "./routes-routines.ts";
 import { RoutinesRunner } from "./routines-runner.ts";
 
@@ -31,6 +31,14 @@ const nowSecs = () => Math.floor(Date.now() / 1000);
 function signed(body: string, secret = SECRET, timestamp = nowSecs()): Record<string, string> {
 	const mac = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
 	return { "x-routine-signature": `sha256=${mac}`, "x-routine-timestamp": String(timestamp) };
+}
+
+function patchWebhook(routes: { request: (path: string, init: RequestInit) => Response | Promise<Response> }, routineId: string, body: unknown) {
+	return routes.request(`/routines/${routineId}/webhook`, {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
 }
 
 /**
@@ -199,16 +207,16 @@ test("turning off the bare secret on an upgraded registration refuses it and kee
 	expect((await deliver({ "x-routine-signature": SECRET })).status).toBe(202);
 	await waitFor(() => listRuns(routine.id)[0]?.endedAt !== undefined);
 
-	const patched = await routes.request(`/routines/${routine.id}/webhook`, {
-		method: "PATCH",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ acceptBareSecret: false }),
-	});
+	const patched = await patchWebhook(routes, routine.id, { acceptBareSecret: false });
 	expect(patched.status).toBe(200);
 	expect(((await patched.json()) as { acceptsBareSecret: boolean }).acceptsBareSecret).toBe(false);
 
 	expect((await deliver({ "x-routine-signature": SECRET })).status).toBe(401);
 	expect((await deliver(signed(BODY))).status).toBe(202);
+
+	// One-way: once refused, the bare secret cannot be accepted again.
+	expect((await patchWebhook(routes, routine.id, { acceptBareSecret: true })).status).toBe(409);
+	expect((await deliver({ "x-routine-signature": SECRET })).status).toBe(401);
 });
 
 test("webhook status reports the migration state without the secret or its hash", async () => {
@@ -233,6 +241,60 @@ test("rotating the secret stops accepting the bare secret and signs with the new
 	expect((await deliver({ "x-routine-signature": rotated.secret })).status).toBe(401);
 	expect((await deliver(signed(BODY, SECRET))).status).toBe(401);
 	expect((await deliver(signed(BODY, rotated.secret))).status).toBe(202);
+});
+
+test("rotation refuses the bare secret for good: accepting it again is a 409", async () => {
+	const { routine, deliver, routes } = setup(true, "pre-upgrade");
+	await routes.request(`/routines/${routine.id}/webhook-secret/rotate`, { method: "POST" });
+	const reenabled = await patchWebhook(routes, routine.id, { acceptBareSecret: true });
+	expect(reenabled.status).toBe(409);
+	expect((await deliver({ "x-routine-signature": SECRET })).status).toBe(401);
+});
+
+test("a new registration cannot be switched to accept the bare secret", async () => {
+	const { routine, deliver, routes } = setup(true);
+	expect((await patchWebhook(routes, routine.id, { acceptBareSecret: true })).status).toBe(409);
+	expect((await deliver({ "x-routine-signature": SECRET })).status).toBe(401);
+});
+
+test("asking an untouched upgraded registration to accept the bare secret changes nothing", async () => {
+	const { routine, deliver, routes } = setup(true, "pre-upgrade");
+	const response = await patchWebhook(routes, routine.id, { acceptBareSecret: true });
+	expect(response.status).toBe(200);
+	expect(((await response.json()) as { acceptsBareSecret: boolean }).acceptsBareSecret).toBe(true);
+	expect((await deliver({ "x-routine-signature": SECRET })).status).toBe(202);
+});
+
+test("a secret rotated while a signed body streams refuses that delivery", async () => {
+	const { routine, marker, deliver, routes } = setup(true);
+	const { body, reading, release } = gatedBody();
+	const pending = deliver(signed(LATE_BODY), body);
+	await reading;
+	expect((await routes.request(`/routines/${routine.id}/webhook-secret/rotate`, { method: "POST" })).status).toBe(200);
+	release();
+	await expectRejected(await pending, routine.id, marker);
+});
+
+test("a bare secret refused while its body streams refuses that delivery", async () => {
+	const { routine, marker, deliver, routes } = setup(true, "pre-upgrade");
+	const { body, reading, release } = gatedBody();
+	const pending = deliver({ "x-routine-signature": SECRET }, body);
+	await reading;
+	expect((await patchWebhook(routes, routine.id, { acceptBareSecret: false })).status).toBe(200);
+	release();
+	await expectRejected(await pending, routine.id, marker);
+});
+
+test("a delivery whose timestamp leaves the window while its body streams is refused", async () => {
+	const { routine, marker, deliver } = setup(true);
+	const { body, reading, release } = gatedBody();
+	const pending = deliver(signed(LATE_BODY, SECRET, nowSecs() - REPLAY_WINDOW_SECS + 1), body);
+	await reading;
+	await Bun.sleep(2100);
+	release();
+	const response = await pending;
+	await expectRejected(response, routine.id, marker);
+	expect(await response.json()).toEqual({ error: "timestamp outside replay window" });
 });
 
 test("a signed webhook for a disabled routine is refused with 409 and runs nothing", async () => {

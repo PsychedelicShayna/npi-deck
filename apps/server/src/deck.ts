@@ -12,7 +12,7 @@ import { InProcessAgentBridge } from "./bridge/in-process.ts";
 import { RoutinesRunner } from "./routines-runner.ts";
 import { closeDb, openDb } from "./db/index.ts";
 import { loadConfig } from "./config.ts";
-import { getDataDir, loadManagedEnvIntoProcess } from "./env-store.ts";
+import { ensurePrivateDataDir, getDataDir, loadManagedEnvIntoProcess } from "./env-store.ts";
 import { initializeOwnedGeneration, stopOwnedProcesses, sweepOwnedProcesses } from "./owned-process.ts";
 import { launcherFromEnv, RESTART_EXIT_CODE, watchLauncher } from "./owned/launcher.ts";
 import { workRegistry } from "./work-registry.ts";
@@ -174,6 +174,7 @@ export async function startDeck(opts: StartDeckOptions = {}): Promise<DeckHandle
 	// process singleton consulted by the `read` tool on every call.
 	if (activeBackend()) sdk().InternalUrlRouter.instance().register(new KbProtocolHandler());
 
+	ensurePrivateDataDir();
 	openDb({ path: config.dbPath });
 
 	// Initialize pi-tui's global `theme` so tools that reference symbols

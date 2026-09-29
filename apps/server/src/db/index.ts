@@ -30,7 +30,8 @@ export interface DbOpenOpts {
 export function openDb(opts: DbOpenOpts): Database {
 	if (instance) return instance;
 	const dbPath = path.resolve(opts.path);
-	fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+	fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+	restrictDbFilesToOwner(dbPath);
 
 	const db = new Database(dbPath, { create: true, strict: true });
 	trackTransactions(db);
@@ -44,6 +45,24 @@ export function openDb(opts: DbOpenOpts): Database {
 	instance = db;
 	log.info(`db ready at ${dbPath}`);
 	return db;
+}
+
+/**
+ * The database holds webhook signing keys, so only its owner may read it.
+ * Creating the file ourselves at 0600 before SQLite opens it leaves no window
+ * where it is world-readable, and SQLite gives the -wal and -shm files it
+ * creates the main file's mode. Files an older deck left at 0644 are narrowed.
+ */
+function restrictDbFilesToOwner(dbPath: string): void {
+	if (process.platform === "win32") return;
+	fs.closeSync(fs.openSync(dbPath, "a", 0o600));
+	for (const file of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+		try {
+			fs.chmodSync(file, 0o600);
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+		}
+	}
 }
 
 export function getDb(): Database {

@@ -11,13 +11,16 @@
  * The MAC covers the exact request bytes, so a captured signature cannot
  * carry another body, and the timestamp must be within five minutes of the
  * deck's clock, so a captured delivery cannot be replayed after that. The
- * comparison is constant-time. The timestamp and signature shape are checked
- * before the body is read; the MAC after.
+ * comparison is constant-time. The signature shape, timestamp window and
+ * signing mode are checked before the body is read. Once the body has arrived
+ * they are checked again against the registration as it is then, together
+ * with the MAC, so a rotation or refusal during a slow upload still applies.
  *
  * Registrations made before signed deliveries (migration 006) also accept
- * the bare secret as X-Routine-Signature until the user turns that off in
- * the routine's Settings tab or rotates the secret. Each such delivery is
- * logged as deprecated and stamped on the registration so the UI can warn.
+ * the bare secret as X-Routine-Signature until the user refuses it, which is
+ * permanent, in the routine's Settings tab or rotates the secret. Each such
+ * delivery is logged as deprecated and stamped on the registration so the UI
+ * can warn.
  *
  * A disabled routine refuses correctly signed deliveries with 409 Conflict:
  * the request is valid, but the routine's current state forbids running it,
@@ -73,12 +76,12 @@ export function buildHooksRouter(runner: RoutinesRunner): Hono {
 			return c.json({ error }, 401);
 		};
 
-		const credential = readCredential(
-			record,
-			c.req.header(SIG_HEADER) ?? "",
-			c.req.header(TS_HEADER) ?? "",
-		);
-		if ("rejected" in credential) return reject(credential.rejected, credential.error);
+		const signature = c.req.header(SIG_HEADER) ?? "";
+		const timestamp = c.req.header(TS_HEADER) ?? "";
+		// Refuse what can be refused without the body, so an unauthenticated
+		// caller cannot make the deck buffer one.
+		const early = readCredential(record, signature, timestamp);
+		if ("rejected" in early) return reject(early.rejected, early.error);
 
 		let raw: Uint8Array;
 		try {
@@ -87,19 +90,26 @@ export function buildHooksRouter(runner: RoutinesRunner): Hono {
 			return c.json({ error: "body unreadable" }, 400);
 		}
 
+		// Verify again, at acceptance time, against the registration as it is
+		// now: while the body streamed the secret may have been rotated, the
+		// bare secret refused, the webhook moved or removed, the routine
+		// disabled or deleted, and the timestamp may have left the window.
+		// Everything from here to the runner's own enabled guard in `fire` is
+		// synchronous.
+		const current = getWebhookSecretByPath(path);
+		if (!current || current.routine_id !== record.routine_id) {
+			// Deleting the routine cascades the registration; answer exactly as a
+			// request arriving after the removal would.
+			return c.json({ error: "hook not registered" }, 404);
+		}
+		const credential = readCredential(current, signature, timestamp);
+		if ("rejected" in credential) return reject(credential.rejected, credential.error);
 		if (credential.kind === "hmac" && !macMatches(credential, raw)) {
 			return reject(`bad ${SIG_HEADER}`);
 		}
 
-		const payload = parsePayload(raw, c.req.header("content-type") ?? "");
-
-		// Re-read the routine after the body arrives: it may have been disabled
-		// or deleted while the body streamed. Everything from here to the
-		// runner's own enabled guard in `fire` is synchronous.
 		const routine = getRoutine(record.routine_id);
 		if (!routine) {
-			// Deletion cascades the webhook registration, so answer exactly as a
-			// request arriving after the deletion would.
 			return c.json({ error: "hook not registered" }, 404);
 		}
 		if (!routine.enabled) {
@@ -107,6 +117,7 @@ export function buildHooksRouter(runner: RoutinesRunner): Hono {
 			return c.json({ error: "routine disabled" }, 409);
 		}
 
+		const payload = parsePayload(raw, c.req.header("content-type") ?? "");
 		if (credential.kind === "bare") {
 			log.warn(
 				`deprecated: webhook ${path} was authenticated by its bare secret; sign deliveries with ${SIG_HEADER}: sha256=<HMAC> and ${TS_HEADER}`,

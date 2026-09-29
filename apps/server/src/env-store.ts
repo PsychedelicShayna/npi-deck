@@ -30,6 +30,15 @@ export function getDataDir(env: NodeJS.ProcessEnv = process.env): string {
 	return explicit ? path.resolve(explicit) : path.join(os.homedir(), ".npi-deck");
 }
 
+/**
+ * Create the data dir if needed and make it owner-only (0700). The db inside
+ * holds webhook signing keys; an older deck created the dir at 0755.
+ */
+export function ensurePrivateDataDir(dir = getDataDir()): void {
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	if (process.platform !== "win32") fs.chmodSync(dir, 0o700);
+}
+
 export function getManagedEnvPath(): string {
 	return path.join(getDataDir(), ".env");
 }

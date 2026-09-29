@@ -30,7 +30,7 @@ import {
 	ensureWebhookSecret,
 	getWebhookSecretByRoutine,
 	listStepRuns,
-	setWebhookAcceptBareSecret,
+	refuseWebhookBareSecret,
 	upsertWebhookSecret,
 } from "./db/routine-step-runs.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
@@ -237,7 +237,11 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 		return status ? c.json(status) : c.json({ error: "routine has no webhook registration" }, 404);
 	});
 
-	/** `{ acceptBareSecret: boolean }`: the deprecated bare-secret signature, per routine. */
+	/**
+	 * `{ acceptBareSecret: false }` stops accepting the deprecated bare-secret
+	 * signature. One-way: `true` is refused with 409 unless the registration
+	 * still accepts it (its untouched pre-upgrade state), where it changes nothing.
+	 */
 	app.patch("/routines/:id/webhook", async (c) => {
 		const id = c.req.param("id");
 		let body: { acceptBareSecret?: unknown };
@@ -249,8 +253,14 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 		if (typeof body.acceptBareSecret !== "boolean") {
 			return c.json({ error: "acceptBareSecret must be a boolean" }, 400);
 		}
-		if (!setWebhookAcceptBareSecret(id, body.acceptBareSecret)) {
-			return c.json({ error: "routine has no webhook registration" }, 404);
+		const row = getWebhookSecretByRoutine(id);
+		if (!row) return c.json({ error: "routine has no webhook registration" }, 404);
+		if (body.acceptBareSecret) {
+			if (row.accept_bare_secret !== 1) {
+				return c.json({ error: "the bare secret cannot be accepted again; senders must sign deliveries" }, 409);
+			}
+		} else {
+			refuseWebhookBareSecret(id);
 		}
 		return c.json(webhookStatus(id));
 	});
