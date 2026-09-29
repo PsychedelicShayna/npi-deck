@@ -438,13 +438,17 @@ export class InProcessAgentBridge implements AgentBridge {
 		// so the CLI could not resume a session the sidebar had only shown.
 		const manager = await sdk().SessionManager.openReadOnly(resolved);
 		const { messages, omitted } = transcriptTail(manager.buildSessionContext({ transcript: true }).messages, opts.limit);
+		const sessionId = manager.getSessionId();
+		const liveFile = this.active.get(sessionId)?.handle.sessionFile;
+		const live = liveFile !== undefined && path.resolve(liveFile) === resolved;
 		return {
-			sessionId: manager.getSessionId(),
+			sessionId,
 			path: resolved,
 			cwd: known.cwd,
 			...(known.title ? { title: known.title } : {}),
 			messages: messages as unknown as AgentMessageJson[],
 			...(omitted ? { omitted } : {}),
+			...(live ? { live: true as const } : {}),
 		};
 	}
 

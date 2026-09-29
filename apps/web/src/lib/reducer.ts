@@ -129,6 +129,9 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 			if (!msg) return state;
 			const next = { ...state, messages: state.messages.slice() };
 			ingestMessage(next, msg);
+			// A reply streams until its message_end; updates and the end target it.
+			const last = next.messages.at(-1);
+			if (msg.role === "assistant" && last?.role === "assistant") next.messages[next.messages.length - 1] = { ...last, isStreaming: true };
 			return next;
 		}
 		case "message_update": {
@@ -541,24 +544,34 @@ function ingestMessage(state: SessionUi, msg: any): void {
 	}
 }
 
-function updateAssistantMessage(state: SessionUi, msg: any): SessionUi {
-	const messages = state.messages.slice();
-	// Walk backward to find the last assistant message.
+/**
+ * The reply in flight: the newest assistant message, if it is still
+ * streaming. A chat that subscribed mid-reply never saw its message_start,
+ * so the newest assistant message is an earlier, finished one.
+ */
+function streamingAssistantIndex(messages: SessionUi["messages"]): number {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
-		if (m && m.role === "assistant") {
-			const updated: AssistantMsg = {
-				...m,
-				blocks: extractAssistantBlocks(msg.content),
-				isStreaming: true,
-				model: typeof msg.model === "string" ? msg.model : m.model,
-				provider: typeof msg.provider === "string" ? msg.provider : m.provider,
-			};
-			messages[i] = updated;
-			return { ...state, messages };
-		}
+		if (m?.role === "assistant") return m.isStreaming ? i : -1;
 	}
-	// Fallback: synthesize.
+	return -1;
+}
+
+function updateAssistantMessage(state: SessionUi, msg: any): SessionUi {
+	const messages = state.messages.slice();
+	const i = streamingAssistantIndex(messages);
+	const m = messages[i];
+	if (m?.role === "assistant") {
+		messages[i] = {
+			...m,
+			blocks: extractAssistantBlocks(msg.content),
+			isStreaming: true,
+			model: typeof msg.model === "string" ? msg.model : m.model,
+			provider: typeof msg.provider === "string" ? msg.provider : m.provider,
+		};
+		return { ...state, messages };
+	}
+	// Its message_start came before this chat subscribed: start it here.
 	messages.push({
 		id: nextId("asst"),
 		role: "assistant",
@@ -574,30 +587,32 @@ function finalizeMessage(state: SessionUi, msg: any): SessionUi {
 	if (!msg || typeof msg !== "object") return state;
 	if (msg.role !== "assistant") return state;
 	const messages = state.messages.slice();
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const m = messages[i];
-		if (m && m.role === "assistant") {
-			messages[i] = {
-				...m,
-				blocks: extractAssistantBlocks(msg.content),
-				isStreaming: false,
-				model: typeof msg.model === "string" ? msg.model : m.model,
-				provider: typeof msg.provider === "string" ? msg.provider : m.provider,
-				usage: extractUsage(msg.usage) ?? m.usage,
-				stopReason: typeof msg.stopReason === "string" ? msg.stopReason : m.stopReason,
-				errorMessage: typeof msg.errorMessage === "string" ? msg.errorMessage : m.errorMessage,
-				timestamp: typeof msg.timestamp === "number" ? msg.timestamp : m.timestamp,
-				durationMs: typeof msg.duration === "number" ? msg.duration : m.durationMs,
-				ttft: typeof msg.ttft === "number" ? msg.ttft : m.ttft,
-			};
-			const next = { ...state, messages };
-			if (msg.usage) {
-				rollupUsage(next, msg.usage);
-			}
-			return next;
-		}
+	const i = streamingAssistantIndex(messages);
+	const m = messages[i];
+	if (m?.role !== "assistant") {
+		// Its start and updates came before this chat subscribed.
+		const next = { ...state, messages };
+		ingestMessage(next, msg);
+		return next;
 	}
-	return state;
+	messages[i] = {
+		...m,
+		blocks: extractAssistantBlocks(msg.content),
+		isStreaming: false,
+		model: typeof msg.model === "string" ? msg.model : m.model,
+		provider: typeof msg.provider === "string" ? msg.provider : m.provider,
+		usage: extractUsage(msg.usage) ?? m.usage,
+		stopReason: typeof msg.stopReason === "string" ? msg.stopReason : m.stopReason,
+		errorMessage: typeof msg.errorMessage === "string" ? msg.errorMessage : m.errorMessage,
+		timestamp: typeof msg.timestamp === "number" ? msg.timestamp : m.timestamp,
+		durationMs: typeof msg.duration === "number" ? msg.duration : m.durationMs,
+		ttft: typeof msg.ttft === "number" ? msg.ttft : m.ttft,
+	};
+	const next = { ...state, messages };
+	if (msg.usage) {
+		rollupUsage(next, msg.usage);
+	}
+	return next;
 }
 
 function extractAssistantBlocks(content: unknown): AssistantContentBlock[] {

@@ -176,7 +176,9 @@ export class WsHub {
 
 		const handle = this.bridge.getSession(sessionId);
 		if (!handle) {
-			send(ws, { type: "error", sessionId, error: "session not active" });
+			// Stopped since the client last saw it (idle reaper, dispose): the
+			// client keeps its transcript read-only and resumes on the next send.
+			send(ws, { type: "session_disposed", sessionId });
 			return;
 		}
 

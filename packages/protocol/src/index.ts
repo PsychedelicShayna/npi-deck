@@ -1364,6 +1364,12 @@ export interface SessionTranscriptResponse {
 	 */
 	omitted?: { count: number; usage: unknown[] };
 	backendLastRan?: { path: string; commit: string | null; version: string | null };
+	/**
+	 * A deck session is running from this file (opened in another tab, or
+	 * before a page reload). The client subscribes to it rather than showing
+	 * the file read-only; `messages` only stand in until the snapshot arrives.
+	 */
+	live?: true;
 }
 
 /** A child of a live deck session. parentId is another node or the root agent id. */

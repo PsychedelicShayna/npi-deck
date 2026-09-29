@@ -309,3 +309,45 @@ describe("tool results from a snapshot", () => {
 		expect(s.toolCalls.t1?.isError).toBe(true);
 	});
 });
+
+describe("a reply already streaming when the chat subscribes", () => {
+	const assistant = (text: string, totalTokens: number) => ({
+		role: "assistant", content: [{ type: "text", text }], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens, cost: { total: 0 } }, timestamp: 1,
+	});
+	const textOf = (s: SessionUi) => s.messages.map((m) => m.role === "user" ? m.text : m.role === "assistant" ? m.blocks.map((b) => (b as { text: string }).text).join("") : m.role);
+
+	test("lands after the prompt it answers and leaves the earlier reply alone", () => {
+		// A reload or reconnect mid-turn: the snapshot holds the committed
+		// messages, not the reply in flight.
+		let s = initSession({
+			sessionId: "s1", cwd: "/tmp", isStreaming: true, todoPhases: [],
+			messages: [{ role: "user", content: "first", timestamp: 1 }, assistant("first answer", 10), { role: "user", content: "second", timestamp: 2 }] as never,
+		});
+		s = applyEvent(s, { type: "message_update", message: assistant("second ans", 0) } as never);
+		s = applyEvent(s, { type: "message_update", message: assistant("second answer", 0) } as never);
+		expect(textOf(s)).toEqual(["first", "first answer", "second", "second answer"]);
+		s = applyEvent(s, { type: "message_end", message: assistant("second answer", 5) } as never);
+		expect(textOf(s)).toEqual(["first", "first answer", "second", "second answer"]);
+		expect(s.messages.at(-1)).toMatchObject({ role: "assistant", isStreaming: false });
+		expect(s.usage.totalTokens).toBe(15);
+	});
+
+	test("a reply that ends before any update still appears once", () => {
+		let s = initSession({
+			sessionId: "s1", cwd: "/tmp", isStreaming: true, todoPhases: [],
+			messages: [{ role: "user", content: "first", timestamp: 1 }, assistant("first answer", 10), { role: "user", content: "second", timestamp: 2 }] as never,
+		});
+		s = applyEvent(s, { type: "message_end", message: assistant("second answer", 5) } as never);
+		expect(textOf(s)).toEqual(["first", "first answer", "second", "second answer"]);
+		expect(s.usage.totalTokens).toBe(15);
+	});
+
+	test("a reply seen from its start streams in place", () => {
+		let s = initSession({ sessionId: "s1", cwd: "/tmp", isStreaming: false, todoPhases: [], messages: [{ role: "user", content: "q", timestamp: 1 }] as never });
+		s = applyEvent(s, { type: "message_start", message: assistant("", 0) } as never);
+		s = applyEvent(s, { type: "message_update", message: assistant("par", 0) } as never);
+		s = applyEvent(s, { type: "message_end", message: assistant("partial", 5) } as never);
+		expect(textOf(s)).toEqual(["q", "partial"]);
+		expect(s.usage.totalTokens).toBe(5);
+	});
+});

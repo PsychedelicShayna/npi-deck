@@ -18,7 +18,8 @@ export function ChatView() {
 					<div className="flex h-full min-h-0 flex-col">
 						<Chat />
 						{session && !session.readOnly && <AdvisorPanel sessionId={session.sessionId} />}
-						<Composer />
+						{/* Keyed so each session gets its own draft, attachments and pickers. */}
+						<Composer key={session?.sessionId} />
 					</div>
 				}
 				inspector={<Inspector />}

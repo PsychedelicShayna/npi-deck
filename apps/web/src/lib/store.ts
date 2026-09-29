@@ -3,7 +3,9 @@ import { subscribeWithSelector } from "zustand/middleware";
 
 import type {
 	BackendStatusResponse,
+	ClientFrame,
 	ExtUiDialogResponse,
+	ImageAttachment,
 	ListSessionsResponse,
 	ListWorkspacesResponse,
 	NotificationKind,
@@ -88,6 +90,28 @@ function readOnlySession(t: SessionTranscriptResponse): SessionUi {
 	ui.backendLastRan = t.backendLastRan;
 	return ui;
 }
+
+/** A live chat the server no longer runs, kept on screen read-only from its file. */
+function endLive(session: SessionUi, path: string): SessionUi {
+	return {
+		...session, status: "idle", readOnly: { ...session.readOnly, path }, queuedPrompts: [], pendingPlanApproval: undefined,
+		messages: session.messages.map(m => m.role === "assistant" ? { ...m, isStreaming: false } : m),
+	};
+}
+
+function promptFrame(sessionId: string, text: string, images?: ImageAttachment[]): Extract<ClientFrame, { type: "prompt" }> {
+	return images && images.length > 0 ? { type: "prompt", sessionId, text, images } : { type: "prompt", sessionId, text };
+}
+
+/**
+ * Bumped each time the reader picks a chat. An open or resume that awaits the
+ * server takes the view only if no pick happened meanwhile, so a slow
+ * response never pulls the reader back to a chat they already left.
+ */
+let navigation = 0;
+
+/** Resumes in flight by session id; a second Resume or send joins the first instead of opening the file twice. */
+const resumes = new Map<string, Promise<string>>();
 
 interface StoreState {
 	ws: WsClient | null;
@@ -308,6 +332,7 @@ export const useStore = create<StoreState>()(
 		},
 
 		async createSession(opts) {
+			const nav = ++navigation;
 			const generation = get().workerGeneration;
 			const created = await api.createSession({
 				cwd: opts.cwd,
@@ -322,9 +347,10 @@ export const useStore = create<StoreState>()(
 				// until the snapshot replaces it, but stop treating it as read-only.
 				// Its MoA panel restarts from that snapshot: resuming is not a reconnect.
 				const prev = s.sessionsById[created.sessionId];
-				return prev?.readOnly
-					? { activeId: created.sessionId, sessionsById: { ...s.sessionsById, [created.sessionId]: { ...prev, readOnly: undefined, mixture: undefined } } }
-					: { activeId: created.sessionId };
+				return {
+					...(nav === navigation ? { activeId: created.sessionId } : {}),
+					...(prev?.readOnly ? { sessionsById: { ...s.sessionsById, [created.sessionId]: { ...prev, readOnly: undefined, mixture: undefined } } } : {}),
+				};
 			});
 			// Background-refresh sidebar to reflect the new entry.
 			void get().refreshSessions();
@@ -333,12 +359,24 @@ export const useStore = create<StoreState>()(
 		},
 
 		async openTranscript(path) {
+			const nav = ++navigation;
 			const live = Object.values(get().sessionsById).find((s) => s.sessionFile === path && !s.readOnly);
 			if (live) {
 				get().selectSession(live.sessionId);
 				return;
 			}
 			const t = await api.getTranscript(path, TRANSCRIPT_TAIL);
+			if (nav !== navigation) return;
+			const current = get().sessionsById[t.sessionId];
+			if (t.live || (current && !current.readOnly)) {
+				// Running on the server (opened in another tab, or before a page
+				// reload): follow it live. The file stands in until the snapshot lands.
+				if (!current || current.readOnly) {
+					set((s) => ({ sessionsById: { ...s.sessionsById, [t.sessionId]: { ...readOnlySession(t), readOnly: undefined } } }));
+				}
+				get().selectSession(t.sessionId);
+				return;
+			}
 			const ui = readOnlySession(t);
 			set((s) => ({ sessionsById: { ...s.sessionsById, [t.sessionId]: ui }, activeId: t.sessionId }));
 		},
@@ -357,13 +395,19 @@ export const useStore = create<StoreState>()(
 			set((s) => ({ sessionsById: { ...s.sessionsById, [id]: next } }));
 		},
 
-		async resumeSession(id) {
+		resumeSession(id) {
 			const ro = get().sessionsById[id];
-			if (!ro?.readOnly) return id;
-			return get().createSession({ cwd: ro.cwd, resumeFromPath: ro.readOnly.path });
+			if (!ro?.readOnly) return Promise.resolve(id);
+			let resume = resumes.get(id);
+			if (!resume) {
+				resume = get().createSession({ cwd: ro.cwd, resumeFromPath: ro.readOnly.path }).finally(() => resumes.delete(id));
+				resumes.set(id, resume);
+			}
+			return resume;
 		},
 
 		selectSession(id: string) {
+			++navigation;
 			set({ activeId: id });
 			if (get().sessionsById[id]?.readOnly) return;
 			if (!get().subscribed.has(id)) {
@@ -375,18 +419,16 @@ export const useStore = create<StoreState>()(
 		sendPrompt(text, images) {
 			const id = get().activeId;
 			if (!id) return;
-			// First send in a read-only transcript resumes it, then sends.
+			// First send in a read-only transcript resumes it, then sends to
+			// that chat, wherever the reader has moved by then.
 			if (get().sessionsById[id]?.readOnly) {
 				void get()
 					.resumeSession(id)
-					.then(() => get().sendPrompt(text, images))
+					.then((liveId) => get().ws?.send(promptFrame(liveId, text, images)))
 					.catch((err) => console.error("resume before send failed", err));
 				return;
 			}
-			const frame: Parameters<NonNullable<StoreState["ws"]>["send"]>[0] = images && images.length > 0
-				? { type: "prompt", sessionId: id, text, images }
-				: { type: "prompt", sessionId: id, text };
-			get().ws?.send(frame);
+			get().ws?.send(promptFrame(id, text, images));
 		},
 
 		abort() {
@@ -582,11 +624,7 @@ function handleFrame(
 					const sessionsById: Record<string, SessionUi> = {};
 					for (const [id, session] of Object.entries(s.sessionsById)) {
 						if (!session.sessionFile) continue;
-						sessionsById[id] = {
-							...session, status: "idle", readOnly: { ...session.readOnly, path: session.sessionFile },
-							endedByRestart: true, queuedPrompts: [], pendingPlanApproval: undefined,
-							messages: session.messages.map(m => m.role === "assistant" ? { ...m, isStreaming: false } : m),
-						};
+						sessionsById[id] = { ...endLive(session, session.sessionFile), endedByRestart: true };
 					}
 					return { connectionId: frame.connectionId, workerGeneration: frame.workerGeneration, backend: frame.backend,
 						sessionsById, activeId: s.activeId && sessionsById[s.activeId] ? s.activeId : undefined,
@@ -728,10 +766,17 @@ function handleFrame(
 			});
 			return;
 
-		case "session_disposed":
+		case "session_disposed": {
+			// The server no longer runs this chat (for example the idle reaper
+			// stopped it while this client was disconnected). One with a file
+			// stays on screen read-only, so the next send resumes it instead of
+			// posting to a session that is gone.
+			get().subscribed.delete(frame.sessionId);
 			set((s) => {
+				const prev = s.sessionsById[frame.sessionId];
 				const nextSessions = { ...s.sessionsById };
-				delete nextSessions[frame.sessionId];
+				if (prev?.sessionFile) nextSessions[frame.sessionId] = endLive(prev, prev.sessionFile);
+				else delete nextSessions[frame.sessionId];
 				const nextDialogs = { ...s.pendingDialogs };
 				const subagentsBySession = { ...s.subagentsBySession };
 				delete subagentsBySession[frame.sessionId];
@@ -740,10 +785,20 @@ function handleFrame(
 					sessionsById: nextSessions,
 					pendingDialogs: nextDialogs,
 					subagentsBySession,
-					activeId: s.activeId === frame.sessionId ? undefined : s.activeId,
+					activeId: s.activeId === frame.sessionId && !nextSessions[frame.sessionId] ? undefined : s.activeId,
 				};
 			});
+			// Events missed while disconnected are in the file; show it.
+			const ro = get().sessionsById[frame.sessionId]?.readOnly;
+			if (ro) {
+				api.getTranscript(ro.path, TRANSCRIPT_TAIL).then((t) => {
+					// Resumed, reopened or restarted meanwhile: that state wins.
+					if (get().sessionsById[frame.sessionId]?.readOnly !== ro) return;
+					set((s) => ({ sessionsById: { ...s.sessionsById, [frame.sessionId]: readOnlySession(t) } }));
+				}, (err) => console.warn("reload transcript failed", err));
+			}
 			return;
+		}
 
 		case "error":
 			set((s) => {

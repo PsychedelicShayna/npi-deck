@@ -1,6 +1,7 @@
 import {
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -37,6 +38,13 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
  */
 const slashCommandsCache = new Map<string, SlashCommand[]>();
 
+/**
+ * Unsent drafts by session id. The composer remounts per session (see
+ * ChatView), so text typed for one chat is never sent to another and is
+ * still there when the reader switches back.
+ */
+const drafts = new Map<string, { text: string; images: PendingImage[] }>();
+
 export function Composer() {
 	const session = useStore(selectActiveSession);
 	const sendPrompt = useStore((s) => s.sendPrompt);
@@ -49,13 +57,20 @@ export function Composer() {
 	const queuedCount = session?.queuedPrompts.length ?? 0;
 	const openAdvisorPicker = useAdvisorPicker((s) => s.open);
 	const liveSessionId = session && !session.readOnly ? session.sessionId : undefined;
-	const [draft, setDraft] = useState("");
-	const [images, setImages] = useState<PendingImage[]>([]);
+	const draftKey = session?.sessionId;
+	const [draft, setDraft] = useState(() => (draftKey ? drafts.get(draftKey)?.text : undefined) ?? "");
+	const [images, setImages] = useState<PendingImage[]>(() => (draftKey ? drafts.get(draftKey)?.images : undefined) ?? []);
 	const [dragOver, setDragOver] = useState(false);
 	const taRef = useRef<HTMLTextAreaElement>(null);
 	const fileRef = useRef<HTMLInputElement>(null);
-	const imagesRef = useRef<PendingImage[]>([]);
+	const imagesRef = useRef<PendingImage[]>(images);
 	imagesRef.current = images;
+
+	useEffect(() => {
+		if (!draftKey) return;
+		if (draft || images.length > 0) drafts.set(draftKey, { text: draft, images });
+		else drafts.delete(draftKey);
+	}, [draftKey, draft, images]);
 
 	// ─── Slash commands ─────────────────────────────────────────────────────
 	//
@@ -172,6 +187,9 @@ export function Composer() {
 		ta.style.height = "auto";
 		ta.style.height = `${Math.min(280, ta.scrollHeight)}px`;
 	}, []);
+
+	// A draft restored for this session may span several lines.
+	useLayoutEffect(autoresize, [autoresize]);
 
 	// ─── @filepath mention picker ──────────────────────────────────────────
 	//

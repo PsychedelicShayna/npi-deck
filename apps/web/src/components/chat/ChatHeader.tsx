@@ -17,7 +17,8 @@ import { ModelPickerModal } from "./ModelPickerModal";
 export function ChatHeader() {
 	const session = useStore(selectActiveSession);
 	if (!session) return null;
-	return <Inner session={session} />;
+	// Keyed so rename, resume and popover state never carry into another session.
+	return <Inner key={session.sessionId} session={session} />;
 }
 
 function Inner({ session }: { session: SessionUi }) {
