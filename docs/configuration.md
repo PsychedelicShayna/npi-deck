@@ -89,6 +89,14 @@ This policy applies only to new deck chats. It does not rewrite NeoPi's
 model selection in the chat header. `OMP_MODEL` and NeoPi's global default
 model do not override the deck's new-chat default.
 
+The Sol fallback is a session-local override on top of the chat's configured
+`retry.fallbackChains`, re-applied after every settings reload so later
+config.yml edits reach the chat. Once config.yml has a chain keyed by the
+chat's Opus model (`provider/id`, with or without an effort suffix), that
+chain replaces the deck's for this model. The deck's `default` chain stays in
+force for other models the chat switches to. Edit the active model's chain
+from the model picker's **Fallbacks** row, or in Settings → NeoPi.
+
 ### Sessions
 
 | Var | Default | Restart? | Notes |

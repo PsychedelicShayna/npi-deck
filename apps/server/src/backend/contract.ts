@@ -804,6 +804,8 @@ await check("fact: per-root settings isolation (Settings.loadIsolated)", ["Setti
 });
 await check("models: new chats select Opus medium with one exact Sol fallback", [
 	"cfgModelRoles", "cfgRetryEnabled", "cfgRetryModelFallback", "cfgRetryFallbackChains",
+	"getRetryFallbackChains", "resolveRetryFallbackChainKey", "parseRetryFallbackSelector", "formatRetryFallbackSelector",
+	"isRetryFallbackModelKey", "isRetryFallbackWildcardKey",
 ], async () => {
 	const cwd = mkdir("root-default");
 	const configPath = path.join(agentDir, "config.yml");
@@ -821,16 +823,24 @@ await check("models: new chats select Opus medium with one exact Sol fallback", 
 		assert(core.cfgRetryEnabled.get(settings) && core.cfgRetryModelFallback.get(settings), "model fallback disabled");
 		const model = registry.find("anthropic", "claude-opus-5-5");
 		assert(model, "primary absent from NeoPi model catalog");
-		const { resolveRetryFallbackChainKey, findRetryFallbackCandidates } = await importFromTree<
+		const chains = feature("fallback-chains");
+		const { findRetryFallbackCandidates } = await importFromTree<
 			typeof import("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains")
 		>("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains");
 		const context = {
-			chains: core.cfgRetryFallbackChains.get(settings),
+			chains: chains.getRetryFallbackChains(settings),
 			getModelRole: (role: string) => settings.getModelRole(role),
 			modelLookup: registry,
 		};
-		const key = resolveRetryFallbackChainKey(context, primary, model);
+		const selector = chains.formatRetryFallbackSelector(model, snapshot.thinkingLevel as Parameters<typeof chains.formatRetryFallbackSelector>[1]);
+		assert(selector === primary, `live selector ${selector} != ${primary}`);
+		const key = chains.resolveRetryFallbackChainKey(context, selector, model);
 		assert(key === primary, `expected exact fallback chain, got ${key}`);
+		// The picker's edit key: a model key naming the primary, never a wildcard or role.
+		const parsed = chains.parseRetryFallbackSelector(primary, registry);
+		assert(parsed?.provider === "anthropic" && parsed.id === "claude-opus-5-5" && parsed.thinkingLevel === "medium", `parsed ${JSON.stringify(parsed)}`);
+		assert(chains.isRetryFallbackModelKey(primary) && !chains.isRetryFallbackWildcardKey(primary)
+			&& chains.isRetryFallbackWildcardKey("anthropic/*") && !chains.isRetryFallbackModelKey("default"), "chain key kinds misclassified");
 		const candidates = findRetryFallbackCandidates(context, key, primary, model);
 		assert(candidates.length === 1 && candidates[0]?.raw === fallback, `unexpected fallback: ${JSON.stringify(candidates)}`);
 		const manual = await bridge.createSession({

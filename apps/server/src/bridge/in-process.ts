@@ -24,6 +24,7 @@ import type {
 	PlanModeContextWire,
 	ServerFrame,
 	SessionSnapshot,
+	SessionFallbackChainResponse,
 	SessionSummary,
 	SessionTranscriptResponse,
 	SubagentNode,
@@ -46,6 +47,7 @@ import { SubagentTree } from "./subagent-tree.ts";
 import { transcriptTail } from "./transcript-tail.ts";
 import { latestErrorTerminal, mixtureSnapshotTraces } from "./mixture-snapshot.ts";
 import { McpAllowlistError, SessionClosedError, SessionInUseError } from "./types.ts";
+import { applyDeckFallbacks, describeFallbackChain, type DeckFallbacks } from "./fallback-chains.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
@@ -167,6 +169,8 @@ interface Active {
 	advisorSelection: string[];
 	/** The last applied roster contains at least one selected advisor. */
 	advisorsRunnable: boolean;
+	/** The deck's fallback for a chat it started on its default model; re-applied after each settings reload. */
+	deckFallbacks?: DeckFallbacks;
 }
 
 export class InProcessAgentBridge implements AgentBridge {
@@ -336,6 +340,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		const core = sdk();
 		const settings = await core.Settings.loadIsolated({ cwd, agentDir: core.getAgentDir() });
 		let deckDefaultModel: ReturnType<ModelRegistry["find"]>;
+		let deckFallbacks: DeckFallbacks | undefined;
 		if (fresh && !model) {
 			deckDefaultModel = firstAuthenticatedModel(modelRegistry, DEFAULT_MODEL_CANDIDATES);
 			if (!deckDefaultModel) {
@@ -350,11 +355,13 @@ export class InProcessAgentBridge implements AgentBridge {
 				...core.cfgModelRoles.get(settings),
 				default: primary,
 			});
-			core.cfgRetryFallbackChains.override(settings, {
-				...core.cfgRetryFallbackChains.get(settings),
-				default: [fallback],
-				[primary]: [fallback],
-			});
+			deckFallbacks = {
+				model: { provider: deckDefaultModel.provider, id: deckDefaultModel.id },
+				primaryKey: primary,
+				chains: { default: [fallback], [primary]: [fallback] },
+				applied: new Set(),
+			};
+			applyDeckFallbacks(settings, deckFallbacks, modelRegistry);
 			core.cfgRetryEnabled.override(settings, true);
 			core.cfgRetryModelFallback.override(settings, true);
 		}
@@ -441,6 +448,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		}
 		await this.wireExtensionRunner(session);
 		const attached = this.attach(session, cwd, sessionManager, result.setToolUIContext, hasFeature("subagent-tree") ? result.subagentEventBus : undefined, result.mcpManager);
+		if (deckFallbacks) attached.entry.deckFallbacks = deckFallbacks;
 		// A new or resumed chat starts with an empty selection: nothing may run.
 		this.enforceAdvisorSelection(attached.entry);
 		await attached.handle.restorePlanMode();
@@ -542,6 +550,7 @@ export class InProcessAgentBridge implements AgentBridge {
 			const settings = entry.session.settings;
 			try {
 				await settings.reloadFromDisk();
+				if (entry.deckFallbacks) applyDeckFallbacks(settings, entry.deckFallbacks, await this.ensureModelRegistry());
 				return { sessionId, cwd: entry.handle.cwd, settings };
 			} catch (err) {
 				log.warn(`reload settings for session ${sessionId} failed`, err);
@@ -664,6 +673,12 @@ export class InProcessAgentBridge implements AgentBridge {
 		} finally {
 			lease?.release();
 		}
+	}
+
+	async fallbackChain(sessionId: string): Promise<SessionFallbackChainResponse | undefined> {
+		const entry = this.active.get(sessionId);
+		if (!entry) return undefined;
+		return describeFallbackChain(entry.session, await this.ensureModelRegistry(), entry.deckFallbacks);
 	}
 
 	/**

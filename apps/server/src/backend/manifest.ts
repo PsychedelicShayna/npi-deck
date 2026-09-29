@@ -33,6 +33,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/config/all-settings": typeof import("@oh-my-pi/pi-coding-agent/config/all-settings");
 	"@oh-my-pi/pi-coding-agent/config/registry": typeof import("@oh-my-pi/pi-coding-agent/config/registry");
 	"@oh-my-pi/pi-coding-agent/session/settings": typeof import("@oh-my-pi/pi-coding-agent/session/settings");
+	"@oh-my-pi/pi-coding-agent/session/retry-fallback-chains": typeof import("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler": typeof import("@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler");
 	"@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace": typeof import("@oh-my-pi/pi-coding-agent/extensibility/plugins/marketplace");
@@ -226,6 +227,23 @@ export const MANIFEST = {
 		consumers: ["routes-models-config.ts"],
 		exports: {
 			ModelsConfigFile: op("@oh-my-pi/pi-coding-agent/config/models-config", "ModelsConfigFile"),
+		},
+	},
+	/**
+	 * #31: the model picker shows and edits the retry fallback chain of the
+	 * chat's active model. NeoPi's own key resolution decides which chain covers
+	 * the model, and its selector parser decides which configured keys name it.
+	 */
+	"fallback-chains": {
+		tier: "optional-feature",
+		consumers: ["bridge/in-process.ts", "routes-fallback-chain.ts"],
+		exports: {
+			getRetryFallbackChains: op("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains", "getRetryFallbackChains"),
+			resolveRetryFallbackChainKey: op("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains", "resolveRetryFallbackChainKey"),
+			parseRetryFallbackSelector: op("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains", "parseRetryFallbackSelector"),
+			formatRetryFallbackSelector: op("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains", "formatRetryFallbackSelector"),
+			isRetryFallbackModelKey: op("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains", "isRetryFallbackModelKey"),
+			isRetryFallbackWildcardKey: op("@oh-my-pi/pi-coding-agent/session/retry-fallback-chains", "isRetryFallbackWildcardKey"),
 		},
 	},
 	/** #86: enumerate, validate and write every registered NeoPi setting from the Settings view. */

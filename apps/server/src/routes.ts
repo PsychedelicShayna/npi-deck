@@ -40,6 +40,7 @@ import { buildModelsConfigRouter } from "./routes-models-config.ts";
 import { buildNpiConfigRouter } from "./routes-npi-config.ts";
 import { buildMcpServersRouter } from "./routes-mcp-servers.ts";
 import { buildMixturesRouter } from "./routes-mixtures.ts";
+import { buildFallbackChainRouter } from "./routes-fallback-chain.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 import type { BridgeSupervisor } from "./bridge-supervisor.ts";
 import type { MarketplaceService } from "./marketplace-service.ts";
@@ -287,6 +288,7 @@ export function buildRouter(
 	app.route("/", buildNpiConfigRouter(bridge, config));
 	app.route("/", buildMcpServersRouter(bridge, config));
 	app.route("/", buildMixturesRouter(bridge, config));
+	app.route("/", buildFallbackChainRouter(bridge));
 
 	return app;
 }

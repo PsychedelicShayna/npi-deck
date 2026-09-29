@@ -7,6 +7,7 @@ import type {
 	ListSlashCommandsResponse,
 	ListWorkspacesResponse,
 	ModelRef,
+	SessionFallbackChainResponse,
 	SessionTranscriptResponse,
 	SubagentTranscriptResponse,
 } from "@npi-deck/protocol";
@@ -76,6 +77,10 @@ export const api = {
 			method: "PATCH",
 			body: JSON.stringify({ model }),
 		});
+	},
+	/** How retry.fallbackChains covers the chat's active model; edits go through npiConfigApi. */
+	getSessionFallbackChain(id: string): Promise<SessionFallbackChainResponse> {
+		return request(`/sessions/${encodeURIComponent(id)}/fallback-chain`);
 	},
 	compactSession(id: string, focus?: string): Promise<{ ok: true }> {
 		const body = focus && focus.trim().length > 0 ? JSON.stringify({ focus: focus.trim() }) : "";

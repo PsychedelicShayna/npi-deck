@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, Search, X } from "lucide-react";
+import { Check, Plus, Search, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { ModelInfo } from "@npi-deck/protocol";
 
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { FallbackChainPanel, useFallbackChain } from "./FallbackChainPanel";
 
 interface Props {
 	open: boolean;
@@ -25,6 +26,10 @@ interface Props {
  * Models without configured auth are dimmed but still listed so the user can
  * see what the SDK supports — picking one surfaces the underlying error from
  * the server (typically "no auth configured for ...").
+ *
+ * Above the list, the active model's retry fallback chain can be viewed and
+ * edited (#31). "Add fallback" turns the list into a chooser: a click appends
+ * the model to the chain instead of switching to it.
  */
 export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) {
 	const [showUnauth, setShowUnauth] = useState(false);
@@ -34,6 +39,8 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 	const [error, setError] = useState<string | undefined>();
 	const [busyKey, setBusyKey] = useState<string | undefined>();
 	const searchRef = useRef<HTMLInputElement>(null);
+	const fallback = useFallbackChain(open, sessionId);
+	const [adding, setAdding] = useState(false);
 
 	useEffect(() => {
 		if (!open) return;
@@ -50,6 +57,7 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 		if (!open) return;
 		setQuery("");
 		setShowUnauth(false);
+		setAdding(false);
 		queueMicrotask(() => searchRef.current?.focus());
 	}, [open]);
 
@@ -109,12 +117,16 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 		}
 	}
 
+	function addFallback(model: ModelInfo): void {
+		fallback.add(`${model.provider}/${model.id}`);
+	}
+
 	const matchCount = grouped.reduce((n, g) => n + g.items.length, 0);
 
 	return (
 		<Modal open={open} onClose={onClose} widthClass="max-w-2xl">
 			<div className="flex h-11 items-center gap-2 border-b border-line px-3">
-				<div className="meta">Switch model</div>
+				<div className="meta">{adding ? "Add fallback" : "Switch model"}</div>
 				<div className="text-xs text-ink-3">
 					{loading ? "loading..." : `${matchCount} / ${showUnauth ? totalCount : availableCount}`}
 				</div>
@@ -162,6 +174,7 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 					/>
 				</div>
 			</div>
+			<FallbackChainPanel state={fallback} models={models} adding={adding} onAddingChange={setAdding} />
 			{error ? (
 				<div className="mx-3 my-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
 					{error}
@@ -183,13 +196,15 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 						<ul>
 							{g.items.map((model) => {
 								const key = `${model.provider}/${model.id}`;
-								const busy = busyKey === key;
+								const busy = adding ? fallback.busy : busyKey === key;
+								const inChain = adding && fallback.chain.includes(key);
 								return (
 									<li key={key}>
 										<button
 											type="button"
 											disabled={busy}
-											onClick={() => void pick(model)}
+											onClick={() => void (adding ? addFallback(model) : pick(model))}
+											title={adding ? `Append ${key} to the fallback chain` : undefined}
 											className={cn(
 												"flex w-full items-center gap-3 px-3 py-2 text-left transition-colors",
 												model.isCurrent ? "bg-accent-soft/40" : "hover:bg-paper-3/60",
@@ -207,6 +222,7 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 														{model.label}
 													</span>
 													{model.isCurrent ? <Badge tone="accent">active</Badge> : null}
+													{inChain ? <Badge tone="muted">in chain</Badge> : null}
 													{model.isMixture ? (
 														<Badge tone="accent" title="NeoPi mixture of agents: several member models behind one id">
 															MoA
@@ -227,6 +243,7 @@ export function ModelPickerModal({ open, sessionId, onClose, onPicked }: Props) 
 													{model.inputModes?.includes("image") ? <span>vision</span> : null}
 												</div>
 											</div>
+											{adding && !model.isCurrent && !inChain ? <Plus className="h-4 w-4 shrink-0 text-ink-3" /> : null}
 											{model.isCurrent ? <Check className="h-4 w-4 shrink-0 text-accent" /> : null}
 										</button>
 									</li>

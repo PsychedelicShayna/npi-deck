@@ -270,6 +270,28 @@ export interface NpiConfigPatchResponse {
 	live: NpiConfigLiveApply[];
 }
 
+/**
+ * `GET /api/sessions/:id/fallback-chain`: how NeoPi's `retry.fallbackChains`
+ * covers the chat's active model. The picker edits `key` through
+ * `PATCH /api/npi-config` with `entries`.
+ */
+export interface SessionFallbackChainResponse {
+	/** The active model as `provider/id`. */
+	model: string;
+	/**
+	 * The chain key that belongs to the active model: a configured model key
+	 * the chat resolves for it (it may carry an effort suffix), else `model`.
+	 */
+	key: string;
+	/** The chain key the chat resolves for its active model now, and that chain. Absent when no chain covers the model. */
+	resolved?: {
+		key: string;
+		chain: string[];
+		/** The deck's own fallback for new chats, which applies until the configuration gives this model a chain. */
+		deckDefault?: true;
+	};
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom providers and models (`~/.omp/agent/models.yml`)
 // ─────────────────────────────────────────────────────────────────────────────

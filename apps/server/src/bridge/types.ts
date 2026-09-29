@@ -11,6 +11,7 @@ import type {
 	PlanModeContextWire,
 	ServerFrame,
 	SessionSnapshot,
+	SessionFallbackChainResponse,
 	SessionSummary,
 	SessionTranscriptResponse,
 	SubagentNode,
@@ -80,6 +81,12 @@ export interface AgentBridge {
 	 * Mixtures are those the session's workspace (else `cwd`, else the server's cwd) defines and can run.
 	 */
 	listModels(opts?: { sessionId?: string; cwd?: string }): Promise<ModelInfo[]>;
+	/**
+	 * How `retry.fallbackChains` covers a live chat's active model, resolved by
+	 * NeoPi over the chat's own settings. Undefined when the chat is not live or
+	 * has no model. Throws when the backend lacks the "fallback-chains" feature.
+	 */
+	fallbackChain(sessionId: string): Promise<SessionFallbackChainResponse | undefined>;
 	/**
 	 * Re-discover the mixtures `cwd`'s MIXTURES.toml search path may register
 	 * and replace the picker roster with them, after the Mixtures view saved a
