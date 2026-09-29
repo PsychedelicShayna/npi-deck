@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { StartersResponse } from "@npi-deck/protocol";
@@ -118,5 +118,38 @@ describe("Settings → Starters (#98)", () => {
 
 	test("a non-boolean switch is refused", async () => {
 		expect((await putAutoInstall({ skills: "no" })).status).toBe(400);
+	});
+});
+
+describe("starter installers stay inside the agent dir (#98 review)", () => {
+	test("a skills or extensions dir symlinked outside the agent dir is refused and nothing is written through it", async () => {
+		const outside = path.join(root, "outside");
+		mkdirSync(path.join(outside, "skills"), { recursive: true });
+		mkdirSync(path.join(outside, "extensions"), { recursive: true });
+		const freshAgent = path.join(root, "fresh-agent");
+		mkdirSync(freshAgent);
+		symlinkSync(path.join(outside, "skills"), path.join(freshAgent, "skills"));
+		symlinkSync(path.join(outside, "extensions"), path.join(freshAgent, "extensions"));
+
+		expect(await installStarterSkills(freshAgent)).toEqual({ installed: [], skipped: [] });
+		expect(await installStarterExtensions(freshAgent)).toEqual({ installed: [], skipped: [] });
+		expect(readdirSync(path.join(outside, "skills"))).toEqual([]);
+		expect(readdirSync(path.join(outside, "extensions"))).toEqual([]);
+	});
+
+	test("a starter destination that is a symlink, even a dangling one, counts as the user's and is not written through", async () => {
+		const outside = path.join(root, "outside-beta");
+		symlinkSync(outside, path.join(agentDir, "skills", "beta"));
+		const result = await installStarterSkills(agentDir);
+		expect(result.installed).toEqual([]);
+		expect(result.skipped.sort()).toEqual(["alpha", "beta"]);
+		expect(existsSync(outside)).toBe(false);
+	});
+
+	test("a symlinked agent dir itself is fine: containment is checked on resolved paths", async () => {
+		const linked = path.join(root, "agent-link");
+		symlinkSync(agentDir, linked);
+		expect(await installStarterSkills(linked)).toEqual({ installed: ["beta"], skipped: ["alpha"] });
+		expect(existsSync(path.join(agentDir, "skills", "beta", "SKILL.md"))).toBe(true);
 	});
 });

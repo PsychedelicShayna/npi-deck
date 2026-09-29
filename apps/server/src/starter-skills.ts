@@ -19,14 +19,13 @@
  * Disable with `NPI_DECK_INSTALL_STARTER_SKILLS=0` (or Settings → Starters).
  */
 
-import { existsSync } from "node:fs";
 import { cp, readdir, stat } from "node:fs/promises";
 import * as path from "node:path";
 
 import { starterSkillsDir } from "./assets.ts";
 import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
-import { starterAutoInstallEnabled } from "./starters.ts";
+import { pathOccupied, starterAutoInstallEnabled, starterTargetRoot } from "./starters.ts";
 
 const log = logger("starter-skills");
 
@@ -47,7 +46,13 @@ export async function installStarterSkills(agentDir = sdk().getAgentDir()): Prom
 		return { installed: [], skipped: [] };
 	}
 
-	const targetRoot = path.join(agentDir, "skills");
+	let targetRoot: string;
+	try {
+		targetRoot = await starterTargetRoot(agentDir, "skills");
+	} catch (err) {
+		log.warn("refusing to install starter skills", err);
+		return { installed: [], skipped: [] };
+	}
 
 	let entries;
 	try {
@@ -67,9 +72,10 @@ export async function installStarterSkills(agentDir = sdk().getAgentDir()): Prom
 		const dst = path.join(targetRoot, name);
 
 		// Idempotent contract: never overwrite, never repair. The user owns
-		// the destination once it exists. If they want a starter back, they
-		// delete the destination dir and restart.
-		if (existsSync(dst)) {
+		// the destination once anything occupies it, a symlink included (cp
+		// would follow it). If they want a starter back, they delete the
+		// destination and restart.
+		if (await pathOccupied(dst)) {
 			skipped.push(name);
 			continue;
 		}

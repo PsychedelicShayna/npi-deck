@@ -4,7 +4,8 @@
  * there, and the switch that turns each installer off.
  */
 
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync } from "node:fs";
+import { lstat, mkdir, realpath } from "node:fs/promises";
 import * as path from "node:path";
 import YAML from "yaml";
 import type { StarterGroup, StarterItem } from "@npi-deck/protocol";
@@ -24,6 +25,32 @@ export function starterAutoInstallEnabled(kind: StarterKind): boolean {
 	return !isEnvFlagOff(process.env[STARTER_AUTO_INSTALL_ENV[kind]]);
 }
 
+/**
+ * Create `<agentDir>/<kind>` if needed and return it, but only when it
+ * resolves inside the resolved agent dir. A symlinked skills or extensions
+ * dir pointing elsewhere would make the installer's copy write outside the
+ * agent dir, so it throws instead.
+ */
+export async function starterTargetRoot(agentDir: string, kind: StarterKind): Promise<string> {
+	const targetRoot = path.join(agentDir, kind);
+	await mkdir(targetRoot, { recursive: true });
+	const [realAgent, realTarget] = await Promise.all([realpath(agentDir), realpath(targetRoot)]);
+	if (path.dirname(realTarget) !== realAgent || !(await lstat(realTarget)).isDirectory()) {
+		throw new Error(`${targetRoot} resolves to ${realTarget}, outside the agent dir ${realAgent}`);
+	}
+	return targetRoot;
+}
+
+/** True when anything, including a dangling symlink, occupies `p`: that entry is the user's. */
+export async function pathOccupied(p: string): Promise<boolean> {
+	try {
+		await lstat(p);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 export function readStarterGroup(kind: StarterKind, agentDir: string): StarterGroup {
 	const sourceDir = (kind === "skills" ? starterSkillsDir() : starterExtensionsDir()) ?? null;
 	const targetDir = path.join(agentDir, kind);
@@ -38,7 +65,8 @@ export function readStarterGroup(kind: StarterKind, agentDir: string): StarterGr
 				description: kind === "skills"
 					? skillDescription(path.join(sourceDir, entry.name, "SKILL.md"))
 					: extensionDescription(path.join(sourceDir, entry.name, "index.ts")),
-				installed: existsSync(installedPath),
+				// Same test the installer uses: a symlink here, even a dangling one, is the user's copy.
+				installed: lstatSync(installedPath, { throwIfNoEntry: false }) !== undefined,
 				installedPath,
 			});
 		}

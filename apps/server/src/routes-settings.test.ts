@@ -56,21 +56,25 @@ function patch(app: ReturnType<typeof buildApp>, updates: Record<string, string 
 }
 
 async function saveTwoKeysConcurrently(app: ReturnType<typeof buildApp>) {
+	const wsA = path.join(dataDir, "ws-a");
+	const wsB = path.join(dataDir, "ws-b");
+	mkdirSync(wsA);
+	mkdirSync(wsB);
 	const [a, b] = await Promise.all([
 		patch(app, { NPI_DECK_DEFAULT_CWD: "/tmp/concurrent-cwd" }),
-		patch(app, { NPI_DECK_WORKSPACES: "/tmp/ws-a,/tmp/ws-b" }),
+		patch(app, { NPI_DECK_WORKSPACES: `${wsA},${wsB}` }),
 	]);
 	expect(a.status).toBe(200);
 	expect(b.status).toBe(200);
 
 	const onDisk = readManagedEnvFile().values;
 	expect(onDisk.get("NPI_DECK_DEFAULT_CWD")).toBe("/tmp/concurrent-cwd");
-	expect(onDisk.get("NPI_DECK_WORKSPACES")).toBe("/tmp/ws-a,/tmp/ws-b");
+	expect(onDisk.get("NPI_DECK_WORKSPACES")).toBe(`${wsA},${wsB}`);
 
 	const listed = (await (await app.request("http://127.0.0.1/settings/env")).json()) as ListEnvSettingsResponse;
 	const byKey = new Map(listed.entries.map((entry) => [entry.key, entry]));
 	expect(byKey.get("NPI_DECK_DEFAULT_CWD")).toMatchObject({ source: "env-file", masked: "/tmp/concurrent-cwd" });
-	expect(byKey.get("NPI_DECK_WORKSPACES")).toMatchObject({ source: "env-file", masked: "/tmp/ws-a,/tmp/ws-b" });
+	expect(byKey.get("NPI_DECK_WORKSPACES")).toMatchObject({ source: "env-file", masked: `${wsA},${wsB}` });
 
 	expect(readdirSync(dataDir).filter((name) => name.includes(".pending-"))).toEqual([]);
 }
@@ -182,6 +186,25 @@ describe("privileged routes authorize by socket peer, not Host (#79)", () => {
 		expect((await app.request(REVEAL, { headers }, { peerAddress: "192.168.1.50" })).status).toBe(403);
 		expect((await app.request(RESTART, { method: "POST", headers }, { peerAddress: "192.168.1.50" })).status).toBe(403);
 		expect(restarts()).toBe(0);
+	});
+});
+
+describe("PATCH /settings/env with NPI_DECK_WORKSPACES (#98 review)", () => {
+	test("the generic env editor applies the same workspace validation as Settings → Workspaces", async () => {
+		const good = path.join(dataDir, "good");
+		mkdirSync(good);
+		const config = { defaultCwd: os.homedir(), extraWorkspaces: [] as string[] } as unknown as Config;
+		const app = buildApp(config);
+		for (const bad of [`${good},${path.join(dataDir, "missing")}`, "relative/dir"]) {
+			expect((await patch(app, { NPI_DECK_WORKSPACES: bad })).status).toBe(400);
+		}
+		expect(readManagedEnvFile().values.has("NPI_DECK_WORKSPACES")).toBe(false);
+		expect(config.extraWorkspaces).toEqual([]);
+
+		// Saved in the same normalized form the Workspaces panel writes.
+		expect((await patch(app, { NPI_DECK_WORKSPACES: ` ${good}/ , ${good} ` })).status).toBe(200);
+		expect(readManagedEnvFile().values.get("NPI_DECK_WORKSPACES")).toBe(good);
+		expect(config.extraWorkspaces).toEqual([good]);
 	});
 });
 

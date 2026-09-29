@@ -85,6 +85,13 @@ export function buildSettingsRouter(
 				const err = validateEnvValue(entry, value);
 				if (err) return c.json({ error: `${key}: ${err}` }, 400);
 			}
+			if (key === WORKSPACES_ENV && value !== null) {
+				// Same rules as Settings → Workspaces, stored in the same normalized form.
+				const result = normalizeWorkspaces(splitList(value));
+				if ("error" in result) return c.json({ error: `${key}: ${result.error}` }, 400);
+				clean[key] = serializeWorkspaces(result.pinned);
+				continue;
+			}
 			clean[key] = value;
 		}
 
@@ -109,16 +116,9 @@ export function buildSettingsRouter(
 		if (!resolveEnvSetting(WORKSPACES_ENV).setting.editable) {
 			return c.json({ error: `${WORKSPACES_ENV} is set by the launching shell; unset it there to manage workspaces here` }, 409);
 		}
-		const pinned: string[] = [];
-		for (const raw of body.pinned) {
-			const expanded = raw.trim().replace(/^~(?=$|\/)/, os.homedir());
-			if (!path.isAbsolute(expanded)) return c.json({ error: `${raw}: use an absolute path` }, 400);
-			const cwd = path.resolve(expanded);
-			if (cwd.includes(",")) return c.json({ error: `${raw}: a workspace path cannot contain a comma` }, 400);
-			if (!isDirectory(cwd)) return c.json({ error: `${raw}: no directory at this path` }, 400);
-			if (!pinned.includes(cwd)) pinned.push(cwd);
-		}
-		await commitEnvUpdates({ [WORKSPACES_ENV]: pinned.length > 0 ? pinned.join(",") : null }, bridge, config);
+		const result = normalizeWorkspaces(body.pinned);
+		if ("error" in result) return c.json({ error: result.error }, 400);
+		await commitEnvUpdates({ [WORKSPACES_ENV]: serializeWorkspaces(result.pinned) }, bridge, config);
 		return c.json(buildWorkspacesResponse(config));
 	});
 
@@ -163,6 +163,29 @@ async function commitEnvUpdates(
 	if (set.length > 0) await appendEnvAudit("set", set);
 	if (unset.length > 0) await appendEnvAudit("unset", unset);
 	return applyHotUpdates(updates, bridge, config);
+}
+
+/**
+ * Validate and normalize pinned workspace roots, for every path that writes
+ * `NPI_DECK_WORKSPACES`: each must be absolute (a leading `~` is expanded),
+ * an existing directory, and free of commas (the list separator). Duplicates
+ * collapse; order is kept.
+ */
+function normalizeWorkspaces(entries: string[]): { pinned: string[] } | { error: string } {
+	const pinned: string[] = [];
+	for (const raw of entries) {
+		const expanded = raw.trim().replace(/^~(?=$|\/)/, os.homedir());
+		if (!path.isAbsolute(expanded)) return { error: `${raw}: use an absolute path` };
+		const cwd = path.resolve(expanded);
+		if (cwd.includes(",")) return { error: `${raw}: a workspace path cannot contain a comma` };
+		if (!isDirectory(cwd)) return { error: `${raw}: no directory at this path` };
+		if (!pinned.includes(cwd)) pinned.push(cwd);
+	}
+	return { pinned };
+}
+
+function serializeWorkspaces(pinned: string[]): string | null {
+	return pinned.length > 0 ? pinned.join(",") : null;
 }
 
 function isDirectory(p: string): boolean {
