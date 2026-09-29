@@ -3,18 +3,18 @@
  *
  *   GET  /models-config            the file NeoPi reads: masked text, NeoPi's verdict, provider summary
  *   POST /models-config/validate   run a document through NeoPi's own loader without writing it
- *   PUT  /models-config            validate, write atomically with a backup, refresh the model registry
+ *   PUT  /models-config            validate, compare-and-replace with a backup, refresh the model registry
  *
  * Validation is NeoPi's ModelsConfigFile pipeline (YAML parse, schema, provider
- * checks) run on the exact text that would be written. Credentials never reach
- * the browser: see models-config-secrets.ts.
+ * checks). Credentials never reach the browser (models-config-secrets.ts), and
+ * no response is built from a document with restored credentials: summaries
+ * and messages come from the submitted (masked) document or a re-masked read.
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
-	chmodSync,
 	closeSync,
-	copyFileSync,
 	existsSync,
+	fchmodSync,
 	fsyncSync,
 	mkdirSync,
 	mkdtempSync,
@@ -42,10 +42,25 @@ import type {
 import { getDeckModelRegistry } from "./auth-singleton.ts";
 import { feature, sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
-import { credentialValues, maskModelsYaml, PlaceholderError, restoreModelsYaml, scrubCredentials } from "./models-config-secrets.ts";
+import {
+	leaksSecret,
+	maskModelsYaml,
+	PlaceholderError,
+	restoreModelsYaml,
+	safeMessage,
+	type Secret,
+	WITHHELD_MESSAGE,
+} from "./models-config-secrets.ts";
 
 const log = logger("routes:models-config");
 const IO_FAILED = "The deck could not read or write models.yml; the server log has the details.";
+const STALE = "models.yml changed on disk since the editor loaded it. Reload, then reapply your edits.";
+const RAW_UNAVAILABLE =
+	"The deck cannot mask every credential in this file unambiguously (it is not valid YAML, or a credential is short or appears where it cannot be replaced), so it does not show the file. Fix it in a text editor, or save a complete replacement here (the current file is kept as a backup).";
+const RESTORED_REJECTED =
+	"NeoPi rejects the document once its masked credentials are restored; the message is withheld because it may quote one. The deck server log has the details.";
+/** Bun's YAML parse errors name no content; anything else about a file the deck cannot mask is withheld. */
+const PARSE_ONLY = /^Failed to load config file models, Unexpected error: YAML Parse error: [A-Za-z ]+$/;
 const ABSENT = "absent";
 
 class RequestError extends Error {
@@ -92,11 +107,11 @@ function validateWithNeoPi(text: string): Validation {
 	}
 }
 
-function summarize(config: ModelsConfig, secrets: readonly string[]): ModelsConfigProviderSummary[] {
-	const url = (value: string | undefined) => value === undefined ? undefined : scrubCredentials(value, secrets);
+/** Summary of a masked document's config: credentials are at most placeholders, and only their presence is reported. */
+function summarize(config: ModelsConfig): ModelsConfigProviderSummary[] {
 	return Object.entries(config.providers ?? {}).map(([name, provider]) => ({
 		name,
-		baseUrl: url(provider.baseUrl),
+		baseUrl: provider.baseUrl,
 		api: provider.api,
 		auth: provider.auth ?? "apiKey",
 		apiKeySet: provider.apiKey !== undefined,
@@ -107,7 +122,7 @@ function summarize(config: ModelsConfig, secrets: readonly string[]): ModelsConf
 			id: model.id,
 			name: model.name,
 			api: model.api,
-			baseUrl: url(model.baseUrl),
+			baseUrl: model.baseUrl,
 			contextWindow: model.contextWindow,
 			maxTokens: model.maxTokens,
 			reasoning: model.reasoning,
@@ -117,89 +132,129 @@ function summarize(config: ModelsConfig, secrets: readonly string[]): ModelsConf
 	}));
 }
 
-/** The response for one exact text of the file. */
-function describe(file: string, text: string | null): ModelsConfigResponse {
+/**
+ * The response for one exact text of the file, built from its masking only.
+ * NeoPi's verdict on the real text decides valid/invalid; its message and the
+ * summary come from the masked text. `known` lists the file's credentials.
+ */
+function describe(file: string, text: string | null): { response: ModelsConfigResponse; known: string[] } {
 	const base = { path: file, exists: text !== null, revision: revisionOf(text) };
-	if (text === null) return { ...base, raw: "", maskedSecrets: 0, providers: [] };
+	if (text === null) return { response: { ...base, raw: "", maskedSecrets: 0, providers: [] }, known: [] };
 	const mask = maskModelsYaml(text);
-	const secrets = mask.ok ? [...mask.secrets.values()].map(secret => secret.text) : credentialValues(text);
-	const verdict = validateWithNeoPi(text);
-	return {
+	const disk = validateWithNeoPi(text);
+	const withheld = (error: string | undefined): ModelsConfigResponse => ({
 		...base,
-		raw: mask.ok ? mask.masked : null,
-		...(mask.ok ? {} : {
-			rawUnavailable: "The deck cannot locate every credential in this file, so it does not show it. Fix it in a text editor, or save a complete replacement here (the current file is kept as a backup).",
-		}),
-		maskedSecrets: mask.ok ? mask.secrets.size : 0,
-		...(verdict.ok ? {} : { error: scrubCredentials(verdict.message, secrets) }),
-		providers: verdict.ok ? summarize(verdict.config, secrets) : [],
+		raw: null,
+		rawUnavailable: RAW_UNAVAILABLE,
+		maskedSecrets: 0,
+		...(error === undefined ? {} : { error }),
+		providers: [],
+	});
+	if (!disk.ok) log.warn(`models.yml is rejected by NeoPi: ${safeMessage(disk.message, mask.known)}`);
+	if (!mask.ok) {
+		return { response: withheld(disk.ok ? undefined : PARSE_ONLY.test(disk.message) ? disk.message : WITHHELD_MESSAGE), known: mask.known };
+	}
+	const shown = validateWithNeoPi(mask.masked);
+	const error = disk.ok ? undefined : safeMessage(shown.ok ? WITHHELD_MESSAGE : shown.message, mask.known);
+	const providers = disk.ok && shown.ok ? summarize(shown.config) : [];
+	if (leaksSecret({ providers, error }, mask.known)) return { response: withheld(disk.ok ? undefined : WITHHELD_MESSAGE), known: mask.known };
+	return {
+		response: {
+			...base,
+			raw: mask.masked,
+			maskedSecrets: mask.secrets.size,
+			...(error === undefined ? {} : { error }),
+			providers,
+		},
+		known: mask.known,
 	};
 }
 
 /**
- * The text a request would write: placeholders restored from the file on disk,
- * then accepted by NeoPi. Errors carry NeoPi's message with credentials masked.
+ * The text a request would write, and the config NeoPi reads from the
+ * submitted (masked) document. Placeholders outside credential positions are
+ * refused before anything is validated. The submitted document's own message
+ * is returned; a rejection that appears only once credentials are restored is
+ * withheld, since it could quote one.
  */
-function prepare(raw: string, diskText: string | null): { text: string; config: ModelsConfig; secrets: string[] } {
+function prepare(raw: string, diskText: string | null): { text: string; config: ModelsConfig } {
 	const disk = diskText === null ? undefined : maskModelsYaml(diskText);
-	const diskSecrets = disk?.ok ? disk.secrets : new Map();
-	const known = [...diskSecrets.values()].map(secret => secret.text);
+	const secrets: Map<string, Secret> = disk?.ok ? disk.secrets : new Map();
 	let text: string;
 	try {
-		text = restoreModelsYaml(raw, diskSecrets);
+		text = restoreModelsYaml(raw, secrets);
 	} catch (err) {
-		if (!(err instanceof PlaceholderError)) throw err;
-		// NeoPi's own complaint about the document comes first when it has one.
-		const verdict = validateWithNeoPi(raw);
-		if (!verdict.ok) throw new RequestError(scrubCredentials(verdict.message, [...known, ...credentialValues(raw)]), 400);
-		throw new RequestError(err.message, 409);
+		if (err instanceof PlaceholderError) throw new RequestError(err.message, err.status);
+		throw err;
 	}
-	const secrets = [...known, ...credentialValues(text)];
-	const verdict = validateWithNeoPi(text);
-	if (!verdict.ok) throw new RequestError(scrubCredentials(verdict.message, secrets), 400);
-	return { text, config: verdict.config, secrets };
+	const submitted = validateWithNeoPi(raw);
+	if (!submitted.ok) throw new RequestError(submitted.message, 400);
+	if (text !== raw) {
+		const restored = validateWithNeoPi(text);
+		if (!restored.ok) {
+			log.warn(`restored models.yml rejected by NeoPi: ${safeMessage(restored.message, [...(disk?.known ?? []), ...maskModelsYaml(text).known])}`);
+			throw new RequestError(RESTORED_REJECTED, 400);
+		}
+	}
+	return { text, config: submitted.config };
 }
 
 /**
- * Replace `file` with `text` through a synced temp file and a rename, keeping
- * the previous contents as `<file>.bak`. A symlinked file is written through
- * the link. Returns the backup path, or null when there was no file.
+ * Replace `file` with `text` if it still holds `before` (compare-and-replace),
+ * keeping `before` as `<file>.bak`. A symlinked file is written through the
+ * link. Returns the backup path, or null when there was no file.
+ *
+ * Both files are written to exclusive (O_EXCL), owner-only temp files in the
+ * target's directory and synced, then renamed into place; rename replaces a
+ * symlink at `.bak` rather than writing through it. The target is re-read and
+ * re-hashed immediately before the renames. NeoPi has no cross-process lock
+ * for models.yml, so a write by another process in the few syscalls between
+ * that re-read and the rename is still overwritten (it survives in no backup);
+ * any earlier change is refused with 409.
  */
-function writeAtomically(file: string, text: string): string | null {
+export function replaceModelsFile(file: string, text: string, before: string | null): string | null {
 	const exists = existsSync(file);
 	const target = exists ? realpathSync(file) : file;
 	const dir = path.dirname(target);
 	mkdirSync(dir, { recursive: true, mode: 0o700 });
-	// Keep the user's permissions; a new file holds credentials, so owner-only.
+	// Keep the user's permissions on the file itself; the backup is owner-only.
 	const mode = exists ? statSync(target).mode & 0o777 : 0o600;
-	const temp = path.join(dir, `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
-	let backup: string | null = null;
-	try {
-		const fd = openSync(temp, "wx", mode);
+	const temps: string[] = [];
+	const writeTemp = (contents: string, fileMode: number): string => {
+		const temp = path.join(dir, `.${path.basename(target)}.${process.pid}.${randomUUID()}.tmp`);
+		const fd = openSync(temp, "wx", 0o600);
+		temps.push(temp);
 		try {
-			writeFileSync(fd, text);
+			writeFileSync(fd, contents);
+			fchmodSync(fd, fileMode);
 			fsyncSync(fd);
 		} finally {
 			closeSync(fd);
 		}
-		chmodSync(temp, mode);
-		if (exists) {
+		return temp;
+	};
+	try {
+		const next = writeTemp(text, mode);
+		const saved = before === null ? undefined : writeTemp(before, 0o600);
+		if (revisionOf(readModelsFile(target)) !== revisionOf(before)) throw new RequestError(STALE, 409);
+		let backup: string | null = null;
+		if (saved !== undefined) {
 			backup = `${target}.bak`;
-			copyFileSync(target, backup);
-			chmodSync(backup, mode);
+			renameSync(saved, backup);
+			temps.splice(temps.indexOf(saved), 1);
 		}
-		renameSync(temp, target);
-	} catch (err) {
-		rmSync(temp, { force: true });
-		throw err;
+		renameSync(next, target);
+		temps.splice(temps.indexOf(next), 1);
+		const dirFd = openSync(dir, "r");
+		try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+		return backup;
+	} finally {
+		for (const temp of temps) rmSync(temp, { force: true });
 	}
-	const dirFd = openSync(dir, "r");
-	try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
-	return backup;
 }
 
 /** Re-read models.yml into the deck's shared registry (picker and every chat) and report what it now lists. */
-async function refreshRegistry(config: ModelsConfig, secrets: readonly string[]): Promise<ModelsConfigRegistryApply> {
+async function refreshRegistry(config: ModelsConfig, known: readonly string[]): Promise<ModelsConfigRegistryApply> {
 	let registry: Awaited<ReturnType<typeof getDeckModelRegistry>>;
 	try {
 		registry = await getDeckModelRegistry();
@@ -228,13 +283,13 @@ async function refreshRegistry(config: ModelsConfig, secrets: readonly string[])
 	}
 	return {
 		refreshed: true,
-		...(loadError ? { error: scrubCredentials(loadError.message, secrets) } : {}),
+		...(loadError ? { error: safeMessage(loadError.message, known) } : {}),
 		missingModels,
 		discovering,
 	};
 }
 
-// One models.yml write at a time from this process; the revision check covers other writers.
+// One models.yml write at a time from this process; replaceModelsFile's compare-and-replace covers other writers.
 let saveQueue: Promise<void> = Promise.resolve();
 function serializeSave<T>(run: () => Promise<T>): Promise<T> {
 	const result = saveQueue.then(run);
@@ -257,7 +312,7 @@ export function buildModelsConfigRouter(): Hono {
 	app.get("/models-config", c => {
 		try {
 			const file = modelsFile();
-			return c.json(describe(file, readModelsFile(file)));
+			return c.json(describe(file, readModelsFile(file)).response);
 		} catch (err) {
 			log.warn("read models.yml failed", err);
 			return c.json({ error: IO_FAILED }, 500);
@@ -268,9 +323,8 @@ export function buildModelsConfigRouter(): Hono {
 		const body = await documentRequest(c, false);
 		if (typeof body === "string") return c.json({ error: body }, 400);
 		try {
-			const file = modelsFile();
-			const { config, secrets } = prepare(body.raw, readModelsFile(file));
-			const response: ModelsConfigValidateResponse = { providers: summarize(config, secrets) };
+			const { config } = prepare(body.raw, readModelsFile(modelsFile()));
+			const response: ModelsConfigValidateResponse = { providers: summarize(config) };
 			return c.json(response);
 		} catch (err) {
 			if (err instanceof RequestError) return c.json({ error: err.message }, err.status);
@@ -286,15 +340,14 @@ export function buildModelsConfigRouter(): Hono {
 			return c.json(await serializeSave(async (): Promise<ModelsConfigSaveResponse> => {
 				const file = modelsFile();
 				const before = readModelsFile(file);
-				if (revisionOf(before) !== body.revision) {
-					throw new RequestError("models.yml changed on disk since the editor loaded it. Reload, then reapply your edits.", 409);
-				}
-				const { text, config, secrets } = prepare(body.raw, before);
-				const backupPath = writeAtomically(file, text);
+				if (revisionOf(before) !== body.revision) throw new RequestError(STALE, 409);
+				const { text, config } = prepare(body.raw, before);
+				const backupPath = replaceModelsFile(file, text, before);
 				const written = readModelsFile(file);
 				if (written !== text) throw new Error(`models.yml read back differently after the write (${file})`);
-				const registry = await refreshRegistry(config, secrets);
-				return { ...describe(modelsFile(), written), backupPath, registry };
+				const { response, known } = describe(modelsFile(), written);
+				const registry = await refreshRegistry(config, known);
+				return { ...response, backupPath, registry };
 			}));
 		} catch (err) {
 			if (err instanceof RequestError) return c.json({ error: err.message }, err.status);

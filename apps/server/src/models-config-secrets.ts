@@ -1,28 +1,38 @@
 /**
- * Credential masking for models.yml as the Settings editor shows it.
+ * Credential masking for models.yml as the Settings editor shows it. Fails
+ * closed: when a credential cannot be removed from the text unambiguously, the
+ * text is withheld rather than partially masked.
  *
- * Every value under a credential-like key (`apiKey`, `Authorization`,
- * `x-api-key`, …) is replaced in the document text by a placeholder
- * `<npi-deck-masked:ID>`; so is every other occurrence of such a value (inside
- * a URL, under an alias's anchor, in a commented-out line) and, in a comment,
- * everything after the first credential-like key (`# apiKey: sk-…`). All other
- * text, comments and layout included, is kept byte for byte.
+ * Masked (replaced by a placeholder `<npi-deck-masked:ID>`):
+ * - every value in a credential position of NeoPi's schema: a provider's
+ *   `apiKey`, every header value under any name (provider, model and model
+ *   override headers) and every `requestMetadata` value;
+ * - every value under a credential-like key anywhere else (`token`, `secret`,
+ *   `password`, `*key`, …), following aliases and merge keys;
+ * - every other occurrence of such a value at least MIN_REPLACE long, in any
+ *   scalar or key;
+ * - in a comment, everything after a credential-like word, a known credential,
+ *   a long token-like string or placeholder-looking text.
+ * A known credential still present anywhere (a short one, one hidden by an
+ * escape) withholds the whole text.
  *
- * ID is an HMAC of the value under a per-process key, so a placeholder names
- * a value without revealing it and survives edits that move it. Saving
- * restores each placeholder from the file on disk; a placeholder whose value
- * is no longer there (the file changed, or the server restarted) is refused.
+ * ID is an HMAC of the value under a per-process key. Saving restores a
+ * placeholder only where it is the whole value of a credential position; a
+ * placeholder anywhere else is refused, so a credential can never be moved
+ * into a field the deck shows.
  */
 import { createHmac, randomBytes } from "node:crypto";
 import { isAlias, isMap, isScalar, isSeq, parseDocument, Parser, type Document, type Scalar } from "yaml";
 
-const PLACEHOLDER = /<npi-deck-masked:([0-9a-f]{16})>/g;
-const PLACEHOLDER_PREFIX = "<npi-deck-masked:";
+export const MASK_MARK = "npi-deck-masked";
+const PLACEHOLDER_EXACT = /^<npi-deck-masked:[0-9a-f]{16}>$/;
 const SECRET_KEY_SUFFIXES = ["key", "authorization", "token", "secret", "password", "cookie", "credential", "credentials"];
-/** Values this short are not credentials in any practical sense, and substituting them would garble unrelated text. */
-const MIN_SECRET_LENGTH = 4;
-/** A `key:` or `key=` inside a comment; after a credential-like one, the rest of the comment is masked. */
-const COMMENT_KEY = /([A-Za-z0-9_-]+)["']?[ \t]*[:=][ \t]*/g;
+/** Shorter credentials are not substituted inside other text (the match would be ambiguous); their presence withholds the text. */
+const MIN_REPLACE = 8;
+/** Token-like runs in comments that could be a credential nobody labelled. */
+const TOKEN_LIKE = /[A-Za-z0-9_\-+/=.]{20,}/g;
+/** Walk budget: aliases can multiply a document exponentially. */
+const MAX_VISITS = 100_000;
 
 const hmacKey = randomBytes(32);
 
@@ -32,19 +42,49 @@ export function isSecretKey(key: unknown): boolean {
 	return SECRET_KEY_SUFFIXES.some(suffix => normalized.endsWith(suffix));
 }
 
+type PathKey = string | number | undefined;
+
+/**
+ * Credential positions in NeoPi's models.yml schema: `providers.P.apiKey`,
+ * `providers.P.headers.H`, `providers.P.requestMetadata.K`,
+ * `providers.P.models[i].headers.H` and `providers.P.modelOverrides.M.headers.H`.
+ */
+export function isCredentialPath(path: readonly PathKey[]): boolean {
+	if (path[0] !== "providers" || path.length < 3) return false;
+	const rest = path.slice(2);
+	if (rest.length === 1) return rest[0] === "apiKey";
+	if (rest.length === 2) return rest[0] === "headers" || rest[0] === "requestMetadata";
+	if (rest.length === 4) {
+		return rest[2] === "headers" && ((rest[0] === "models" && typeof rest[1] === "number") || rest[0] === "modelOverrides");
+	}
+	return false;
+}
+
 function placeholderFor(text: string): string {
-	return `${PLACEHOLDER_PREFIX}${createHmac("sha256", hmacKey).update(text).digest("hex").slice(0, 16)}>`;
+	return `<${MASK_MARK}:${createHmac("sha256", hmacKey).update(text).digest("hex").slice(0, 16)}>`;
 }
 
 /** A masked credential: its scalar value (typed, for exact restores) and its text. */
-interface Secret {
+export interface Secret {
 	value: unknown;
 	text: string;
 }
 
+/** Keys the user names freely (providers, overridden model ids); a name is not a credential label. */
+function isNamePosition(path: readonly PathKey[]): boolean {
+	return path[0] === "providers" && (path.length === 2 || (path.length === 4 && path[2] === "modelOverrides"));
+}
+
 export type MaskResult =
-	| { ok: true; masked: string; secrets: Map<string, Secret> }
-	| { ok: false };
+	| { ok: true; masked: string; secrets: Map<string, Secret>; known: string[] }
+	/** `known` holds the credentials that could be located, for scrubbing messages. */
+	| { ok: false; known: string[] };
+
+export class PlaceholderError extends Error {
+	constructor(message: string, readonly status: 400 | 409) {
+		super(message);
+	}
+}
 
 interface Edit {
 	start: number;
@@ -63,7 +103,7 @@ function parse(text: string): Document | undefined {
 	return doc.errors.length === 0 ? doc : undefined;
 }
 
-/** Every scalar in the document, map keys included, in source order. */
+/** Every scalar in the document, map keys included. */
 function allScalars(doc: Document): Scalar[] {
 	const out: Scalar[] = [];
 	const walk = (node: unknown): void => {
@@ -75,28 +115,56 @@ function allScalars(doc: Document): Scalar[] {
 	return out;
 }
 
-/** Scalars holding credentials: every scalar under a credential-like key, following aliases to their anchors. */
-function credentialScalars(doc: Document): Set<Scalar> {
-	const found = new Set<Scalar>();
-	const seen = new Set<unknown>();
-	const collect = (node: unknown): void => {
-		if (seen.has(node)) return;
-		seen.add(node);
-		if (isAlias(node)) collect(node.resolve(doc));
-		else if (isScalar(node)) { if (node.value !== null && node.value !== undefined) found.add(node); }
-		else if (isMap(node)) for (const pair of node.items) collect(pair.value);
-		else if (isSeq(node)) for (const item of node.items) collect(item);
-	};
-	const walk = (node: unknown): void => {
+interface Reach {
+	/** Scalars reached through a credential position or under a credential-like key: masked. */
+	masked: Set<Scalar>;
+	/** Scalars reached through a credential position of the schema. */
+	credential: Set<Scalar>;
+	/** Scalars reached through any other position. */
+	elsewhere: Set<Scalar>;
+}
+
+/**
+ * Classify every scalar by each position it is reachable from, following
+ * aliases and `<<` merge keys to the data paths NeoPi sees. Undefined when the
+ * document exceeds the walk budget.
+ */
+function reach(doc: Document): Reach | undefined {
+	const result: Reach = { masked: new Set(), credential: new Set(), elsewhere: new Set() };
+	const onPath = new Set<unknown>();
+	let visits = 0;
+	const walk = (node: unknown, path: PathKey[], secret: boolean): boolean => {
+		if (++visits > MAX_VISITS) return false;
+		if (isAlias(node)) {
+			const target = node.resolve(doc);
+			if (target === undefined || onPath.has(target)) return true;
+			onPath.add(target);
+			const ok = walk(target, path, secret);
+			onPath.delete(target);
+			return ok;
+		}
+		if (isScalar(node)) {
+			const credential = isCredentialPath(path);
+			(credential ? result.credential : result.elsewhere).add(node);
+			if (secret || credential) result.masked.add(node);
+			return true;
+		}
 		if (isMap(node)) {
 			for (const pair of node.items) {
-				if (isSecretKey(isScalar(pair.key) ? pair.key.value : undefined)) collect(pair.value);
-				else walk(pair.value);
+				const key = isScalar(pair.key) ? pair.key.value : undefined;
+				const merge = key === "<<";
+				const childKey: PathKey = typeof key === "string" || typeof key === "number" ? key : undefined;
+				const childPath = merge ? path : [...path, childKey];
+				if (!walk(pair.value, childPath, secret || (!merge && !isNamePosition(childPath) && isSecretKey(key)))) return false;
 			}
-		} else if (isSeq(node)) for (const item of node.items) walk(item);
+			return true;
+		}
+		if (isSeq(node)) {
+			for (const [index, item] of node.items.entries()) if (!walk(item, [...path, index], secret)) return false;
+		}
+		return true;
 	};
-	walk(doc.contents);
-	return found;
+	return walk(doc.contents, [], false) ? result : undefined;
 }
 
 /** Offsets and text of every comment, from the concrete syntax tree. */
@@ -116,6 +184,28 @@ function comments(text: string): Array<{ offset: number; source: string }> {
 	return out;
 }
 
+/** Where a comment stops being safe to show, or undefined when all of it is. */
+function commentCut(source: string, known: readonly string[]): number | undefined {
+	let cut = Number.POSITIVE_INFINITY;
+	for (const word of source.matchAll(/[A-Za-z0-9_-]+/g)) {
+		if (!isSecretKey(word[0])) continue;
+		const end = word.index + word[0].length;
+		cut = end + /^["']?[ \t]*[:=]?[ \t]*/.exec(source.slice(end))![0].length;
+		break;
+	}
+	for (const secret of known) {
+		const at = source.indexOf(secret);
+		if (at >= 0) cut = Math.min(cut, at);
+	}
+	const mark = source.indexOf(MASK_MARK);
+	if (mark >= 0) cut = Math.min(cut, Math.max(0, source.lastIndexOf("<", mark)));
+	for (const token of source.matchAll(TOKEN_LIKE)) {
+		if (/[A-Za-z]/.test(token[0]) && /[0-9]/.test(token[0])) { cut = Math.min(cut, token.index); break; }
+	}
+	// Never before the comment's `#`, which must stay for the line to remain a comment.
+	return Number.isFinite(cut) ? Math.max(1, cut) : undefined;
+}
+
 /** Replacement text for a scalar's source range; a block scalar's range ends with its line break, which must stay. */
 function scalarEdit(node: Scalar, source: string, text: string): Edit {
 	const [start, end] = node.range!;
@@ -123,123 +213,157 @@ function scalarEdit(node: Scalar, source: string, text: string): Edit {
 	return { start, end, text: text + trailing };
 }
 
-function replaceAll(text: string, secrets: Map<string, Secret>): string {
-	let out = text;
-	for (const [id, secret] of secrets) if (secret.text.length >= MIN_SECRET_LENGTH) out = out.split(secret.text).join(id);
+/** Every string a parsed value holds, keys included. */
+function strings(value: unknown, out: string[] = []): string[] {
+	if (typeof value === "string") out.push(value);
+	else if (Array.isArray(value)) for (const item of value) strings(item, out);
+	else if (value && typeof value === "object") for (const [key, item] of Object.entries(value)) { out.push(key); strings(item, out); }
 	return out;
 }
 
-/**
- * Mask everything after the first credential-like `key:` in a comment
- * (`# apiKey: sk-…`, `# Authorization: Bearer …`), keeping trailing blanks.
- * A rest that already holds a placeholder is left alone: a nested one would not restore.
- */
-function maskCommentAssignment(comment: string, secrets: Map<string, Secret>): string {
-	for (const match of comment.matchAll(COMMENT_KEY)) {
-		if (!isSecretKey(match[1])) continue;
-		const start = (match.index ?? 0) + match[0].length;
-		const value = comment.slice(start).trimEnd();
-		if (value === "" || value.includes(PLACEHOLDER_PREFIX)) return comment;
-		const id = placeholderFor(value);
-		secrets.set(id, { value, text: value });
-		return comment.slice(0, start) + id + comment.slice(start + value.length);
-	}
-	return comment;
+/** Whether any string in `value` (keys included) contains a known credential. */
+export function leaksSecret(value: unknown, known: readonly string[]): boolean {
+	const texts = strings(value);
+	return known.some(secret => texts.some(text => text.includes(secret)));
 }
 
-/**
- * Mask every credential in `text`. Fails closed: `{ ok: false }` when the
- * document cannot be parsed (its credentials cannot be located) or when a
- * credential would still appear in the masked text.
- */
+/** Mask every credential in `text`, or `{ ok: false }` when that cannot be done unambiguously. */
 export function maskModelsYaml(text: string): MaskResult {
 	const doc = parse(text);
-	if (!doc) return { ok: false };
+	const reached = doc && reach(doc);
+	if (!doc || !reached) return { ok: false, known: [] };
 	const secrets = new Map<string, Secret>();
-	const credential = credentialScalars(doc);
-	for (const node of credential) {
+	const knownSet = new Set<string>();
+	for (const node of reached.masked) {
+		if (node.value === null || node.value === undefined) continue;
 		const value = String(node.value);
+		if (value === "") continue;
+		knownSet.add(value);
 		secrets.set(placeholderFor(value), { value: node.value, text: value });
 	}
+	const known = [...knownSet];
+	// Longest first, so a credential containing another is replaced whole.
+	const replaceable = known.filter(secret => secret.length >= MIN_REPLACE).sort((a, b) => b.length - a.length);
 	const edits: Edit[] = [];
 	for (const node of allScalars(doc)) {
 		if (!node.range) continue;
-		if (credential.has(node)) {
-			edits.push(scalarEdit(node, text, JSON.stringify(placeholderFor(String(node.value)))));
+		if (reached.masked.has(node)) {
+			if (knownSet.has(String(node.value))) edits.push(scalarEdit(node, text, JSON.stringify(placeholderFor(String(node.value)))));
 		} else if (typeof node.value === "string") {
-			const masked = replaceAll(node.value, secrets);
-			if (masked !== node.value) edits.push(scalarEdit(node, text, JSON.stringify(masked)));
+			let value = node.value;
+			for (const secret of replaceable) value = value.split(secret).join(placeholderFor(secret));
+			if (value !== node.value) edits.push(scalarEdit(node, text, JSON.stringify(value)));
 		}
 	}
 	for (const comment of comments(text)) {
-		const masked = maskCommentAssignment(replaceAll(comment.source, secrets), secrets);
-		if (masked !== comment.source) edits.push({ start: comment.offset, end: comment.offset + comment.source.length, text: masked });
+		const cut = commentCut(comment.source, known);
+		if (cut === undefined) continue;
+		const tail = comment.source.slice(cut).trimEnd();
+		if (tail === "") continue;
+		edits.push({ start: comment.offset + cut, end: comment.offset + cut + tail.length, text: placeholderFor(tail) });
 	}
 	const masked = applyEdits(text, edits);
-	// Structural credentials must be gone. A comment assignment is masked where it
-	// appears only: its "value" may be an ordinary word used elsewhere in the file.
-	for (const node of credential) {
-		const value = String(node.value);
-		if (value.length >= MIN_SECRET_LENGTH && masked.includes(value)) return { ok: false };
+	// Nothing known may survive: not in the text, not in a decoded (escaped) scalar, not in what NeoPi's parser reads.
+	if (known.some(secret => masked.includes(secret))) return { ok: false, known };
+	const check = parse(masked);
+	if (!check || known.some(secret => allScalars(check).some(node => String(node.value).includes(secret)))) return { ok: false, known };
+	try {
+		if (leaksSecret(Bun.YAML.parse(masked), known)) return { ok: false, known };
+	} catch {
+		return { ok: false, known };
 	}
-	return { ok: true, masked, secrets };
+	return { ok: true, masked, secrets, known };
 }
 
-export class PlaceholderError extends Error {}
+/** Line (1-based) of an offset, for messages. */
+function lineOf(text: string, offset: number): number {
+	return text.slice(0, offset).split("\n").length;
+}
+
+/** Walk NeoPi's parse of the submitted and restored documents together; they may differ only where a placeholder was restored. */
+function sameExceptRestored(submitted: unknown, restored: unknown, path: PathKey[], secrets: Map<string, Secret>): boolean {
+	if (typeof submitted === "string" && submitted.includes(MASK_MARK)) {
+		if (!isCredentialPath(path) || !PLACEHOLDER_EXACT.test(submitted)) return false;
+		const secret = secrets.get(submitted);
+		return secret !== undefined && Bun.deepEquals(secret.value, restored);
+	}
+	if (Array.isArray(submitted)) {
+		return Array.isArray(restored) && submitted.length === restored.length
+			&& submitted.every((item, index) => sameExceptRestored(item, restored[index], [...path, index], secrets));
+	}
+	if (submitted && typeof submitted === "object") {
+		if (!restored || typeof restored !== "object" || Array.isArray(restored)) return false;
+		const keys = Object.keys(submitted);
+		const other = restored as Record<string, unknown>;
+		if (keys.length !== Object.keys(other).length || keys.some(key => key.includes(MASK_MARK) || !(key in other))) return false;
+		return keys.every(key => sameExceptRestored((submitted as Record<string, unknown>)[key], other[key], [...path, key], secrets));
+	}
+	return Bun.deepEquals(submitted, restored);
+}
+
+const OUTSIDE_CREDENTIAL = "can only be restored as the whole value of an apiKey, a header or a requestMetadata entry. Replace it with the full value, or remove it (delete a masked comment).";
 
 /**
  * Put the credentials from `secrets` (the on-disk file's masking) back in
- * place of their placeholders in a submitted document. A scalar that is a
- * placeholder becomes the original value; a placeholder inside a longer
- * value or a comment becomes the original text. Throws PlaceholderError for a
- * placeholder `secrets` does not hold, or one the document's structure hides.
+ * place of their placeholders. A placeholder is restored only where it is the
+ * whole value of a credential position; anywhere else (a name, id, key,
+ * baseUrl, comment, tag, or an alias reaching another field) the document is
+ * refused with 400 before anything is validated or written, and an unknown
+ * placeholder with 409.
  */
-export function restoreModelsYaml(text: string, secrets: Map<string, Secret>): string {
-	if (!text.includes(PLACEHOLDER_PREFIX)) return text;
-	const lookup = (id: string): Secret => {
-		const secret = secrets.get(id);
-		if (!secret) throw new PlaceholderError(`${id} does not match a credential in the file on disk (it changed, or the deck restarted since the editor loaded). Reload, then reapply your edits.`);
-		return secret;
-	};
-	const doc = parse(text);
-	if (!doc) throw new PlaceholderError("The document has masked credentials but is not valid YAML, so they cannot be restored.");
+export function restoreModelsYaml(raw: string, secrets: Map<string, Secret>): string {
+	if (!raw.includes(MASK_MARK)) return raw;
+	const doc = parse(raw);
+	const reached = doc && reach(doc);
+	if (!doc || !reached) {
+		throw new PlaceholderError("The document holds masked credentials but is not valid YAML, so they cannot be located.", 400);
+	}
 	const edits: Edit[] = [];
-	for (const node of allScalars(doc)) {
-		if (!node.range || typeof node.value !== "string" || !node.value.includes(PLACEHOLDER_PREFIX)) continue;
-		const exact = /^<npi-deck-masked:[0-9a-f]{16}>$/.test(node.value) ? lookup(node.value) : undefined;
-		const restored = exact
-			? JSON.stringify(exact.value)
-			: JSON.stringify(node.value.replace(PLACEHOLDER, id => lookup(id).text));
-		edits.push(scalarEdit(node, text, restored));
+	const ranges: Array<[number, number]> = [];
+	for (const node of reached.credential) {
+		if (reached.elsewhere.has(node) || typeof node.value !== "string" || !node.value.includes(MASK_MARK) || !node.range) continue;
+		if (!PLACEHOLDER_EXACT.test(node.value)) {
+			throw new PlaceholderError(`Line ${lineOf(raw, node.range[0])}: a masked credential ${OUTSIDE_CREDENTIAL}`, 400);
+		}
+		ranges.push([node.range[0], node.range[1]]);
+		const secret = secrets.get(node.value);
+		if (secret) edits.push(scalarEdit(node, raw, JSON.stringify(secret.value)));
 	}
-	for (const comment of comments(text)) {
-		if (!comment.source.includes(PLACEHOLDER_PREFIX)) continue;
-		const restored = comment.source.replace(PLACEHOLDER, id => {
-			const value = lookup(id).text;
-			if (/[\r\n]/.test(value)) throw new PlaceholderError("A multi-line credential cannot be restored inside a comment; remove its placeholder from the comment.");
-			return value;
-		});
-		edits.push({ start: comment.offset, end: comment.offset + comment.source.length, text: restored });
+	for (let at = raw.indexOf(MASK_MARK); at >= 0; at = raw.indexOf(MASK_MARK, at + 1)) {
+		if (!ranges.some(([start, end]) => at >= start && at < end)) {
+			throw new PlaceholderError(`Line ${lineOf(raw, at)}: a masked credential ${OUTSIDE_CREDENTIAL}`, 400);
+		}
 	}
-	const out = applyEdits(text, edits);
-	if (out.includes(PLACEHOLDER_PREFIX)) {
-		throw new PlaceholderError("A masked credential sits where it cannot be restored (a tag, anchor or directive). Replace it with the full value.");
+	if (edits.length !== ranges.length) {
+		throw new PlaceholderError("A masked credential does not match one in the file on disk (it changed, or the deck restarted since the editor loaded). Reload, then reapply your edits.", 409);
 	}
-	return out;
+	const restored = applyEdits(raw, edits);
+	// Cross-check with the parser NeoPi uses: only restored credential positions may differ.
+	let submittedData: unknown;
+	try {
+		submittedData = Bun.YAML.parse(raw);
+	} catch {
+		return restored; // NeoPi rejects the submitted document itself; nothing is written.
+	}
+	let restoredData: unknown;
+	try {
+		restoredData = Bun.YAML.parse(restored);
+	} catch {
+		throw new PlaceholderError("The masked credentials could not be restored unambiguously. Replace them with the full values.", 400);
+	}
+	if (!sameExceptRestored(submittedData, restoredData, [], secrets)) {
+		throw new PlaceholderError(`A masked credential ${OUTSIDE_CREDENTIAL}`, 400);
+	}
+	return restored;
 }
 
-/** Every credential value in a parseable document, for scrubbing messages. */
-export function credentialValues(text: string): string[] {
-	const doc = parse(text);
-	if (!doc) return [];
-	return [...credentialScalars(doc)].map(node => String(node.value));
-}
+const WITHHELD = "NeoPi rejects this document; its message is withheld because it would quote a credential. The deck server log has the details.";
 
-/** `message` with each of `values` replaced by a placeholder mark, so an error never quotes a credential. */
-export function scrubCredentials(message: string, values: Iterable<string>): string {
+/** `message` with known credentials replaced, or a withheld notice when that is ambiguous. */
+export function safeMessage(message: string, known: readonly string[]): string {
 	let out = message;
-	for (const value of [...values].sort((a, b) => b.length - a.length)) {
-		if (value.length >= MIN_SECRET_LENGTH) out = out.split(value).join("<masked>");
-	}
-	return out;
+	for (const secret of [...known].filter(s => s.length >= MIN_REPLACE).sort((a, b) => b.length - a.length)) out = out.split(secret).join("<masked>");
+	return known.some(secret => out.includes(secret)) ? WITHHELD : out;
 }
+
+export const WITHHELD_MESSAGE = WITHHELD;

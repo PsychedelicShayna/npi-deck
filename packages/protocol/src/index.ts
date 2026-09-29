@@ -242,7 +242,7 @@ export interface ModelsConfigModelSummary {
 	input?: string[];
 }
 
-/** One provider as NeoPi validated it. Credentials are reduced to whether they are set. */
+/** One provider, read from the masked document: credentials are at most placeholders, and reduced to whether they are set. */
 export interface ModelsConfigProviderSummary {
 	name: string;
 	baseUrl?: string;
@@ -267,17 +267,20 @@ export interface ModelsConfigResponse {
 	/** Identifies the file contents this response describes; saves must send it back. */
 	revision: string;
 	/**
-	 * The document with every credential replaced by a `<npi-deck-masked:…>` placeholder.
-	 * Saving a placeholder unchanged keeps the value on disk. Null when the credentials
-	 * cannot all be located and masked (the file is not parseable YAML); `rawUnavailable` says why.
+	 * The document with every credential replaced by a `<npi-deck-masked:…>` placeholder:
+	 * apiKey, every header and requestMetadata value, values under credential-like keys,
+	 * their other occurrences, and comment text from a credential-like word onward. A
+	 * placeholder saved as the whole value of an apiKey, header or requestMetadata entry
+	 * keeps the value on disk; anywhere else the save is refused (400). Null when the
+	 * credentials cannot be masked unambiguously; `rawUnavailable` says why.
 	 */
 	raw: string | null;
 	rawUnavailable?: string;
 	/** Distinct credentials masked in `raw`. */
 	maskedSecrets: number;
-	/** NeoPi's load error for this document; NeoPi ignores an invalid file. Credentials are masked. */
+	/** NeoPi's load error for this document (NeoPi ignores an invalid file), as it reads the masked text; withheld when it could quote a credential. */
 	error?: string;
-	/** Empty when `error` is set. */
+	/** Empty when `error` is set or `raw` is withheld. */
 	providers: ModelsConfigProviderSummary[];
 }
 
@@ -288,6 +291,7 @@ export interface ModelsConfigDocumentRequest {
 	revision?: string;
 }
 
+/** Summary of the submitted document as sent (placeholders unrestored). */
 export interface ModelsConfigValidateResponse {
 	providers: ModelsConfigProviderSummary[];
 }

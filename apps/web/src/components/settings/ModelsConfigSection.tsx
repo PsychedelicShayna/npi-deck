@@ -119,9 +119,11 @@ export function ModelsConfigSection() {
 						<div className="space-y-2 p-3">
 							{data.raw === null ? <Alert tone="warn">{data.rawUnavailable}</Alert> : null}
 							<p className="text-xs text-ink-3">
-								Credentials appear as <code className="font-mono text-2xs">&lt;npi-deck-masked:…&gt;</code>. Leave a placeholder as
-								it is to keep the stored value (it may be moved or copied), or replace it with a new key, an environment
-								variable name, or a <code className="font-mono text-2xs">!command</code>.
+								Credentials appear as <code className="font-mono text-2xs">&lt;npi-deck-masked:…&gt;</code>. A placeholder that is the
+								whole value of an <code className="font-mono text-2xs">apiKey</code>, a header or a requestMetadata entry keeps the
+								stored value on save (it may be moved or copied between those). Anywhere else, including masked comments and
+								URLs, a save is refused: replace it with the full value, a new key, an environment variable name or a{" "}
+								<code className="font-mono text-2xs">!command</code>, or delete it.
 							</p>
 							<textarea
 								aria-label="models.yml document"
