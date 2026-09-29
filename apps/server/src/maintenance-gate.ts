@@ -11,7 +11,7 @@
  * cost is one small env-file read.
  */
 
-import { readManagedEnvFile } from "./env-store.ts";
+import { isDeckGeneratedEnv, readManagedEnvFile, setDeckGeneratedEnv } from "./env-store.ts";
 import { optedInStarters, starterId } from "./starters.ts";
 
 /** The bundled extension's directory name under `starter-extensions/`. */
@@ -60,11 +60,13 @@ export function readMaintenanceGateState(): MaintenanceGateState {
 	const resolve = (key: string): { rawValue: string | null; source: GateValueSource } => {
 		const processValue = process.env[key];
 		const fileValue = file.values.get(key);
-		if (processValue !== undefined && processValue !== fileValue) {
+		const generated = isDeckGeneratedEnv(key);
+		if (processValue !== undefined && !generated && processValue !== fileValue) {
 			return { rawValue: processValue, source: "process-env" };
 		}
 		if (fileValue !== undefined) return { rawValue: fileValue, source: "env-file" };
-		if (processValue !== undefined) return { rawValue: processValue, source: "process-env" };
+		// A value the deck generated (the org root) is its default, not the shell's.
+		if (processValue !== undefined) return { rawValue: processValue, source: generated ? "default" : "process-env" };
 		return { rawValue: null, source: "unset" };
 	};
 	const intKnob = (key: string, def: number): GateKnob => {
@@ -112,30 +114,19 @@ function isTruthy(value: string | null | undefined): boolean {
 	return ["1", "true", "yes", "on"].includes(lower);
 }
 
-/** The org root the deck last set itself; a value it did not set belongs to the user. */
-let deckOrgRoot: string | undefined;
-
 /**
  * Point `NPI_DECK_ORG_ROOT` at `kbRoot` while the maintenance-gate starter is
  * opted in and not disabled, so the extension treats every session this
  * server spawns (routine subprocesses inherit the env) as a deck-managed org
  * root regardless of cwd, which rarely has the flat-file org markers the
- * upstream detector looks for. Otherwise remove the value the deck set. A
- * value from the launching shell or the managed .env is left alone.
+ * upstream detector looks for. Otherwise remove the value the deck set. The
+ * value is deck-generated (see `setDeckGeneratedEnv`): one from the launching
+ * shell or the managed .env wins over it and is never cleared.
  */
 export function syncMaintenanceGateOrgRoot(kbRoot: string): void {
-	const key = MAINTENANCE_GATE_ENV_KEYS.orgRoot;
-	const current = process.env[key];
-	if (current !== undefined && current !== deckOrgRoot) return;
 	const wanted = optedInStarters().has(starterId("extensions", MAINTENANCE_GATE_STARTER))
 		&& !isTruthy(process.env[MAINTENANCE_GATE_ENV_KEYS.disabled]);
-	if (wanted) {
-		process.env[key] = kbRoot;
-		deckOrgRoot = kbRoot;
-	} else if (current !== undefined) {
-		delete process.env[key];
-		deckOrgRoot = undefined;
-	}
+	setDeckGeneratedEnv(MAINTENANCE_GATE_ENV_KEYS.orgRoot, wanted ? kbRoot : undefined);
 }
 
 /**

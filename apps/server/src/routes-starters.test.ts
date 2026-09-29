@@ -4,7 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { StartersResponse } from "@npi-deck/protocol";
 
-import { MANAGED_ENV_KEYS_LOADED, readManagedEnvFile } from "./env-store.ts";
+import { MANAGED_ENV_KEYS_LOADED, commitManagedEnvUpdates, readManagedEnvFile, setDeckGeneratedEnv } from "./env-store.ts";
+import { resolveEnvSetting } from "./env-schema.ts";
 import { buildStartersRouter } from "./routes-starters.ts";
 import { installOptedInStarters } from "./starters.ts";
 
@@ -53,6 +54,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	setDeckGeneratedEnv("NPI_DECK_ORG_ROOT", undefined);
 	for (const k of ENV_KEYS) {
 		MANAGED_ENV_KEYS_LOADED.delete(k);
 		if (saved[k] === undefined) delete process.env[k];
@@ -213,6 +215,36 @@ describe("maintenance gate org root follows its starter (#34)", () => {
 		expect(process.env.NPI_DECK_ORG_ROOT).toBe("/srv/my-org");
 		await optIn("extensions/maintenance-gate", { optedIn: false });
 		expect(process.env.NPI_DECK_ORG_ROOT).toBe("/srv/my-org");
+	});
+
+	test("an org root saved in Settings after opt-in overrides the generated one live, and opting out leaves it", async () => {
+		const gate = async () =>
+			(await (await app().request("http://127.0.0.1/starters/maintenance-gate")).json()) as { orgRoot: string | null; orgRootSource: string };
+		await optIn("extensions/maintenance-gate", { optedIn: true });
+		expect(resolveEnvSetting("NPI_DECK_ORG_ROOT").setting).toEqual({ key: "NPI_DECK_ORG_ROOT", source: "default", editable: true });
+		expect(await gate()).toMatchObject({ orgRoot: kbRoot, orgRootSource: "default" });
+
+		// The Env editor's save path.
+		await commitManagedEnvUpdates({ NPI_DECK_ORG_ROOT: "/srv/my-org" });
+		expect(process.env.NPI_DECK_ORG_ROOT).toBe("/srv/my-org");
+		expect(resolveEnvSetting("NPI_DECK_ORG_ROOT")).toEqual({
+			value: "/srv/my-org",
+			setting: { key: "NPI_DECK_ORG_ROOT", source: "env-file", editable: true },
+		});
+		expect(await gate()).toMatchObject({ orgRoot: "/srv/my-org", orgRootSource: "env-file" });
+
+		// Clearing the override while opted in brings the generated root back.
+		await commitManagedEnvUpdates({ NPI_DECK_ORG_ROOT: null });
+		expect(process.env.NPI_DECK_ORG_ROOT).toBe(kbRoot);
+		await commitManagedEnvUpdates({ NPI_DECK_ORG_ROOT: "/srv/my-org" });
+
+		await optIn("extensions/maintenance-gate", { optedIn: false });
+		expect(process.env.NPI_DECK_ORG_ROOT).toBe("/srv/my-org");
+		expect(readManagedEnvFile().values.get("NPI_DECK_ORG_ROOT")).toBe("/srv/my-org");
+
+		// Opted out, clearing the override leaves nothing behind.
+		await commitManagedEnvUpdates({ NPI_DECK_ORG_ROOT: null });
+		expect(process.env.NPI_DECK_ORG_ROOT).toBeUndefined();
 	});
 });
 

@@ -1,6 +1,6 @@
 import type { EnvBackedSetting, EnvRestartTarget, EnvValueSource, EnvValueType } from "@npi-deck/protocol";
 
-import { MANAGED_ENV_KEYS_LOADED, readManagedEnvFile } from "./env-store.ts";
+import { MANAGED_ENV_KEYS_LOADED, isDeckGeneratedEnv, readManagedEnvFile } from "./env-store.ts";
 import { NOTIFICATIONS_DISABLED_ENV, NOTIFICATION_SOURCES, isNotificationKind } from "./notifications/kinds.ts";
 
 export interface EnvSchemaEntry {
@@ -264,16 +264,19 @@ export function isEnvFlagOff(value: string | undefined): boolean {
 /**
  * Effective value of a schema key and where it came from. A value the
  * launching shell exported wins over the managed .env; a key the deck loaded
- * from (or wrote to) the .env reports `env-file`.
+ * from (or wrote to) the .env reports `env-file`. A value the deck generated
+ * (see `setDeckGeneratedEnv`) is its default, not the shell's.
  */
 export function resolveEnvEntry(entry: EnvSchemaEntry): { source: EnvValueSource; value?: string } {
 	const file = readManagedEnvFile();
 	const fileValue = file.values.get(entry.key);
 	const processValue = process.env[entry.key];
-	if (processValue !== undefined && !(MANAGED_ENV_KEYS_LOADED.has(entry.key) && processValue === fileValue)) {
+	const generated = isDeckGeneratedEnv(entry.key);
+	if (processValue !== undefined && !generated && !(MANAGED_ENV_KEYS_LOADED.has(entry.key) && processValue === fileValue)) {
 		return { source: "process-env", value: processValue };
 	}
 	if (fileValue !== undefined) return { source: "env-file", value: fileValue };
+	if (generated) return { source: "default", value: processValue };
 	if (entry.defaultValue !== undefined) return { source: "default", value: entry.defaultValue };
 	return { source: "unset" };
 }

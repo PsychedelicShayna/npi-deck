@@ -7,6 +7,40 @@ const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export const MANAGED_ENV_KEYS_LOADED = new Set<string>();
 
+/**
+ * Values the deck generates for a key nobody set (the maintenance gate's
+ * `NPI_DECK_ORG_ROOT` from the kb root), and the keys whose `process.env`
+ * value is currently that generated one. A generated value is the deck's, not
+ * the launching shell's: a managed .env value overrides it and propagates
+ * live, and clearing that override brings the generated value back.
+ */
+const deckGeneratedValues = new Map<string, string>();
+const deckGeneratedApplied = new Set<string>();
+
+/** True while `process.env[key]` holds the value the deck generated for it. */
+export function isDeckGeneratedEnv(key: string): boolean {
+	return deckGeneratedApplied.has(key);
+}
+
+/**
+ * Record the value the deck wants for `key` (undefined: none) and apply it to
+ * `process.env` when the deck owns the key there, that is, when it holds the
+ * deck's earlier generated value or nothing at all. A value from the shell or
+ * the managed .env is never replaced or cleared.
+ */
+export function setDeckGeneratedEnv(key: string, value: string | undefined): void {
+	if (value === undefined) deckGeneratedValues.delete(key);
+	else deckGeneratedValues.set(key, value);
+	if (!deckGeneratedApplied.has(key) && process.env[key] !== undefined) return;
+	if (value === undefined) {
+		delete process.env[key];
+		deckGeneratedApplied.delete(key);
+	} else {
+		process.env[key] = value;
+		deckGeneratedApplied.add(key);
+	}
+}
+
 interface EntryLine {
 	kind: "entry";
 	key: string;
@@ -74,16 +108,24 @@ export function loadManagedEnvIntoProcess(): void {
  * (bridge supervisor, log-level toggle, etc.) observe the change without a
  * server restart. We refuse to clobber values originally supplied by the
  * launching shell — those values are tracked by their absence from
- * `MANAGED_ENV_KEYS_LOADED`.
+ * `MANAGED_ENV_KEYS_LOADED` — but a deck-generated value yields to the
+ * managed one, and returns when the managed one is cleared.
  */
 function applyManagedEnvUpdatesToProcess(updates: Record<string, string | null>): string[] {
 	const propagated: string[] = [];
 	for (const [key, value] of Object.entries(updates)) {
-		const ownedByManaged = MANAGED_ENV_KEYS_LOADED.has(key) || process.env[key] === undefined;
+		const ownedByManaged = MANAGED_ENV_KEYS_LOADED.has(key) || deckGeneratedApplied.has(key) || process.env[key] === undefined;
 		if (!ownedByManaged) continue;
+		deckGeneratedApplied.delete(key);
 		if (value === null) {
-			delete process.env[key];
 			MANAGED_ENV_KEYS_LOADED.delete(key);
+			const generated = deckGeneratedValues.get(key);
+			if (generated === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = generated;
+				deckGeneratedApplied.add(key);
+			}
 		} else {
 			process.env[key] = value;
 			MANAGED_ENV_KEYS_LOADED.add(key);
