@@ -330,8 +330,8 @@ function KbEmpty() {
 			<BookOpen className="h-6 w-6 text-ink-4" />
 			<div className="mt-3 text-sm text-ink-2">Pick a file from the tree.</div>
 			<div className="mt-1 max-w-sm text-xs text-ink-3">
-				The KB cockpit reads your wiki at <span className="font-mono text-ink-2">~/kb</span>. Set{" "}
-				<span className="font-mono">NPI_DECK_KB_EXCLUDE_DIRS</span> to hide subtrees if you need to.
+				The KB cockpit reads your wiki at <span className="font-mono text-ink-2">~/kb</span>. List subtrees
+				to hide in <span className="font-mono">.kbignore</span> (gitignore syntax) at its root.
 			</div>
 		</div>
 	);
@@ -438,8 +438,8 @@ function KbSidebar() {
 			</div>
 			<div className="min-h-0 flex-1 px-3 py-2 text-xs text-ink-3">
 				The cockpit reads <span className="font-mono">~/kb</span> via{" "}
-				<span className="font-mono">NPI_DECK_KB_ROOT</span>. Hide subtrees via{" "}
-				<span className="font-mono">NPI_DECK_KB_EXCLUDE_DIRS</span>.
+				<span className="font-mono">NPI_DECK_KB_ROOT</span>. Hide subtrees with a{" "}
+				<span className="font-mono">.kbignore</span> at the kb root.
 			</div>
 		</div>
 	);

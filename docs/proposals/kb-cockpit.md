@@ -109,7 +109,12 @@ Hardcoded skip-set (matches `orphan-census.py`):
 projects                          # top-level — see Decisions below
 ```
 
-Future: `.kbignore` file at any subdir level (gitignore-style). Out of v1.
+Shipped (#27): a `.kbignore` at the kb root, in gitignore syntax (negation,
+`dir/`-only, anchored and `**` patterns), applied on top of this skip-set and
+`NPI_DECK_KB_EXCLUDE_DIRS` to the tree, file reads and writes, search, graph,
+backlinks and the watcher. A `!` pattern cannot re-include a skip-set
+directory. Edits reload with the next index rebuild, which the watcher
+triggers. Nested `.kbignore` files below the root are not read.
 
 ### 3. Wikilink resolution rules
 
@@ -238,8 +243,8 @@ are independently valuable. T-39 and T-40 polish the experience.
    `build`, etc.) already catch the noise — measured: 411 raw projects/ md
    files filter down to 147 real signal files. The cockpit ships every
    visible directory the user organized; opinionated curation is not its
-   job. Other users who want to hide subtrees set
-   `OMP_DECK_KB_EXCLUDE_DIRS=<csv>` and restart.
+   job. Other users who want to hide subtrees list them in `.kbignore` at
+   the kb root, or set `NPI_DECK_KB_EXCLUDE_DIRS=<csv>` and restart.
 3. **Editor**: textarea with mono font + soft-wrap for v1 (CodeMirror 6 was
    the proposal-stated default but is not yet installed; the textarea ships
    the save loop in zero kb of extra weight and can be swapped to a richer

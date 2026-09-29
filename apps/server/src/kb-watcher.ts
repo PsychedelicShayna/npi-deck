@@ -1,7 +1,9 @@
 /**
  * Watcher rooted at the KB. Fires a debounced `kb_changed` broadcast on any
  * mutation under the watched tree and invalidates the KbService index so
- * the next read sees fresh data.
+ * the next read sees fresh data. Events under paths the cockpit hides (the
+ * skip set, `NPI_DECK_KB_EXCLUDE_DIRS`, `.kbignore`) are dropped; an edit
+ * to `.kbignore` itself always fires, which is how its rules hot-reload.
  *
  * Gated by `NPI_DECK_WATCH_KB`. Per-root errors degrade to no-op (the
  * cockpit still works; the UI just needs manual refresh on changes). On
@@ -48,7 +50,8 @@ export function startKbWatcher(service: KbService): () => void {
 	};
 
 	try {
-		watcher = watch(root, { recursive: true, persistent: false }, () => {
+		watcher = watch(root, { recursive: true, persistent: false }, (_event, filename) => {
+			if (filename && service.isWatchEventIgnored(filename.toString())) return;
 			schedule();
 		});
 		watcher.on("error", (err) => {

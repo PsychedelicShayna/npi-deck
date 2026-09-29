@@ -23,7 +23,7 @@
  * fresh data after `rebuildIndex()` is called by the watcher.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -45,6 +45,7 @@ import type {
 	KbSearchResult,
 } from "@npi-deck/protocol";
 
+import { KB_IGNORE_FILE, KbIgnore } from "./kb-ignore.ts";
 import { logger } from "./log.ts";
 
 const log = logger("kb");
@@ -52,14 +53,15 @@ const log = logger("kb");
 // Top-level (anywhere in the tree) directory names to skip. Mirrors the
 // canonical set in my-org-new/scripts/orphan-census.py — vendor-noise
 // directories that nobody wants in a knowledge graph. To add your own
-// (e.g. a personal `drafts/` folder, a `private/` subtree), set
-// `NPI_DECK_KB_EXCLUDE_DIRS` to a comma-separated list and restart.
+// (e.g. a personal `drafts/` folder, a `private/` subtree), either list
+// them in a gitignore-syntax `.kbignore` at the kb root (see kb-ignore.ts;
+// re-read whenever the index rebuilds, so edits apply without a restart)
+// or set `NPI_DECK_KB_EXCLUDE_DIRS` to a comma-separated list of names and
+// restart.
 //
 // The list is intentionally minimal by default: npi-deck shows your kb the
-// way you organized it on disk. If you want to keep a directory out of the
-// cockpit (e.g. it's full of vendor markdown or a checked-in node_modules),
-// either add it to the env override below or rely on the built-in
-// vendor-noise filter (which already catches .venv, node_modules, etc).
+// way you organized it on disk. This set and the env override apply before
+// `.kbignore`, so a `!` pattern there cannot re-include them.
 const SKIP_DIR_NAMES = new Set<string>([
 	".git",
 	".github",
@@ -172,6 +174,8 @@ export class KbService {
 	private indexReady = false;
 	private indexPromise: Promise<void> | undefined;
 	private graphCache: GraphCache | undefined;
+	/** `.kbignore` rules; undefined until first use after an invalidate. */
+	private ignoreRules: KbIgnore | undefined;
 
 	constructor(opts: KbServiceOptions) {
 		// Always store the root as an absolute path with native separators.
@@ -190,10 +194,26 @@ export class KbService {
 		}
 	}
 
-	/** Invalidate cache + rebuild on next request. Called by the watcher. */
+	/**
+	 * Invalidate cache + rebuild on next request. Called by the watcher,
+	 * which also covers edits to `.kbignore` itself: its rules are re-read
+	 * on next use.
+	 */
 	invalidate(): void {
 		this.indexReady = false;
 		this.graphCache = undefined;
+		this.ignoreRules = undefined;
+	}
+
+	/**
+	 * Should a watcher event at `rel` (kb-relative) be dropped? True only
+	 * when the path is excluded whether it names a file or a directory, so
+	 * an ambiguous event still refreshes. `.kbignore` itself always counts.
+	 */
+	isWatchEventIgnored(rel: string): boolean {
+		const clean = normalizeRel(rel);
+		if (!clean || clean === KB_IGNORE_FILE) return false;
+		return this.pathIsExcluded(clean, false) && this.pathIsExcluded(clean, true);
 	}
 
 	/**
@@ -270,7 +290,7 @@ export class KbService {
 		// Reject traversal into any path whose segments include an excluded
 		// directory — keeps `/api/kb/tree?path=projects` 404 even though
 		// `projects` exists on disk.
-		if (this.pathIsExcluded(cleanRel)) return undefined;
+		if (this.pathIsExcluded(cleanRel, true)) return undefined;
 		const absDir = this.resolveAbs(cleanRel);
 		if (!absDir) return undefined;
 		try {
@@ -307,6 +327,7 @@ export class KbService {
 					}
 				}
 				if (!isDir) continue;
+				if (this.rules().ignoresEntry(relPath, true)) continue;
 				const mdCount = this.recursiveMdCount(relPath);
 				const item: KbTreeEntry = {
 					name: entry.name,
@@ -321,6 +342,7 @@ export class KbService {
 
 			if (!entry.isFile()) continue;
 			if (!entry.name.toLowerCase().endsWith(".md")) continue;
+			if (this.rules().ignoresEntry(relPath, false)) continue;
 			let st;
 			try {
 				st = await stat(abs);
@@ -353,7 +375,7 @@ export class KbService {
 		await this.ensureIndex();
 		const cleanRel = normalizeRel(subpath);
 		if (!cleanRel) return undefined;
-		if (this.pathIsExcluded(cleanRel)) return undefined;
+		if (this.pathIsExcluded(cleanRel, false)) return undefined;
 		const abs = this.resolveAbs(cleanRel);
 		if (!abs) return undefined;
 
@@ -414,7 +436,7 @@ export class KbService {
 		await this.ensureIndex();
 		const cleanRel = normalizeRel(subpath);
 		if (!cleanRel) return { kind: "invalid-path" };
-		if (this.pathIsExcluded(cleanRel)) return { kind: "invalid-path" };
+		if (this.pathIsExcluded(cleanRel, false)) return { kind: "invalid-path" };
 		const abs = this.resolveAbs(cleanRel);
 		if (!abs) return { kind: "invalid-path" };
 		if (!cleanRel.toLowerCase().endsWith(".md")) return { kind: "invalid-path" };
@@ -492,7 +514,7 @@ export class KbService {
 		await this.ensureIndex();
 		const cleanRel = normalizeRel(subpath);
 		if (!cleanRel) return undefined;
-		if (this.pathIsExcluded(cleanRel)) return undefined;
+		if (this.pathIsExcluded(cleanRel, false)) return undefined;
 		if (!this.byRelPath.has(cleanRel)) return undefined;
 		if (!this.graphCache) {
 			this.graphCache = await this.buildGraph();
@@ -755,7 +777,7 @@ export class KbService {
 			if (entry.isDirectory() || entry.isSymbolicLink()) {
 				try {
 					const st = await stat(abs);
-					if (st.isDirectory()) {
+					if (st.isDirectory() && !this.rules().ignoresEntry(rel, true)) {
 						await this.walk(abs, rel, visited);
 					}
 				} catch {
@@ -766,6 +788,7 @@ export class KbService {
 
 			if (!entry.isFile()) continue;
 			if (!entry.name.toLowerCase().endsWith(".md")) continue;
+			if (this.rules().ignoresEntry(rel, false)) continue;
 
 			try {
 				const st = await stat(abs);
@@ -792,7 +815,12 @@ export class KbService {
 		return false;
 	}
 
-	private pathIsExcluded(rel: string): boolean {
+	/**
+	 * Is `rel` hidden from the cockpit? The skip set applies to any segment;
+	 * `.kbignore` applies to the path and each ancestor directory. `isDir`
+	 * describes the last segment, for `.kbignore`'s `dir/` patterns.
+	 */
+	private pathIsExcluded(rel: string, isDir: boolean): boolean {
 		if (!rel) return false;
 		for (const seg of rel.split("/")) {
 			if (SKIP_DIR_NAMES.has(seg)) return true;
@@ -800,7 +828,23 @@ export class KbService {
 		for (const frag of SKIP_PATH_FRAGMENTS) {
 			if (rel.includes(frag)) return true;
 		}
-		return false;
+		return this.rules().ignores(rel, isDir);
+	}
+
+	/** `.kbignore` at the kb root, read on first use after an invalidate. */
+	private rules(): KbIgnore {
+		if (this.ignoreRules) return this.ignoreRules;
+		let rules = KbIgnore.empty;
+		const file = path.join(this.root, KB_IGNORE_FILE);
+		try {
+			rules = KbIgnore.parse(readFileSync(file, "utf8"));
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+				log.warn(`could not read ${file}; ignoring it`, err);
+			}
+		}
+		this.ignoreRules = rules;
+		return rules;
 	}
 
 	private resolveAbs(rel: string): string | undefined {
