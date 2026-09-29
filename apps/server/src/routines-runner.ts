@@ -87,9 +87,7 @@ export class RoutinesRunner {
 
 	schedule(r: Routine): void {
 		this.unschedule(r.id);
-		if (!r.enabled) return;
-
-		const cronExprs = collectCronExpressions(r);
+		const cronExprs = r.enabled ? collectCronExpressions(r) : [];
 		if (cronExprs.length === 0) {
 			setRoutineSchedule(r.id, { nextRunAt: null });
 			return;

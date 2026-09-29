@@ -4,7 +4,7 @@ import * as path from "node:path";
 import type { RoutineSpec } from "@npi-deck/protocol";
 import { openDb, closeDb, getDb } from "../db/index.ts";
 import { listStepRuns } from "../db/routine-step-runs.ts";
-import { createRoutine, createV1Routine, getRoutine, listRuns } from "../db/routines.ts";
+import { createRoutine, createV1Routine, getRoutine, listRuns, updateV1Routine } from "../db/routines.ts";
 import { RoutinesRunner } from "../routines-runner.ts";
 import { initializeOwnedGeneration, stopOwnedProcesses } from "../owned-process.ts";
 
@@ -150,6 +150,21 @@ test("multi-cron next run remains the earliest after a manual run", async () => 
 	const after = getRoutine(r.id)?.nextRunAt;
 	expect(after).toBeDefined();
 	expect(new Date(after!).getTime() - Date.now()).toBeLessThan(61_000);
+});
+
+test("disabling a cron routine clears next run, and a manual run while disabled does not restore it", async () => {
+	setup();
+	const s = spec([{ id: "fast", type: "run", command: "true" }]);
+	s.trigger = [{ cron: "* * * * *" }];
+	const r = routine(s);
+	runner!.schedule(r);
+	expect(getRoutine(r.id)?.nextRunAt).toBeDefined();
+	runner!.schedule(updateV1Routine(r.id, { enabled: false })!);
+	expect(getRoutine(r.id)?.nextRunAt).toBeUndefined();
+	await runner!.fire(r.id, "manual");
+	const after = getRoutine(r.id)!;
+	expect(after.lastRunAt).toBeDefined();
+	expect(after.nextRunAt).toBeUndefined();
 });
 
 test("legacy shell routines also queue before spawning and drain on shutdown", async () => {
