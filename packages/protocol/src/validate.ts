@@ -102,12 +102,15 @@ function normalizeErrors(errors: ErrorObject[] | null | undefined): ValidationEr
  * parsed-from-YAML JavaScript object; YAML parsing is the caller's
  * responsibility (and lives in the server's routine runner).
  *
- * Two-stage validation:
+ * Three-stage validation:
  *   1. Ajv structural validation against the JSON Schemas.
  *   2. Cross-reference pass: when a `layout` block is present, every edge
  *      `from`/`to` and every node key must reference an actual step id.
  *      Reported with a synthetic `crossRef` keyword + a JSON-Pointer path so
  *      the UI can surface them inline alongside Ajv errors.
+ *   3. Every agent step's `structured_output.schema` must compile with
+ *      {@link compileStructuredOutputSchema}, so an unusable or `$async`
+ *      schema is refused at save instead of at run time.
  */
 export function validateRoutineSpec(spec: unknown): ValidationResult {
 	const { validate } = getValidator();
@@ -122,18 +125,48 @@ export function validateRoutineSpec(spec: unknown): ValidationResult {
 	if (crossRef.length > 0) {
 		return { valid: false, errors: crossRef };
 	}
+	const outputSchemas = checkStructuredOutputSchemas(spec);
+	if (outputSchemas.length > 0) {
+		return { valid: false, errors: outputSchemas };
+	}
 	return { valid: true };
 }
 
 /**
  * Compile a headless agent's declared output schema. Throws when the schema
  * itself is invalid, so callers can report that apart from a bad answer.
+ * `$async` schemas are refused: their validator returns a Promise, which a
+ * synchronous caller would read as a pass. (Ajv already refuses `$async`
+ * nested under a synchronous root.)
  */
 export function compileStructuredOutputSchema(schema: unknown): (output: unknown) => ValidationResult {
 	const ajv = new Ajv2020({ allErrors: true, strict: false });
 	addFormats(ajv);
 	const validate = ajv.compile(schema as object);
+	// Ajv types compile() as synchronous; an `$async: true` root still yields an async validator.
+	if ((validate as { $async?: unknown }).$async) throw new Error("$async schemas are not supported; structured output is validated synchronously");
 	return (output) => validate(output) ? { valid: true } : { valid: false, errors: normalizeErrors(validate.errors) };
+}
+
+/** Stage 3 of {@link validateRoutineSpec}; runs after Ajv has guaranteed the step shapes. */
+function checkStructuredOutputSchemas(spec: unknown): ValidationError[] {
+	const steps = (spec as { steps?: unknown }).steps;
+	if (!Array.isArray(steps)) return [];
+	const errors: ValidationError[] = [];
+	steps.forEach((step: { type?: unknown; structured_output?: { schema?: unknown } }, index) => {
+		if (step.type !== "agent" || !step.structured_output) return;
+		try {
+			compileStructuredOutputSchema(step.structured_output.schema);
+		} catch (error) {
+			errors.push({
+				path: `/steps/${index}/structured_output/schema`,
+				keyword: "structuredOutputSchema",
+				message: `structured_output schema could not be compiled: ${error instanceof Error ? error.message : String(error)}`,
+				params: {},
+			});
+		}
+	});
+	return errors;
 }
 
 /**

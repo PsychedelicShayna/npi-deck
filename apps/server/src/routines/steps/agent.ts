@@ -1,10 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
-import { compileStructuredOutputSchema, type RoutineStep } from "@npi-deck/protocol";
+import type { RoutineStep } from "@npi-deck/protocol";
 import { spawnOwned, terminateOwned } from "../../owned-process.ts";
 import { isLiteralAllowlistName } from "../../literal-allowlist-name.ts";
 import { feature } from "../../backend/runtime.ts";
 import { routineAgentCommand, routineAgentSupportsMcpAllowlist } from "../agent-command.ts";
 import { renderString } from "../template.ts";
+import { checkStructuredOutput, isAnswerFault } from "./structured-output.ts";
 import type { RunContext, StepResult } from "../types.ts";
 
 const MAX_EXCERPT = 8 * 1024;
@@ -182,37 +183,6 @@ async function mcpFlags(step: AgentStep, command: string[], cwd: string): Promis
 	return ["--mcp", names.join(",")];
 }
 
-const MAX_REPORTED_SCHEMA_ERRORS = 10;
-
-type StructuredOutputCheck =
-	| { ok: true; json: unknown }
-	| { ok: false; kind: "parse" | "mismatch" | "schema"; error: string };
-
-/** Compile the step's JSON Schema, parse the answer, then validate it; each failure class reports separately. */
-function checkStructuredOutput(schema: unknown, answer: string): StructuredOutputCheck {
-	let validate: ReturnType<typeof compileStructuredOutputSchema>;
-	try {
-		validate = compileStructuredOutputSchema(schema);
-	} catch (error) {
-		return { ok: false, kind: "schema", error: `structured_output schema could not be compiled: ${error instanceof Error ? error.message : String(error)}` };
-	}
-	let json: unknown;
-	try {
-		json = JSON.parse(answer);
-	} catch (error) {
-		return { ok: false, kind: "parse", error: `structured_output is not valid JSON: ${error instanceof Error ? error.message : String(error)}` };
-	}
-	const validation = validate(json);
-	if (validation.valid) return { ok: true, json };
-	const errors = validation.errors ?? [];
-	const described = errors.slice(0, MAX_REPORTED_SCHEMA_ERRORS).map(error => {
-		const property = error.keyword === "additionalProperties" ? ` '${String(error.params.additionalProperty)}'` : "";
-		return `${error.path} ${error.message}${property}`;
-	});
-	if (errors.length > MAX_REPORTED_SCHEMA_ERRORS) described.push(`(+${errors.length - MAX_REPORTED_SCHEMA_ERRORS} more)`);
-	return { ok: false, kind: "mismatch", error: `structured_output does not match schema: ${described.join("; ")}` };
-}
-
 export async function executeAgentStep(
 	step: AgentStep,
 	context: RunContext,
@@ -259,10 +229,10 @@ export async function executeAgentStep(
 			if (usage.answer === undefined) return result("failed", "NeoPi agent_end has no assistant answer");
 			let json: unknown;
 			if (step.structured_output) {
-				const checked = checkStructuredOutput(step.structured_output.schema, usage.answer);
+				const checked = await checkStructuredOutput(step.structured_output.schema, usage.answer);
 				if (checked.ok) json = checked.json;
-				// strict:false tolerates a bad answer (raw stdout stays captured) but never a bad schema.
-				else if (checked.kind === "schema" || step.structured_output.strict !== false) return result("failed", checked.error);
+				// strict:false tolerates a bad answer (raw stdout stays captured), never a bad schema or a stuck validation.
+				else if (step.structured_output.strict !== false || !isAnswerFault(checked)) return result("failed", checked.error);
 			}
 			return result("success", undefined, json);
 		} finally {

@@ -185,6 +185,50 @@ process.stdout.write(JSON.stringify({type:"message_end",message:msg})+"\\n"+JSON
 		}
 	});
 
+	test("$async schemas are refused in either mode instead of passing as a Promise", async () => {
+		const schemas = [
+			{ $async: true, type: "object", required: ["name"] },
+			{ $async: true, type: "object", properties: { name: { $async: true, type: "string" } }, required: ["name"] },
+			{ type: "object", properties: { name: { $async: true, type: "string" } }, required: ["name"] },
+		];
+		for (const asyncSchema of schemas) {
+			for (const strict of [true, false]) {
+				const result = await withAnswer('{"name":5}', { schema: asyncSchema, strict });
+				expect(result.status).toBe("failed");
+				expect(result.json).toBeUndefined();
+				expect(result.error).toStartWith("structured_output schema could not be compiled: ");
+			}
+		}
+	});
+
+	test("a catastrophically backtracking pattern times out without blocking the event loop", async () => {
+		const redos = { type: "array", items: { type: "string", pattern: "^(a+)+$" } };
+		const answer = JSON.stringify(Array.from({ length: 30 }, () => "a".repeat(30) + "b"));
+		let ticks = 0;
+		const ticker = setInterval(() => ticks++, 25);
+		const started = performance.now();
+		try {
+			const result = await withAnswer(answer, { schema: redos, strict: false });
+			expect(result.status).toBe("failed");
+			expect(result.error).toStartWith("structured_output validation timed out after 2000 ms");
+		} finally {
+			clearInterval(ticker);
+		}
+		expect(performance.now() - started).toBeLessThan(6_000);
+		// ~2 s of validation at a 25 ms interval; an event loop blocked by the regex would not tick at all meanwhile.
+		expect(ticks).toBeGreaterThanOrEqual(40);
+	}, 20_000);
+
+	test("answers over the size cap are refused before validation", async () => {
+		const answer = JSON.stringify({ name: "x".repeat(300 * 1024) });
+		const strict = await withAnswer(answer, { schema });
+		expect(strict.status).toBe("failed");
+		expect(strict.error).toBe(`structured_output answer is ${answer.length} characters; the limit is ${256 * 1024}`);
+		const lenient = await withAnswer(answer, { schema, strict: false });
+		expect(lenient.status).toBe("success");
+		expect(lenient.json).toBeUndefined();
+	});
+
 	test("strict: false keeps the raw answer and withholds invalid JSON from later steps", async () => {
 		for (const answer of ['{"name":5}', "not json"]) {
 			const result = await withAnswer(answer, { schema, strict: false });

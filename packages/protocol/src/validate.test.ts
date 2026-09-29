@@ -381,6 +381,29 @@ describe("validateRoutineSpec — rejects malformed specs with clear errors", ()
 		);
 		expect(hasSecretEnvError).toBe(true);
 	});
+
+	test("agent structured_output schemas that are $async or do not compile are refused at the schema path", () => {
+		const agent = (id: string, schema: unknown) => ({ id, type: "agent", prompt: "reply", structured_output: { schema } });
+		const spec = {
+			name: "bad-output-schemas",
+			trigger: [{ manual: {} }],
+			steps: [
+				agent("ok", { type: "object", properties: { name: { type: "string", pattern: "^[a-z]+$" } } }),
+				agent("async_root", { $async: true, type: "object" }),
+				agent("async_nested", { type: "object", properties: { name: { $async: true, type: "string" } } }),
+				agent("bad_type", { type: "no-such-type" }),
+			],
+		};
+		const result = validateRoutineSpec(spec);
+		expect(result.valid).toBe(false);
+		expect(result.errors!.map((e) => [e.path, e.keyword])).toEqual([
+			["/steps/1/structured_output/schema", "structuredOutputSchema"],
+			["/steps/2/structured_output/schema", "structuredOutputSchema"],
+			["/steps/3/structured_output/schema", "structuredOutputSchema"],
+		]);
+		expect(result.errors![0]!.message).toContain("$async schemas are not supported");
+		expect(validateRoutineSpec({ ...spec, steps: [spec.steps[0]] })).toEqual({ valid: true });
+	});
 });
 
 // ─── layout (V2 canvas authoring) ────────────────────────────────────────
