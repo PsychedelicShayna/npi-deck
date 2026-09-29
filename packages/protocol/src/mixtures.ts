@@ -133,8 +133,16 @@ export interface MixtureDraftResponse {
 	parseDiagnostics: string[];
 	validation: MixtureDefinitionReport[];
 }
-export interface MixtureScopeDocument {
+/** One MIXTURES.toml on NeoPi's search path for a workspace. */
+export interface MixtureSourceDocument {
+	/** Opaque id the server derives; send it back to save. */
+	id: string;
+	kind: MixtureScope;
 	path: string;
+	/** Precedence: a higher `order` shadows a lower one by mixture name. */
+	order: number;
+	/** Why the deck will not write this file (a symlink, outside the workspace root); absent when editable. */
+	readOnly?: string;
 	/** Whether the file exists on disk. */
 	exists: boolean;
 	/** sha256 of the file bytes (or "absent"); required as `baseHash` to save. */
@@ -193,8 +201,14 @@ export interface MixturesResponse {
 		gates: MixtureGateProbe[];
 		diagnostics: string[];
 	};
-	user: MixtureScopeDocument;
-	project: MixtureScopeDocument;
+	/**
+	 * Every MIXTURES.toml NeoPi reads for this workspace, in its precedence
+	 * order: a later source's definition shadows an earlier one of the same
+	 * name. Includes the user and workspace-root files even when absent.
+	 */
+	sources: MixtureSourceDocument[];
+	/** The workspace root's MIXTURES.toml: the source a new mixture goes to by default. */
+	defaultSource: string;
 	/** Mixture names the model picker lists for a chat in this workspace (`mixture/<name>`). */
 	picker: string[];
 }
@@ -205,15 +219,16 @@ export interface MixtureDraftRequest {
 }
 export interface MixtureSaveRequest {
 	cwd: string;
-	scope: MixtureScope;
+	/** A `MixtureSourceDocument.id` from this workspace's load; never a path. */
+	source: string;
 	doc: MixturesDocument;
-	/** `hash` of the scope document this edit started from; a mismatch is a 409. */
+	/** `hash` of the source document this edit started from; a mismatch is a 409. */
 	baseHash: string;
 	/** Required when the file on disk holds content NeoPi's parser does not keep (a 409 `rewrite-loses-source`). */
 	confirmCanonicalRewrite?: boolean;
 }
 export interface MixtureSaveResponse {
-	scope: MixtureScopeDocument;
+	source: MixtureSourceDocument;
 	/** The picker after the save re-registered this workspace's mixtures. */
 	picker: string[];
 }

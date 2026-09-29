@@ -62,30 +62,56 @@ describe("mixture panel state", () => {
 		expect(mixtureRunPhase(run, { ...live, connected: false })).toEqual({ kind: "disconnected", activeMemberId: "editor" });
 	});
 
-	test("a live snapshot's persisted trace cards rebuild the panel without adding chat messages", () => {
-		const state = initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: true, messages: [], todoPhases: [], mixtureTraces: [card(hop(1, "writer", "editor"))] as never });
+	test("a snapshot taken mid-run on the same mixture resumes the latest unfinished run as live", () => {
+		const onMixture = (model: { provider: string; id: string }, traces: unknown[]) =>
+			initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: true, model, messages: [], todoPhases: [], mixtureTraces: traces as never });
+		const state = onMixture({ provider: "mixture", id: "draft-then-edit" }, [card(hop(1, "writer", "editor"))]);
 		expect(mixtureRunPhase(onlyRun(state), live)).toEqual({ kind: "running", activeMemberId: "editor", phase: "generating" });
 		expect(state.messages).toEqual([]);
 	});
 
-	test("reconnecting keeps live-only run_end events the transcript does not persist", () => {
-		let before = applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never);
-		before = applyEvent(before, { type: "mixture_hop_end", details: hop(2, "editor") } as never);
-		before = applyEvent(before, { type: "mixture_run_end", details: runEnd(3, "terminal") } as never);
-		const snapshot = session([card(hop(1, "writer", "editor")), card(hop(2, "editor"))], "/s/one.jsonl", false);
-		const merged = reconcileMixtureResubscribe(before.mixture, snapshot.mixture!, { at: 99, conversationReplaced: false });
-		expect(merged.reconnectedAt).toBe(99);
-		expect(merged.runs[0]!.traces.map(trace => trace.seq)).toEqual([1, 2, 3]);
+	test("streaming on another model never revives a historical mixture run", () => {
+		const onOther = initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: true, model: { provider: "anthropic", id: "claude" }, messages: [], todoPhases: [], mixtureTraces: [card(hop(1, "writer", "editor"))] as never });
+		expect(mixtureRunPhase(onlyRun(onOther), live)).toEqual({ kind: "unrecorded" });
+		// Nor does a finished run of the active mixture.
+		const finished = initSession({ sessionId: "s1", cwd: "/tmp/x", isStreaming: true, model: { provider: "mixture", id: "draft-then-edit" }, messages: [], todoPhases: [], mixtureTraces: [card(hop(1, "writer", "editor")), card(runEnd(2, "terminal"))] as never });
+		expect(mixtureRunPhase(onlyRun(finished), live)).toEqual({ kind: "completed", endReason: "terminal" });
+		// A live event for the run is what makes it current.
+		const resumed = applyEvent(onOther, { type: "mixture_hop_end", details: hop(2, "editor") } as never);
+		expect(onlyRun(resumed).live).toBe(true);
+	});
+
+	test("a run that ended while disconnected shows completed from the snapshot's rebuilt run end", () => {
+		const before = applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never);
+		const snapshot = session([card(hop(1, "writer", "editor")), card(hop(2, "editor")), card(runEnd(4, "terminal"))], "/s/one.jsonl", false);
+		const merged = reconcileMixtureResubscribe(before.mixture, snapshot.mixture!, 5);
 		expect(mixtureRunPhase(merged.runs[0]!, { ...live, streaming: false })).toEqual({ kind: "completed", endReason: "terminal" });
 	});
 
-	test("a replaced conversation drops its runs and records the reset", () => {
-		const before = applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never);
-		const replaced = reconcileMixtureResubscribe(before.mixture, session([], "/s/two.jsonl").mixture!, { at: 7, conversationReplaced: true });
-		expect(replaced.runs).toEqual([]);
-		expect(replaced.resets).toEqual([{ at: 7, runIds: ["run-1"] }]);
+	test("reconnecting keeps live-only events and does not duplicate a rebuilt run end", () => {
+		let before = applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never);
+		before = applyEvent(before, { type: "mixture_hop_end", details: hop(2, "editor") } as never);
+		before = applyEvent(before, { type: "mixture_run_end", details: runEnd(5, "terminal") } as never);
+		const withoutEnd = reconcileMixtureResubscribe(before.mixture, session([card(hop(1, "writer", "editor")), card(hop(2, "editor"))], "/s/one.jsonl", false).mixture!, 99);
+		expect(withoutEnd.reconnectedAt).toBe(99);
+		expect(withoutEnd.runs[0]!.traces.map(trace => trace.seq)).toEqual([1, 2, 5]);
+		const rebuilt = reconcileMixtureResubscribe(before.mixture, session([card(hop(1, "writer", "editor")), card(hop(2, "editor")), card(runEnd(3, "terminal"))], "/s/one.jsonl", false).mixture!, 99);
+		expect(rebuilt.runs[0]!.traces.filter(trace => trace.kind === "run_end")).toHaveLength(1);
+	});
+
+	test("runs missing from the new branch are dropped as a reset, whether or not the session file changed", () => {
+		let before = applyEvent(session(), { type: "mixture_hop_end", details: hop(1, "writer", "editor") } as never);
+		before = applyEvent(before, { type: "mixture_hop_end", details: { ...hop(1, "writer"), runId: "run-2" } } as never);
+		// Tree navigation in the same file: the new branch keeps run-2 only.
+		const branched = reconcileMixtureResubscribe(before.mixture, session([card({ ...hop(1, "writer"), runId: "run-2" })]).mixture!, 7);
+		expect(branched.runs.map(run => run.runId)).toEqual(["run-2"]);
+		expect(branched.resets).toEqual([{ at: 7, runIds: ["run-1"] }]);
+		// A new, empty conversation drops everything.
+		const cleared = reconcileMixtureResubscribe(before.mixture, session([], "/s/two.jsonl").mixture!, 8);
+		expect(cleared.runs).toEqual([]);
+		expect(cleared.resets).toEqual([{ at: 8, runIds: ["run-1", "run-2"] }]);
 		// A first subscribe is neither a reconnect nor a reset.
-		expect(reconcileMixtureResubscribe(undefined, emptyMixtureUi(), { at: 7, conversationReplaced: true })).toEqual(emptyMixtureUi());
+		expect(reconcileMixtureResubscribe(undefined, emptyMixtureUi(), 7)).toEqual(emptyMixtureUi());
 	});
 
 	test("an update to an existing (runId, seq) replaces it; unreadable payloads are counted, not applied", () => {

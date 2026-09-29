@@ -199,22 +199,24 @@ export const MANIFEST = {
 		},
 	},
 	/**
-	 * #80: author MIXTURES.toml in the Mixtures view. NeoPi parses, resolves,
-	 * validates (including its milestone capability gate) and writes; the deck
-	 * re-discovers the picker roster after a save.
+	 * #80: author MIXTURES.toml in the Mixtures view. NeoPi supplies the search
+	 * path, parsing, serialization, resolution and validation (including its
+	 * milestone capability gate); the deck writes the file itself so it never
+	 * follows links, under NeoPi's cross-process file lock, and re-discovers
+	 * the picker roster after a save.
 	 */
 	"mixture-config": {
 		tier: "optional-feature",
 		consumers: ["mixtures-service.ts", "bridge/in-process.ts (roster refresh, run-settings check)"],
 		exports: {
-			mixturesConfigFilePath: op("@oh-my-pi/pi-coding-agent/moa/config", "mixturesConfigFilePath"),
-			loadMixturesConfigFile: op("@oh-my-pi/pi-coding-agent/moa/config", "loadMixturesConfigFile"),
+			configCandidatePaths: op("@oh-my-pi/pi-coding-agent/advisor/watchdog", "configCandidatePaths"),
 			parseMixturesDoc: op("@oh-my-pi/pi-coding-agent/moa/config", "parseMixturesDoc"),
-			saveMixturesConfigFile: op("@oh-my-pi/pi-coding-agent/moa/config", "saveMixturesConfigFile"),
 			serializeMixturesConfig: op("@oh-my-pi/pi-coding-agent/moa/toml", "serializeMixturesConfig"),
+			MAX_FILE_BYTES: op("@oh-my-pi/pi-coding-agent/moa/validate", "MAX_FILE_BYTES"),
 			resolveMixture: op("@oh-my-pi/pi-coding-agent/moa/resolve", "resolveMixture"),
 			validateMixture: op("@oh-my-pi/pi-coding-agent/moa/validate", "validateMixture"),
 			discoverRegistrableMixtures: op("@oh-my-pi/pi-coding-agent/moa/registration", "discoverRegistrableMixtures"),
+			withFileLock: op("@oh-my-pi/pi-utils", "withFileLock"),
 		},
 	},
 	/** #86: enumerate, validate and write every registered NeoPi setting from the Settings view. */

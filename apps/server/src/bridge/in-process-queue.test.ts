@@ -92,7 +92,7 @@ function makeHandle(): { handle: InProcessSessionHandle; session: StubSession; e
 	const handle = new InProcessSessionHandle({
 		session: session as unknown as never,
 		// Snapshots read persisted mixture trace cards from the session file.
-		sessionManager: { buildSessionContext: () => ({ messages: [] }) } as never,
+		sessionManager: { buildSessionContext: () => ({ messages: [] }), getBranch: () => [] } as never,
 		cwd: "/tmp/stub",
 		sessionId: "stub-1",
 		getModelRegistry: async () => ({}) as never,

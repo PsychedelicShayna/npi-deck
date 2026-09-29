@@ -4,15 +4,16 @@
  * the persisted `mixture_trace` custom messages on (re)subscribe. Display only:
  * nothing here is replayed to a model or counted as usage.
  *
- * What NeoPi provides, and what it does not (pinned 9f8647e):
+ * What NeoPi provides, and what it does not:
  * - Live events: `mixture_hop_end`, `mixture_limit`, `mixture_checkpoint`,
  *   `mixture_run_end`. There is no hop-start or run-start event; the member
  *   currently generating is the run header's `activeMemberId` after the last
  *   event.
- * - The transcript keeps hop/limit/checkpoint cards but not `run_end`, so a
- *   run replayed from history has no recorded outcome unless it checkpointed.
+ * - The transcript keeps hop/limit/checkpoint cards; a run's end is only a
+ *   lifecycle entry, which the deck's snapshot turns back into a `run_end` card.
  * - No conversation-reset event reaches session listeners; the deck sees a
- *   replaced conversation only as a changed session file on (re)subscribe.
+ *   reset (a new session file, `/clear`, tree navigation) on (re)subscribe as
+ *   runs missing from the active branch's snapshot.
  */
 import type { MixtureHopTrace, MixtureTrace, MixtureTraceHeader } from "@npi-deck/protocol";
 
@@ -93,57 +94,61 @@ export function applyMixtureTrace(state: MixtureUi, value: unknown, live = true)
 	return { ...state, runs, currentRunId: index < 0 ? value.runId : state.currentRunId };
 }
 
+/** A run ended by `run_end` or by an abort/error checkpoint as its last event. */
+function ended(run: MixtureRunUi): boolean {
+	const last = run.traces[run.traces.length - 1];
+	return run.traces.some(trace => trace.kind === "run_end") || (last?.kind === "checkpoint" && INTERRUPTING_CHECKPOINT.has(last.reason));
+}
+
 /**
  * Rebuild from persisted `mixture_trace` custom messages (a snapshot or
- * transcript). Replayed runs are history; only when the session is streaming
- * can the last one still be running.
+ * transcript). Replayed runs are history until a live event for that run
+ * arrives. The one exception: while the session streams on `mixture/<name>`,
+ * the latest run of that mixture that has not ended is the one running now.
  */
-export function hydrateMixtureTraces(messages: readonly unknown[], streaming = false): MixtureUi {
+export function hydrateMixtureTraces(messages: readonly unknown[], active?: { streaming: boolean; model?: { provider: string; id: string } }): MixtureUi {
 	let state = emptyMixtureUi();
 	for (const message of messages) {
 		if (record(message) && message.role === "custom" && message.customType === "mixture_trace" && message.display !== false) {
 			state = applyMixtureTrace(state, message.details, false);
 		}
 	}
-	if (!streaming || !state.currentRunId) return state;
-	return { ...state, runs: state.runs.map(run => (run.runId === state.currentRunId ? { ...run, live: true } : run)) };
+	const latest = state.runs.find(run => run.runId === state.currentRunId);
+	if (!latest || !active?.streaming || active.model?.provider !== "mixture" || active.model.id !== latest.mixture || ended(latest)) return state;
+	return { ...state, runs: state.runs.map(run => (run === latest ? { ...run, live: true } : run)) };
 }
 
 /**
- * A resubscribe replaced the session state with a fresh snapshot. Keep what
- * this client saw live but the transcript does not persist (`run_end`), mark
- * the reconnect, and treat a changed session file as a replaced conversation:
- * its runs are gone and never resume (NeoPi drops them on reset).
+ * A resubscribe replaced the session state with a fresh snapshot of the
+ * active branch. Runs whose cards are not on that branch are gone (a new or
+ * cleared conversation, another session file, or tree navigation within the
+ * same file) and are recorded as a reset; NeoPi never resumes them. Runs
+ * still on the branch keep what this client saw live, and the reconnect is
+ * marked.
  */
-export function reconcileMixtureResubscribe(
-	previous: MixtureUi | undefined,
-	hydrated: MixtureUi,
-	change: { at: number; conversationReplaced: boolean },
-): MixtureUi {
+export function reconcileMixtureResubscribe(previous: MixtureUi | undefined, hydrated: MixtureUi, at: number): MixtureUi {
 	if (!previous || (previous.runs.length === 0 && previous.resets.length === 0)) return hydrated;
-	if (change.conversationReplaced) {
-		const runIds = previous.runs.map(run => run.runId);
-		return {
-			...hydrated,
-			reconnectedAt: change.at,
-			resets: runIds.length ? [...previous.resets, { at: change.at, runIds }] : previous.resets,
-		};
-	}
+	const onBranch = new Set(hydrated.runs.map(run => run.runId));
+	const vanished = previous.runs.filter(run => !onBranch.has(run.runId)).map(run => run.runId);
 	let merged = hydrated;
 	for (const run of previous.runs) {
+		if (!onBranch.has(run.runId)) continue;
 		const kept = hydrated.runs.find(candidate => candidate.runId === run.runId);
-		// A live-only run (no persisted trace) is kept whole; a replayed one gains the live-only events.
+		// Gain the events this client saw live that the snapshot does not carry. A run end the
+		// snapshot rebuilt from NeoPi's lifecycle entry may carry another seq than the live one.
+		const keptEnd = kept?.traces.some(candidate => candidate.kind === "run_end");
 		for (const trace of run.traces) {
-			if (!kept?.traces.some(candidate => candidate.seq === trace.seq)) merged = applyMixtureTrace(merged, trace, run.live);
+			if (kept?.traces.some(candidate => candidate.seq === trace.seq) || (keptEnd && trace.kind === "run_end")) continue;
+			merged = applyMixtureTrace(merged, trace, run.live);
 		}
 	}
 	const liveBefore = new Set(previous.runs.filter(run => run.live).map(run => run.runId));
 	return {
 		...merged,
 		runs: merged.runs.map(run => (liveBefore.has(run.runId) && !run.live ? { ...run, live: true } : run)),
-		currentRunId: merged.runs.some(run => run.runId === previous.currentRunId) ? previous.currentRunId : merged.currentRunId,
-		reconnectedAt: change.at,
-		resets: previous.resets,
+		currentRunId: previous.currentRunId && onBranch.has(previous.currentRunId) ? previous.currentRunId : merged.currentRunId,
+		reconnectedAt: at,
+		resets: vanished.length ? [...previous.resets, { at, runIds: vanished }] : previous.resets,
 		dropped: previous.dropped + hydrated.dropped,
 	};
 }

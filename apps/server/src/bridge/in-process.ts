@@ -42,6 +42,7 @@ import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import { SubagentTree } from "./subagent-tree.ts";
 import { transcriptTail } from "./transcript-tail.ts";
+import { mixtureSnapshotTraces } from "./mixture-snapshot.ts";
 import { McpAllowlistError } from "./types.ts";
 import type {
 	AgentBridge,
@@ -1101,10 +1102,9 @@ export class InProcessSessionHandle implements SessionHandle {
 		const pendingPlan = this.planBridge.getPendingPlanApproval();
 		if (pendingPlan) snap.pendingPlanApproval = pendingPlan;
 		if (this.shadowQueue.length > 0) snap.queuedPrompts = [...this.shadowQueue];
-		// The model context never holds display-only trace cards; the session file does.
-		const traces = this.sessionManager
-			.buildSessionContext({ transcript: true })
-			.messages.filter((message) => (message as { role?: string; customType?: string }).role === "custom" && (message as { customType?: string }).customType === "mixture_trace");
+		// The model context never holds display-only trace cards; the session file's branch does,
+		// and its lifecycle entries say which runs ended.
+		const traces = mixtureSnapshotTraces(this.sessionManager.buildSessionContext({ transcript: true }).messages, this.sessionManager.getBranch());
 		if (traces.length > 0) snap.mixtureTraces = traces as unknown as AgentMessageJson[];
 		// Legacy backends limit async jobs to their first root. On multi-root
 		// backends each root owns its own manager, including later chats.

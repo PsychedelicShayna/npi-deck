@@ -1,11 +1,11 @@
 /**
- * MIXTURES.toml authoring for the Mixtures view (#80). NeoPi parses,
- * serializes, resolves, validates and writes; this service chooses the file
- * from a known workspace + scope (never a client path), serializes writes,
- * compares against the hash the editor loaded, verifies what landed on disk,
- * and re-discovers the picker roster so a saved mixture is selectable at once.
+ * MIXTURES.toml authoring for the Mixtures view (#80). NeoPi supplies the
+ * search path, parsing, serialization, resolution and validation; this
+ * service picks a file from NeoPi's search path by opaque id (never a client
+ * path), writes it without following links under NeoPi's cross-process file
+ * lock, compares against the hash the editor loaded, verifies what landed on
+ * disk, and re-discovers the picker roster so a saved mixture is selectable.
  */
-import { createHash } from "node:crypto";
 import type {
 	MixtureDefinition,
 	MixtureDefinitionReport,
@@ -18,27 +18,24 @@ import type {
 	MixtureModelMember,
 	MixtureSaveRequest,
 	MixtureSaveResponse,
-	MixtureScope,
-	MixtureScopeDocument,
+	MixtureSourceDocument,
 	MixturesDocument,
 	MixturesResponse,
 } from "@npi-deck/protocol";
+import * as path from "node:path";
 import type { ModelRegistry } from "@oh-my-pi/pi-coding-agent";
 import type { FeatureExports } from "./backend/manifest.ts";
 import { activeBackend, feature, formatDiagnostic, hasFeature, sdk } from "./backend/runtime.ts";
+import { digest, mixtureSources, readSource, SourceConflictError, sourceId, writeSource, type MixtureSource } from "./mixture-files.ts";
 import { spawnOwnedSync } from "./owned-process.ts";
 
 type ConfigApi = FeatureExports<"mixture-config">;
 type MixtureRegistrationContext = Parameters<ConfigApi["discoverRegistrableMixtures"]>[0];
-type SdkDoc = Parameters<ConfigApi["saveMixturesConfigFile"]>[1];
+type SdkDoc = Parameters<ConfigApi["serializeMixturesConfig"]>[0];
 type SdkDefinition = Parameters<ConfigApi["resolveMixture"]>[0];
 
 const empty = (): MixturesDocument => ({ mixtures: [] });
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-/** File errors carry a code, never file content. */
-const fileError = (error: unknown) =>
-	error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : "unreadable";
-const ABSENT = "absent";
 const UNREADABLE = "unreadable:";
 
 export class MixtureServiceError extends Error {
@@ -104,19 +101,6 @@ function parseDocument(api: ConfigApi, doc: MixturesDocument): { doc: MixturesDo
 	const parseDiagnostics = result.parseDiagnostics.filter(line => line !== SOURCE_LOSS);
 	if (lossy) parseDiagnostics.push("Saving would change or omit the fields above; NeoPi cannot store this draft as shown.");
 	return { ...result, parseDiagnostics, lossy };
-}
-
-function digest(text: string | null): string {
-	return text === null ? ABSENT : createHash("sha256").update(text).digest("hex");
-}
-
-async function readSource(file: string): Promise<{ text: string | null; error?: string }> {
-	try {
-		return { text: await Bun.file(file).text() };
-	} catch (error) {
-		if (error instanceof Error && "code" in error && error.code === "ENOENT") return { text: null };
-		return { text: null, error: fileError(error) };
-	}
 }
 
 /** NeoPi's TUI edits the VCS root, falling back to cwd; discovery walks cwd up to that root. */
@@ -217,20 +201,24 @@ export class MixturesService {
 		return { cwd, agentDir, registry, settings };
 	}
 
-	private file(api: ConfigApi, cwd: string, scope: MixtureScope): string {
-		return api.mixturesConfigFilePath(scope, { projectDir: projectRoot(cwd), agentDir: sdk().getAgentDir() });
+	/** NeoPi's search path for `cwd`, with the deck's editability decided per file. */
+	private async sources(api: ConfigApi, cwd: string): Promise<MixtureSource[]> {
+		const agentDir = sdk().getAgentDir();
+		return mixtureSources(cwd, api.configCandidatePaths(cwd, agentDir, ["MIXTURES.toml"]), { projectDir: projectRoot(cwd), agentDir });
 	}
 
-	private async scopeDoc(api: ConfigApi, ctx: MixtureRegistrationContext, scope: MixtureScope): Promise<MixtureScopeDocument> {
-		const file = this.file(api, ctx.cwd, scope);
-		const source = await readSource(file);
-		if (source.error)
-			return { path: file, exists: true, hash: `${UNREADABLE}${source.error}`, doc: empty(), toml: "", validation: [], parseDiagnostics: [`${file}: cannot read (${source.error}); not editable.`] };
-		const parsed = source.text === null ? { doc: empty(), toml: "", parseDiagnostics: [] } : parseText(api, source.text, file);
+	private async sourceDoc(api: ConfigApi, ctx: MixtureRegistrationContext, source: MixtureSource): Promise<MixtureSourceDocument> {
+		const read = await readSource(source.path, api.MAX_FILE_BYTES);
+		const base = { id: source.id, kind: source.kind, path: source.path, order: source.order };
+		if (read.state === "refused")
+			return { ...base, readOnly: read.reason, exists: true, hash: `${UNREADABLE}${read.reason}`, doc: empty(), toml: "", validation: [], parseDiagnostics: [`${source.path} ${read.reason}; the editor does not read or write it.`] };
+		const text = read.state === "file" ? read.text : null;
+		const parsed = text === null ? { doc: empty(), toml: "", parseDiagnostics: [] } : parseText(api, text, source.path);
 		return {
-			path: file,
-			exists: source.text !== null,
-			hash: digest(source.text),
+			...base,
+			...(source.readOnly ? { readOnly: source.readOnly } : {}),
+			exists: text !== null,
+			hash: digest(text),
 			doc: parsed.doc,
 			toml: parsed.toml,
 			parseDiagnostics: parsed.parseDiagnostics,
@@ -242,7 +230,8 @@ export class MixturesService {
 		const cwd = await this.known(cwdInput);
 		const api = this.api();
 		const ctx = await this.context(cwd);
-		const [user, project, picker] = await Promise.all([this.scopeDoc(api, ctx, "user"), this.scopeDoc(api, ctx, "project"), this.host.pickerMixtures(cwd)]);
+		const listed = await this.sources(api, cwd);
+		const [sources, picker] = await Promise.all([Promise.all(listed.map(source => this.sourceDoc(api, ctx, source))), this.host.pickerMixtures(cwd)]);
 		const gates = probeGates(api, ctx);
 		const milestone = milestoneOf(gates);
 		return {
@@ -256,11 +245,12 @@ export class MixturesService {
 				gates,
 				diagnostics: [
 					"Saving rewrites MIXTURES.toml in NeoPi's canonical form: comments and formatting are not kept.",
+					"Saves hold NeoPi's cross-process file lock and recheck the file just before replacing it. An editor that does not take that lock (NeoPi's own TUI save, a text editor) can still write between that check and the replace, and would be overwritten.",
 					...(hasFeature("mixtures") ? [] : ["This backend holds no mixture catalog: saved mixtures cannot reach the model picker."]),
 				],
 			},
-			user,
-			project,
+			sources,
+			defaultSource: sourceId(path.resolve(projectRoot(cwd), "MIXTURES.toml")),
 			picker,
 		};
 	}
@@ -291,47 +281,60 @@ export class MixturesService {
 	}
 
 	/**
-	 * Compare-and-save one scope file. A definition with validation errors
+	 * Compare-and-save one source file. A definition with validation errors
 	 * blocks the save unless it is carried over unchanged from the file on
 	 * disk (the editor never deletes or flattens what it cannot run).
 	 */
 	async save(request: MixtureSaveRequest): Promise<MixtureSaveResponse> {
 		const cwd = await this.known(request.cwd);
-		if (request.scope !== "user" && request.scope !== "project") throw new MixtureServiceError(400, "scope must be user or project");
+		if (typeof request.source !== "string") throw new MixtureServiceError(400, "source id required");
 		if (typeof request.baseHash !== "string") throw new MixtureServiceError(400, "baseHash required");
 		const api = this.api();
-		return serialize(async () => {
-			const ctx = await this.context(cwd);
-			const current = await this.scopeDoc(api, ctx, request.scope);
-			if (current.hash.startsWith(UNREADABLE)) throw new MixtureServiceError(409, `${current.path} cannot be read; not saving over it`);
-			if (current.hash !== request.baseHash)
-				throw new MixtureServiceError(409, `${current.path} changed since it was loaded; reload before saving`, { current });
-			if (current.exists && current.parseDiagnostics.length > 0 && request.confirmCanonicalRewrite !== true)
-				throw new MixtureServiceError(409, `${current.path} has content NeoPi's parser does not keep; saving would drop it`, {
-					code: "rewrite-loses-source",
-					parseDiagnostics: current.parseDiagnostics,
-				});
+		const source = (await this.sources(api, cwd)).find(candidate => candidate.id === request.source);
+		if (!source) throw new MixtureServiceError(400, "unknown mixture source for this workspace; reload");
+		if (source.readOnly) throw new MixtureServiceError(409, `${source.path} is not editable here: ${source.readOnly}`);
+		const draft = parseDocument(api, request.doc);
+		if (draft.lossy || draft.doc.warnings?.length)
+			throw new MixtureServiceError(422, "NeoPi cannot represent this draft without changing it", { parseDiagnostics: draft.parseDiagnostics });
+		const content = api.serializeMixturesConfig(withoutWarnings(draft.doc) as unknown as SdkDoc);
+		if (Buffer.byteLength(content, "utf8") > api.MAX_FILE_BYTES) throw new MixtureServiceError(422, `the saved file would exceed NeoPi's ${api.MAX_FILE_BYTES}-byte cap`);
+		// In-process queue for ordering, NeoPi's lock for other deck processes and lock-aware NeoPi writers.
+		return serialize(() =>
+			api.withFileLock(source.path, async () => {
+				const ctx = await this.context(cwd);
+				const current = await this.sourceDoc(api, ctx, source);
+				if (current.readOnly) throw new MixtureServiceError(409, `${source.path} is not editable here: ${current.readOnly}`);
+				if (current.hash !== request.baseHash)
+					throw new MixtureServiceError(409, `${source.path} changed since it was loaded; reload before saving`, { current });
+				if (current.exists && current.parseDiagnostics.length > 0 && request.confirmCanonicalRewrite !== true)
+					throw new MixtureServiceError(409, `${source.path} has content NeoPi's parser does not keep; saving would drop it`, {
+						code: "rewrite-loses-source",
+						parseDiagnostics: current.parseDiagnostics,
+					});
 
-			const draft = parseDocument(api, request.doc);
-			if (draft.lossy || draft.doc.warnings?.length)
-				throw new MixtureServiceError(422, "NeoPi cannot represent this draft without changing it", { parseDiagnostics: draft.parseDiagnostics });
+				const validation = validateDocument(api, ctx, draft.doc);
+				const onDisk = new Map(current.doc.mixtures.map(mixture => [mixture.name, structure(mixture)] as const));
+				const blocked = validation.filter(report => !report.runnable && onDisk.get(report.name) !== structure(draft.doc.mixtures[report.index]));
+				if (blocked.length > 0)
+					throw new MixtureServiceError(422, `NeoPi refuses to save definitions with validation errors: ${blocked.map(report => report.name || "(unnamed)").join(", ")}`, {
+						validation,
+						blocked: blocked.map(report => report.index),
+					});
 
-			const validation = validateDocument(api, ctx, draft.doc);
-			const onDisk = new Map(current.doc.mixtures.map(mixture => [mixture.name, structure(mixture)] as const));
-			const blocked = validation.filter(report => !report.runnable && onDisk.get(report.name) !== structure(draft.doc.mixtures[report.index]));
-			if (blocked.length > 0)
-				throw new MixtureServiceError(422, `NeoPi refuses to save definitions with validation errors: ${blocked.map(report => report.name || "(unnamed)").join(", ")}`, {
-					validation,
-					blocked: blocked.map(report => report.index),
-				});
-
-			await api.saveMixturesConfigFile(current.path, withoutWarnings(draft.doc) as unknown as SdkDoc);
-			const saved = await this.scopeDoc(api, ctx, request.scope);
-			if (structure(withoutWarnings(saved.doc)) !== structure(withoutWarnings(draft.doc)))
-				throw new MixtureServiceError(500, `${current.path} does not read back as the saved document`, { scope: saved });
-			if (hasFeature("mixtures")) await this.host.refreshRoster(cwd);
-			return { scope: saved, picker: await this.host.pickerMixtures(cwd) };
-		});
+				try {
+					// An empty serialization removes the file, as NeoPi's own save does.
+					await writeSource(source, content ? content : null, current.hash, api.MAX_FILE_BYTES);
+				} catch (error) {
+					if (error instanceof SourceConflictError) throw new MixtureServiceError(409, error.message);
+					throw error;
+				}
+				const saved = await this.sourceDoc(api, ctx, source);
+				if (structure(withoutWarnings(saved.doc)) !== structure(withoutWarnings(draft.doc)))
+					throw new MixtureServiceError(500, `${source.path} does not read back as the saved document`, { source: saved });
+				if (hasFeature("mixtures")) await this.host.refreshRoster(cwd);
+				return { source: saved, picker: await this.host.pickerMixtures(cwd) };
+			}),
+		);
 	}
 }
 

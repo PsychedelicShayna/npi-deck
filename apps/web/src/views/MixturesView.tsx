@@ -6,7 +6,7 @@ import type {
 	MixtureDraftResponse,
 	MixtureEdge,
 	MixtureMember,
-	MixtureScope,
+	MixtureSourceDocument,
 	MixtureTransit,
 	MixturesDocument,
 	MixturesResponse,
@@ -51,6 +51,11 @@ const blank: MixturesDocument = { mixtures: [] };
 const explain = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const freshKeys = (doc: MixturesDocument) => doc.mixtures.map(definition => definition.members.map(() => crypto.randomUUID()));
 const typing = (target: EventTarget) => target instanceof HTMLElement && !!target.closest("input,textarea,select,[contenteditable]");
+/** A source's path relative to the workspace when inside it. */
+function sourceLabel(source: MixtureSourceDocument, cwd: string | undefined): string {
+	if (source.kind === "user") return `user: ${source.path}`;
+	return cwd && source.path.startsWith(`${cwd}/`) ? `./${source.path.slice(cwd.length + 1)}` : source.path;
+}
 
 export function MixturesView() {
 	const [pending, setPending] = useState<Record<string, boolean>>({});
@@ -88,7 +93,7 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 	const wanted = params.get("name") ?? undefined;
 	const [cwd, setCwd] = useState(() => sessions[activeId ?? ""]?.cwd ?? "");
 	const currentCwd = cwd || workspaces[0]?.cwd || "";
-	const [scope, setScope] = useState<MixtureScope>("project");
+	const [sourceId, setSourceId] = useState<string | null>(null);
 	const [loaded, setLoaded] = useState<MixturesResponse | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [doc, setDoc] = useState<MixturesDocument>(blank);
@@ -130,11 +135,22 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		return () => window.removeEventListener("beforeunload", beforeUnload);
 	}, [dirty]);
 
-	const scopeDoc = loaded?.[scope];
+	const sourceDoc = loaded?.sources.find(item => item.id === sourceId);
+	/** The file a mixture name runs from: the last source defining it, this file counted as drafted. */
+	const effectiveSource = (name: string): MixtureSourceDocument | undefined => {
+		let winner: MixtureSourceDocument | undefined;
+		for (const item of loaded?.sources ?? []) {
+			const mixtures = item.id === sourceDoc?.id ? doc.mixtures : item.doc.mixtures;
+			if (mixtures.some(mixture => mixture.name === name)) winner = item;
+		}
+		return winner;
+	};
+	/** Whether `name` runs from source `id` according to the files on disk. */
+	const effectiveIn = (id: string, name: string) => [...(loaded?.sources ?? [])].reverse().find(item => item.doc.mixtures.some(mixture => mixture.name === name))?.id === id;
 	const definition = doc.mixtures[index];
 	const current = draft?.revision === revision ? draft.result : null;
 	// Graph validation: the draft's, or the loaded file's while nothing changed.
-	const reports = sourceDirty ? undefined : (current?.validation ?? (revision === savedRevision ? scopeDoc?.validation : undefined));
+	const reports = sourceDirty ? undefined : (current?.validation ?? (revision === savedRevision ? sourceDoc?.validation : undefined));
 	const report = reports?.[index];
 	const gates = useMemo(
 		() => new Map((loaded?.capabilities.gates ?? []).filter(gate => gate.gated).map(gate => [gate.feature, gate.message ?? ""] as const)),
@@ -146,7 +162,7 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 	const selectedEdge = definition?.edges[selectedEdgeIndex];
 
 	// Layout is not part of MIXTURES.toml; it stays in this browser.
-	const layoutKey = `npi-mixture-layout:${loaded?.cwd ?? currentCwd}:${scope}:${definition?.name ?? ""}`;
+	const layoutKey = `npi-mixture-layout:${loaded?.cwd ?? currentCwd}:${sourceDoc?.path ?? ""}:${definition?.name ?? ""}`;
 	const [positions, setPositions] = useState<Positions>({});
 	useEffect(() => {
 		try {
@@ -160,15 +176,17 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		localStorage.setItem(layoutKey, JSON.stringify(next));
 	}
 
-	function accept(value: MixturesResponse, nextScope: MixtureScope, chosen?: string) {
-		const nextDoc = structuredClone(value[nextScope].doc);
+	function accept(value: MixturesResponse, nextSource: string, chosen?: string) {
+		const target = value.sources.find(item => item.id === nextSource) ?? value.sources.find(item => item.id === value.defaultSource);
+		const nextDoc = structuredClone(target?.doc ?? blank);
 		const found = nextDoc.mixtures.findIndex(mixture => mixture.name === chosen);
 		const rev = ++sequence.current;
 		setLoaded(value);
+		setSourceId(target?.id ?? null);
 		setDoc(nextDoc);
 		setKeys(freshKeys(nextDoc));
 		setIndex(nextDoc.mixtures.length ? Math.max(0, found) : -1);
-		setSource(value[nextScope].toml);
+		setSource(target?.toml ?? "");
 		setSourceDirty(false);
 		setDraft(null);
 		setRevision(rev);
@@ -179,14 +197,16 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		setForm("none");
 	}
 
-	async function load(workspace: string, chosen?: string, targetScope: MixtureScope = scope) {
+	/** `targetSource` null: the file the wanted mixture runs from, else the workspace root's. */
+	async function load(workspace: string, chosen?: string, targetSource: string | null = sourceId) {
 		const epoch = ++loadEpoch.current;
 		setLoading(true);
 		setError("");
 		try {
 			const value = await mixturesApi.load(workspace);
 			if (epoch !== loadEpoch.current) return;
-			accept(value, targetScope, chosen);
+			const runsFrom = chosen ? [...value.sources].reverse().find(item => item.doc.mixtures.some(mixture => mixture.name === chosen))?.id : undefined;
+			accept(value, targetSource && value.sources.some(item => item.id === targetSource) ? targetSource : (runsFrom ?? value.defaultSource), chosen);
 		} catch (reason) {
 			if (epoch === loadEpoch.current) setError(`Could not load MIXTURES.toml: ${explain(reason)}`);
 		} finally {
@@ -194,8 +214,8 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		}
 	}
 	useEffect(() => {
-		if (currentCwd) void load(currentCwd, wanted);
-		// Reload only when the workspace changes; scope switches reuse the loaded response.
+		if (currentCwd) void load(currentCwd, wanted, null);
+		// Reload only when the workspace changes; switching files reuses the loaded response.
 	}, [currentCwd]);
 
 	useEffect(() => {
@@ -263,7 +283,7 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		restore(next);
 	}
 
-	const editable = !!definition && !sourceDirty && !loading && !jsonPending && !saving;
+	const editable = !!definition && !sourceDirty && !loading && !jsonPending && !saving && !sourceDoc?.readOnly;
 	function updateDefinition(next: MixtureDefinition, nextKeys?: string[][]) {
 		commit(replaceDefinition(doc, index, next), nextKeys);
 	}
@@ -335,16 +355,15 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		setIndex(doc.mixtures.length > 1 ? Math.min(index, doc.mixtures.length - 2) : -1);
 		setSelection(null);
 	}
-	function copyFromOtherScope(item: MixtureDefinition) {
+	function copyFromOtherSource(item: MixtureDefinition) {
 		if (doc.mixtures.some(mixture => mixture.name === item.name) && !window.confirm(`Replace ${item.name} in this draft?`)) return;
 		const next = { ...doc, mixtures: [...doc.mixtures.filter(mixture => mixture.name !== item.name), structuredClone(item)] };
 		commit(next, freshKeys(next));
 		setIndex(next.mixtures.length - 1);
 	}
-	function changeScope(next: MixtureScope) {
-		if (next === scope || !loaded) return;
-		if (dirty && !window.confirm("Discard your unsaved edits and switch scope?")) return;
-		setScope(next);
+	function changeSource(next: string) {
+		if (next === sourceDoc?.id || !loaded) return;
+		if (dirty && !window.confirm("Discard your unsaved edits and open another file?")) return;
 		accept(loaded, next);
 	}
 	function changeWorkspace(next: string) {
@@ -367,11 +386,12 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 	}
 
 	// The server's rule: a definition with errors blocks saving unless it is unchanged from the file.
-	const onDisk = useMemo(() => new Map((scopeDoc?.doc.mixtures ?? []).map(mixture => [mixture.name, structureKey(mixture)] as const)), [scopeDoc]);
+	const onDisk = useMemo(() => new Map((sourceDoc?.doc.mixtures ?? []).map(mixture => [mixture.name, structureKey(mixture)] as const)), [sourceDoc]);
 	const blocked = (reports ?? []).filter(item => !item.runnable && onDisk.get(item.name) !== structureKey(doc.mixtures[item.index]));
 	const lossy = current?.parseDiagnostics.some(message => message.includes("would change or omit")) ?? false;
 	const saveBlockers = [
 		!loaded?.capabilities.persistence ? "this backend cannot save mixtures" : "",
+		sourceDoc?.readOnly ? `this file is read-only here: ${sourceDoc.readOnly}` : "",
 		sourceDirty ? "apply or discard the TOML text first" : "",
 		jsonPending ? "fix the invalid JSON field" : "",
 		dirty && !reports ? "waiting for NeoPi's validation" : "",
@@ -386,10 +406,10 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		setError("");
 		setNotice("");
 		try {
-			const result = await mixturesApi.save({ cwd: loaded.cwd, scope, doc, baseHash: loaded[scope].hash, ...(confirmCanonicalRewrite ? { confirmCanonicalRewrite: true } : {}) });
-			accept({ ...loaded, [scope]: result.scope, picker: result.picker }, scope, definition?.name);
-			const listed = result.scope.validation.filter(item => item.runnable && result.picker.includes(item.name)).map(item => `mixture/${item.name}`);
-			setNotice(`Saved ${result.scope.path}. ${listed.length ? `The model picker lists ${listed.join(", ")}.` : "No definition in this file is registered in the picker."}`);
+			const result = await mixturesApi.save({ cwd: loaded.cwd, source: sourceDoc!.id, doc, baseHash: sourceDoc!.hash, ...(confirmCanonicalRewrite ? { confirmCanonicalRewrite: true } : {}) });
+			accept({ ...loaded, sources: loaded.sources.map(item => (item.id === result.source.id ? result.source : item)), picker: result.picker }, result.source.id, definition?.name);
+			const listed = result.source.validation.filter(item => item.runnable && result.picker.includes(item.name) && effectiveIn(result.source.id, item.name)).map(item => `mixture/${item.name}`);
+			setNotice(`Saved ${result.source.path}. ${listed.length ? `The model picker lists ${listed.join(", ")} from this file.` : "No definition in this file is registered in the picker from it."}`);
 		} catch (reason) {
 			if (reason instanceof MixturesApiError && reason.status === 409 && reason.details.code === "rewrite-loses-source") {
 				const diagnostics = Array.isArray(reason.details.parseDiagnostics) ? reason.details.parseDiagnostics.join("\n") : "";
@@ -430,7 +450,7 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 		return () => window.removeEventListener("keydown", listener);
 	}, []);
 
-	const otherScope: MixtureScope = scope === "project" ? "user" : "project";
+	const sources = loaded?.sources ?? [];
 	const sidebar = (
 		<aside className="h-full overflow-y-auto p-4 text-sm">
 			<h2 className="mb-4 text-lg font-semibold">Mixtures</h2>
@@ -444,53 +464,74 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 					))}
 				</select>
 			</label>
-			<div className="mt-4 flex gap-2" role="group" aria-label="MIXTURES.toml scope">
-				{(["project", "user"] as const).map(value => (
-					<button key={value} type="button" aria-pressed={scope === value} className={scope === value ? "btn-primary px-3 py-2" : "btn-ghost px-3 py-2"} onClick={() => changeScope(value)}>
-						{value === "project" ? "Project" : "User"}
-					</button>
-				))}
-			</div>
-			<p className="mt-3 break-all font-mono text-xs text-ink-3">{scopeDoc?.path ?? (loading ? "Loading…" : "Choose a workspace")}</p>
-			<h3 className="mt-5 font-semibold">In this file</h3>
-			<ul className="mt-1 space-y-1">
-				{doc.mixtures.map((item, i) => (
-					<li key={i}>
+			<h3 className="mt-5 font-semibold">Files NeoPi reads</h3>
+			<p className="text-xs text-ink-3">Later files win: a mixture defined in more than one runs from the last.</p>
+			<ul className="mt-1 space-y-1" aria-label="MIXTURES.toml files">
+				{sources.map(item => (
+					<li key={item.id}>
 						<button
 							type="button"
-							aria-current={index === i}
-							className={`block w-full rounded px-2 py-2 text-left ${index === i ? "bg-accent-soft text-ink" : "hover:bg-paper-3"}`}
-							onClick={() => {
-								setIndex(i);
-								setSelection(null);
-							}}
+							aria-current={item.id === sourceDoc?.id}
+							className={`block w-full rounded px-2 py-2 text-left ${item.id === sourceDoc?.id ? "bg-accent-soft text-ink" : "hover:bg-paper-3"}`}
+							onClick={() => changeSource(item.id)}
 						>
-							<span className="block font-medium">{item.name || "Unnamed mixture"}</span>
+							<span className="block break-all font-mono text-xs">{sourceLabel(item, loaded?.cwd)}</span>
 							<span className="mt-1 flex flex-wrap gap-1">
-								<StatusBadge report={reports?.[i]} />
-								{loaded?.picker.includes(item.name) && revision === savedRevision ? <Badge tone="accent">in picker</Badge> : null}
+								<Badge tone="muted">{item.kind}</Badge>
+								{item.exists ? <Badge tone="muted">{item.doc.mixtures.length} mixture{item.doc.mixtures.length === 1 ? "" : "s"}</Badge> : <Badge tone="muted">not created</Badge>}
+								{item.readOnly ? <Badge tone="warn" title={item.readOnly}>read-only</Badge> : null}
 							</span>
 						</button>
 					</li>
 				))}
 			</ul>
+			<h3 className="mt-5 font-semibold">In this file</h3>
+			<ul className="mt-1 space-y-1">
+				{doc.mixtures.map((item, i) => {
+					const winner = effectiveSource(item.name);
+					const shadowed = winner && winner.id !== sourceDoc?.id;
+					return (
+						<li key={i}>
+							<button
+								type="button"
+								aria-current={index === i}
+								className={`block w-full rounded px-2 py-2 text-left ${index === i ? "bg-accent-soft text-ink" : "hover:bg-paper-3"}`}
+								onClick={() => {
+									setIndex(i);
+									setSelection(null);
+								}}
+							>
+								<span className="block font-medium">{item.name || "Unnamed mixture"}</span>
+								<span className="mt-1 flex flex-wrap gap-1">
+									<StatusBadge report={reports?.[i]} />
+									{shadowed ? <Badge tone="warn" title={winner.path}>shadowed by {sourceLabel(winner, loaded?.cwd)}</Badge> : null}
+									{!shadowed && loaded?.picker.includes(item.name) && revision === savedRevision ? <Badge tone="accent">in picker</Badge> : null}
+								</span>
+							</button>
+						</li>
+					);
+				})}
+			</ul>
 			{!loading && !doc.mixtures.length ? <p className="mt-2 text-ink-3">No mixtures in this file yet.</p> : null}
-			<button type="button" disabled={!loaded || loading || sourceDirty || jsonPending} className="btn-ghost mt-3 w-full p-2" onClick={addMixture}>
+			<button type="button" disabled={!loaded || loading || sourceDirty || jsonPending || !!sourceDoc?.readOnly} className="btn-ghost mt-3 w-full p-2" onClick={addMixture}>
 				Add mixture
 			</button>
-			{loaded?.[otherScope].doc.mixtures.length ? (
-				<>
-					<h3 className="mt-7 font-semibold">In the {otherScope} file</h3>
-					{loaded[otherScope].doc.mixtures.map((item, i) => (
-						<div key={`${item.name}:${i}`} className="mt-3 border-t border-line pt-2">
-							<p className="font-semibold">{item.name}</p>
-							<button type="button" disabled={loading || sourceDirty || jsonPending} className="btn-ghost mt-1 px-2 py-1" onClick={() => copyFromOtherScope(item)}>
-								Copy into this file
-							</button>
-						</div>
-					))}
-				</>
-			) : null}
+			{sources
+				.filter(item => item.id !== sourceDoc?.id && item.doc.mixtures.length)
+				.map(item => (
+					<section key={item.id} className="mt-6">
+						<h3 className="break-all font-semibold">In {sourceLabel(item, loaded?.cwd)}</h3>
+						{item.doc.mixtures.map((mixture, i) => (
+							<div key={`${mixture.name}:${i}`} className="mt-2 border-t border-line pt-2">
+								<p className="font-semibold">{mixture.name}</p>
+								{effectiveSource(mixture.name)?.id === item.id ? <p className="text-xs text-ink-3">runs from this file</p> : null}
+								<button type="button" disabled={loading || sourceDirty || jsonPending || !!sourceDoc?.readOnly} className="btn-ghost mt-1 px-2 py-1" onClick={() => copyFromOtherSource(mixture)}>
+									Copy into this file
+								</button>
+							</div>
+						))}
+					</section>
+				))}
 		</aside>
 	);
 
@@ -535,7 +576,12 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 						{message}
 					</p>
 				))}
-				{scopeDoc?.parseDiagnostics.map((message, i) => (
+				{sourceDoc?.readOnly ? (
+					<p role="note" className="rounded border border-warn/60 p-3 text-sm">
+						<span className="break-all font-mono">{sourceDoc.path}</span> is read-only here: {sourceDoc.readOnly}. Copy its mixtures into an editable file to change them.
+					</p>
+				) : null}
+				{sourceDoc?.parseDiagnostics.map((message, i) => (
 					<p key={i} role="alert" className="rounded border border-danger p-2 text-sm">
 						{message}
 					</p>
@@ -603,10 +649,10 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 
 				{tab === "toml" ? (
 					<TomlTab
-						text={sourceDirty ? source : (current?.toml ?? (revision === savedRevision ? (scopeDoc?.toml ?? "") : ""))}
+						text={sourceDirty ? source : (current?.toml ?? (revision === savedRevision ? (sourceDoc?.toml ?? "") : ""))}
 						sourceDirty={sourceDirty}
 						// The canonical text of an edited graph arrives with its validation.
-						disabled={loading || !loaded || jsonPending || (!sourceDirty && revision !== savedRevision && !current)}
+						disabled={loading || !loaded || jsonPending || !!sourceDoc?.readOnly || (!sourceDirty && revision !== savedRevision && !current)}
 						draft={sourceDirty ? current : null}
 						onChange={text => {
 							if (!sourceDirty) setSourceBase(revision);
@@ -666,8 +712,8 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 							</button>
 						</div>
 						<aside className="min-w-0 rounded border border-line bg-paper-2 p-4 xl:max-h-[80vh] xl:overflow-y-auto" aria-label="Selected item">
-							<fieldset disabled={sourceDirty || loading || saving} className="space-y-5">
-								<div key={`${currentCwd}:${scope}:${index}:${selection ?? "mixture"}`}>
+							<fieldset disabled={sourceDirty || loading || saving || !!sourceDoc?.readOnly} className="space-y-5">
+								<div key={`${currentCwd}:${sourceDoc?.id ?? ""}:${index}:${selection ?? "mixture"}`}>
 									{selectedMember ? (
 										<MemberFields
 											member={selectedMember}
@@ -696,7 +742,7 @@ function MixturesEditor({ jsonPending }: { jsonPending: boolean }) {
 					<div className="rounded border border-line p-6 text-sm">{loading ? "Loading…" : "Select or add a mixture."}</div>
 				)}
 				{!sourceDirty && loaded && !loading ? (
-					<section key={`${currentCwd}:${scope}`} className="max-w-2xl border-t border-line pt-4">
+					<section key={`${currentCwd}:${sourceDoc?.id ?? ""}`} className="max-w-2xl border-t border-line pt-4">
 						<PresetsFields doc={doc} onChange={next => commit(next)} />
 					</section>
 				) : null}

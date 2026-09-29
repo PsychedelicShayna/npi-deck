@@ -53,11 +53,14 @@ sessions-related flows through `AgentBridge` or `SessionHandle`.
 ## Mixtures of agents
 
 NeoPi owns mixture parsing, resolution, validation, persistence and execution.
-`apps/server/src/mixtures-service.ts` (routes in `routes-mixtures.ts`) reads a
-known workspace's project or user `MIXTURES.toml`, validates drafts through
-the `mixture-config` manifest feature, and saves with a hash compare, a
-read-back check and `AgentBridge.refreshMixtureRoster(cwd)`, the only place
-the deck replaces a workspace's mixture roster. The bridge otherwise leases a
+`apps/server/src/mixtures-service.ts` (routes in `routes-mixtures.ts`) lists
+every `MIXTURES.toml` on NeoPi's search path for a known workspace, addressed
+by opaque ids, and validates drafts through the `mixture-config` manifest
+feature. `mixture-files.ts` reads and writes those files without following
+links (temp file + rename in the expected directory). A save holds NeoPi's
+cross-process file lock across the hash compare, write and read-back, then
+calls `AgentBridge.refreshMixtureRoster(cwd)`, the only place the deck
+replaces a workspace's mixture roster. The bridge otherwise leases a
 workspace scope per request (picker listing, chat creation, model switch) and
 re-validates the chosen mixture under the chat's settings.
 

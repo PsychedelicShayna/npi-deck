@@ -72,7 +72,7 @@ export function MixtureRunPanel({ session }: { session: SessionUi }) {
 				</button>
 			) : null}
 			<p className="border-t border-line pt-3 text-2xs leading-relaxed text-ink-3">
-				NeoPi reports each hop when it ends, plus limits, checkpoints and the run's end; it sends no run-start or hop-start event, streams no member tokens, and offers no graph snapshot. The member shown as working is the run's own next-member field after the last event. The transcript keeps hop cards but not the run's end.
+				NeoPi reports each hop when it ends, plus limits, checkpoints and the run's end; it sends no run-start or hop-start event, streams no member tokens, and offers no graph snapshot. The member shown as working is the run's own next-member field after the last event. NeoPi records a run's end only when its answer is committed, so a run that stopped otherwise shows no outcome from history.
 			</p>
 		</section>
 	);
@@ -112,12 +112,12 @@ function ConnectionNotes({ session, connected }: { session: SessionUi; connected
 			) : null}
 			{state?.reconnectedAt ? (
 				<p role="status" className="rounded border border-line p-2 text-xs">
-					Reconnected at {time(state.reconnectedAt)}: hop, limit and checkpoint cards were reloaded from the session file and everything this page saw live was kept. NeoPi does not replay events to a returning client, so a run end emitted while disconnected is missing.
+					Reconnected at {time(state.reconnectedAt)}: the panel reloaded this branch's hop, limit and checkpoint cards and each ended run's outcome from the session file, and kept what this page saw live.
 				</p>
 			) : null}
 			{state?.resets.map(reset => (
 				<p key={reset.at} role="status" className="rounded border border-warn/40 bg-warn/10 p-2 text-xs">
-					Conversation replaced at {time(reset.at)}: {reset.runIds.length} earlier run{reset.runIds.length === 1 ? "" : "s"} dropped. NeoPi never resumes a run across a reset.
+					Conversation reset at {time(reset.at)} (a new or cleared conversation, or a move to another branch): {reset.runIds.length} run{reset.runIds.length === 1 ? "" : "s"} no longer on this branch dropped. NeoPi never resumes a run across a reset.
 				</p>
 			))}
 			{state?.dropped ? <p className="text-xs text-warn">{state.dropped} mixture event(s) could not be read and are not shown.</p> : null}
@@ -139,7 +139,7 @@ function PhaseLine({ phase }: { phase: MixtureRunPhase }) {
 			case "disconnected":
 				return ["warn", "disconnected", phase.activeMemberId ? `last seen: ${phase.activeMemberId} working` : "last seen running"] as const;
 			case "unrecorded":
-				return ["muted", "not live", "the transcript does not record how this run ended"] as const;
+				return ["muted", "not live", "history: no recorded outcome for this run"] as const;
 		}
 	})();
 	return (

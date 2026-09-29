@@ -620,11 +620,9 @@ function handleFrame(
 							// Advisor events sent while this client was away are not replayed;
 							// every (re)subscribe tells the advisor panel to refetch.
 							advisorActivity: (previous?.advisorActivity ?? 0) + 1,
-							// Mixture events are not replayed either; keep what was seen live.
-							mixture: reconcileMixtureResubscribe(live?.mixture, next.mixture ?? emptyMixtureUi(), {
-								at: Date.now(),
-								conversationReplaced: !!live?.sessionFile && live.sessionFile !== frame.snapshot.sessionFile,
-							}) },
+							// Mixture events are not replayed either; keep what was seen live
+							// for runs still on the snapshot's branch.
+							mixture: reconcileMixtureResubscribe(live?.mixture, next.mixture ?? emptyMixtureUi(), Date.now()) },
 					},
 				};
 			});

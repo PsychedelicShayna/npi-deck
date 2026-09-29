@@ -247,16 +247,19 @@ await check("mixtures: workspaces register only their own MIXTURES.toml models",
 });
 
 await check(
-	"mixture-config: parse, serialize, resolve, validate, save and rediscover a MIXTURES.toml",
-	["mixturesConfigFilePath", "loadMixturesConfigFile", "parseMixturesDoc", "saveMixturesConfigFile", "serializeMixturesConfig", "resolveMixture", "validateMixture", "discoverRegistrableMixtures"],
+	"mixture-config: search path, parse, serialize, resolve, validate, lock and rediscover a MIXTURES.toml",
+	["configCandidatePaths", "parseMixturesDoc", "serializeMixturesConfig", "MAX_FILE_BYTES", "resolveMixture", "validateMixture", "discoverRegistrableMixtures", "withFileLock"],
 	async () => {
-		const cwd = mkdir("mixture-config");
-		const file = mixtureConfig.mixturesConfigFilePath("project", { projectDir: cwd, agentDir });
-		assert(file === path.join(cwd, "MIXTURES.toml"), `project path = ${file}`);
+		const cwd = mkdir("mixture-config", "nested");
+		const file = path.join(cwd, ".omp", "MIXTURES.toml");
+		const { candidates } = mixtureConfig.configCandidatePaths(cwd, agentDir, ["MIXTURES.toml"]);
+		assert(candidates.includes(file) && candidates.includes(path.join(agentDir, "MIXTURES.toml")), `search path = ${candidates.join(", ")}`);
+		assert(Number.isInteger(mixtureConfig.MAX_FILE_BYTES) && mixtureConfig.MAX_FILE_BYTES > 0, `MAX_FILE_BYTES = ${mixtureConfig.MAX_FILE_BYTES}`);
 		const member = (id: string) => ({ id, model: "openrouter/openai/gpt-4o-mini", systemPrompt: "Answer.", tools: false });
 		const chain = { name: "deck-chain", entry: "writer", members: [member("writer"), member("editor")], edges: [{ from: "writer", to: "editor", x: { output: true as const } }], limits: { maxHops: 4 } };
 		const gated = { ...chain, name: "deck-gated", limits: { maxHops: 4, budgetUsd: 1 } };
-		const roundTrip = mixtureConfig.parseMixturesDoc(Bun.TOML.parse(mixtureConfig.serializeMixturesConfig({ mixtures: [chain, gated] })), "contract draft");
+		const text = mixtureConfig.serializeMixturesConfig({ mixtures: [chain, gated] });
+		const roundTrip = mixtureConfig.parseMixturesDoc(Bun.TOML.parse(text), "contract draft");
 		assert(!roundTrip.warnings?.length, `round-trip warnings: ${roundTrip.warnings?.join("; ")}`);
 		assert(roundTrip.mixtures[1]?.limits?.budgetUsd === 1, "serialize/parse dropped limits.budget_usd");
 		const settings = await core.Settings.loadIsolated({ cwd, agentDir });
@@ -267,12 +270,16 @@ await check(
 		assert(ok && ok.errors.length === 0, `linear chain refused: ${ok?.errors.map(issue => issue.code).join(",")}`);
 		const gate = refused?.errors.find(issue => issue.code === "unsupported.feature");
 		assert(gate?.path === "limits.budget_usd", `budget gate = ${JSON.stringify(refused?.errors)}`);
-		await mixtureConfig.saveMixturesConfigFile(file, roundTrip);
-		const loaded = await mixtureConfig.loadMixturesConfigFile(file);
-		assert(loaded.mixtures.map(mixture => mixture.name).join(",") === "deck-chain,deck-gated", "saved file does not load back");
+		mkdirSync(path.dirname(file), { recursive: true });
+		// The lock is exclusive across holders: a second acquisition fails while the first holds it.
+		await mixtureConfig.withFileLock(file, async () => {
+			const second = await mixtureConfig.withFileLock(file, async () => "acquired", { retries: 1 }).catch(() => "refused");
+			assert(second === "refused", "withFileLock granted a second holder");
+			await Bun.write(file, text);
+		});
 		const registrable = await mixtureConfig.discoverRegistrableMixtures({ cwd, agentDir, registry, settings });
 		assert(registrable.map(mixture => mixture.definition.name).join(",") === "deck-chain", `registrable = ${registrable.map(mixture => mixture.definition.name)}`);
-		return `project file round-trips; ${gate.message}; discovery registers mixture/deck-chain only`;
+		return `.omp/MIXTURES.toml is on the search path; ${gate.message}; lock excludes a second holder; discovery registers mixture/deck-chain only`;
 	},
 );
 
