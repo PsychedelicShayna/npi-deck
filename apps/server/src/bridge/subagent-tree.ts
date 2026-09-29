@@ -7,6 +7,17 @@ type Bus = { on(channel: string, listener: (payload: any) => void): () => void }
 
 const TERMINAL = new Set(["completed", "failed", "aborted"]);
 
+/**
+ * Terminal precedence for bus records: aborted, on the node, the registry ref
+ * (a tombstone) or the record, always wins; otherwise a node that already
+ * reached a terminal status keeps it, and only a live node takes `incoming`.
+ */
+function nextStatus(current: string | undefined, refStatus: string | undefined, incoming: string): string {
+	if (current === "aborted" || refStatus === "aborted" || incoming === "aborted") return "aborted";
+	if (current && TERMINAL.has(current)) return current;
+	return incoming;
+}
+
 /** One root generation owns one bus. Never infer ownership from a user-supplied file path. */
 export class SubagentTree {
 	private readonly registry: Registry;
@@ -74,7 +85,7 @@ export class SubagentTree {
 			if (previous) this.settleRemoved(previous, data.status, data.description, data.sessionFile);
 			return;
 		}
-		const status = data.status === "started" ? ref.status : data.status;
+		const status = nextStatus(previous?.status, ref.status, data.status === "started" ? ref.status : data.status);
 		this.nodes.set(data.id, {
 			id: data.id, parentId: ref.parentId!, name: ref.displayName || data.agent || data.id,
 			status, description: data.description ?? previous?.description,
@@ -98,7 +109,7 @@ export class SubagentTree {
 			if (data.progress.status) this.settleRemoved(node, data.progress.status, data.progress.description, data.sessionFile);
 			return;
 		}
-		const status = ref.status === "aborted" ? "aborted" : data.progress.status ?? node.status;
+		const status = nextStatus(node.status, ref.status, data.progress.status ?? node.status);
 		this.nodes.set(id, { ...node, status, description: data.progress.description ?? node.description,
 			activity: status === "running" ? ref.activity ?? data.progress.activity ?? node.activity : undefined,
 			sessionFile: ref.sessionFile ?? data.sessionFile ?? node.sessionFile });
@@ -118,12 +129,14 @@ export class SubagentTree {
 
 	/**
 	 * A bus record that arrives after the registry removed its ref can only
-	 * settle a still-running node to a terminal status. It never revives the
-	 * node, overwrites an earlier terminal status, or re-admits work, since no
-	 * later removal would release that admission.
+	 * settle the node to a terminal status under `nextStatus` precedence. It
+	 * never revives the node or re-admits work, since no later removal would
+	 * release that admission.
 	 */
-	private settleRemoved(node: SubagentNode, status: string, description?: string, sessionFile?: string): void {
-		if (!TERMINAL.has(status) || TERMINAL.has(node.status)) return;
+	private settleRemoved(node: SubagentNode, incoming: string, description?: string, sessionFile?: string): void {
+		if (!TERMINAL.has(incoming)) return;
+		const status = nextStatus(node.status, undefined, incoming);
+		if (status === node.status) return;
 		this.release(node.id);
 		this.nodes.set(node.id, { ...node, status, description: description ?? node.description, activity: undefined, sessionFile: node.sessionFile ?? sessionFile });
 		this.publish();

@@ -129,3 +129,48 @@ test("late tool event after removal is ignored", () => {
 	expect(tree.snapshot()[0]).toMatchObject({ status: "running", activity: "Thinking" });
 	tree.dispose();
 });
+
+function liveChild(id: string) {
+	refs.clear(); released.length = 0;
+	refs.set("rootA", { id: "rootA", kind: "main" });
+	const ref = { id, parentId: "rootA", kind: "sub", status: "running", createdAt: 1, displayName: id, sessionFile: `/tmp/${id}.jsonl`, session: { abort: async () => {} } };
+	refs.set(id, ref);
+	const events = bus(), tree = new SubagentTree("rootA", events, api);
+	events.emit("task:subagent:lifecycle", { id, status: "started" });
+	return { events, tree, ref };
+}
+
+test("an aborted tombstone outranks a late lifecycle or progress completion", async () => {
+	for (const late of [
+		(events: ReturnType<typeof bus>, id: string) => events.emit("task:subagent:lifecycle", { id, status: "completed" }),
+		(events: ReturnType<typeof bus>, id: string) => events.emit("task:subagent:progress", { progress: { id, status: "completed" } }),
+	]) {
+		// Tombstoned by the deck's own abort: node and ref are both aborted.
+		const deck = liveChild("deck-abort");
+		await deck.tree.abort("deck-abort");
+		late(deck.events, "deck-abort");
+		expect(deck.tree.snapshot()[0]?.status).toBe("aborted");
+		deck.tree.dispose();
+		// Tombstoned elsewhere before its registry change reached this tree.
+		const hub = liveChild("hub-abort");
+		hub.ref.status = "aborted";
+		late(hub.events, "hub-abort");
+		expect(hub.tree.snapshot()[0]?.status).toBe("aborted");
+		expect(workRegistry.snapshot()).not.toContainEqual({ kind: "subagent", id: "rootA:hub-abort" });
+		hub.tree.dispose();
+	}
+});
+
+test("a finished child keeps its first terminal status except for a later abort", () => {
+	const { events, tree, ref } = liveChild("finished");
+	ref.status = "idle";
+	events.emit("task:subagent:lifecycle", { id: "finished", status: "completed" });
+	events.emit("task:subagent:progress", { progress: { id: "finished", status: "failed" } });
+	events.emit("task:subagent:lifecycle", { id: "finished", status: "failed" });
+	expect(tree.snapshot()[0]?.status).toBe("completed");
+	events.emit("task:subagent:lifecycle", { id: "finished", status: "aborted" });
+	expect(tree.snapshot()[0]?.status).toBe("aborted");
+	events.emit("task:subagent:progress", { progress: { id: "finished", status: "completed" } });
+	expect(tree.snapshot()[0]?.status).toBe("aborted");
+	tree.dispose();
+});
