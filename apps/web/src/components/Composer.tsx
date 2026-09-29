@@ -17,7 +17,7 @@ import { SlashCommandPicker } from "@/components/composer/SlashCommandPicker";
 import { Paperclip, ArrowUp, Square, X } from "lucide-react";
 import type { ImageAttachment } from "@npi-deck/protocol";
 
-import { readDraft, saveDraft, type PendingImage } from "@/lib/composer-drafts";
+import { readDraft, releaseImages, saveDraft, type PendingImage } from "@/lib/composer-drafts";
 import { selectActiveSession, useStore } from "@/lib/store";
 import { useComposerHistory } from "@/lib/use-composer-history";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,9 @@ const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
  * `/api/slash-commands` calls on every Vite reload is noise.
  */
 const slashCommandsCache = new Map<string, SlashCommand[]>();
+
+/** Prompts leave in the order they were sent, though attachments encode asynchronously. */
+let outbox: Promise<void> = Promise.resolve();
 
 export function Composer() {
 	const session = useStore(selectActiveSession);
@@ -374,16 +377,11 @@ export function Composer() {
 			}
 			if (imagesRef.current.length >= MAX_PENDING_IMAGES) return;
 
-			const data = await fileToBase64(file);
-			const mimeType = file.type || "image/png";
-			const preview = `data:${mimeType};base64,${data}`;
-
 			const newImage: PendingImage = {
 				id: crypto.randomUUID(),
-				type: "image",
-				data,
-				mimeType,
-				preview,
+				file,
+				mimeType: file.type || "image/png",
+				preview: URL.createObjectURL(file),
 			};
 			const placeholderIndex = imagesRef.current.length + 1;
 			imagesRef.current = [...imagesRef.current, newImage];
@@ -421,8 +419,18 @@ export function Composer() {
 				return;
 			}
 		}
-		const payload: ImageAttachment[] = images.map(({ id: _id, preview: _p, ...rest }) => rest);
-		sendPrompt(text, payload.length > 0 ? payload : undefined);
+		// Attachments are encoded after the composer clears, so the prompt
+		// names its chat (the reader may switch meanwhile) and waits its turn
+		// behind earlier sends.
+		const attached = images;
+		const target = draftKey;
+		outbox = outbox
+			.then(async () => {
+				const payload = await Promise.all(attached.map(async (img): Promise<ImageAttachment> => ({ type: "image", data: await blobToBase64(img.file), mimeType: img.mimeType })));
+				sendPrompt(text, payload.length > 0 ? payload : undefined, target);
+			})
+			.catch((err) => console.error("attaching images failed", err))
+			.finally(() => releaseImages(attached));
 		// Record the prompt for ArrowUp recall. The hook collapses consecutive
 		// duplicates and ignores recall-then-send-unmodified, so we don't have
 		// to track that here.
@@ -588,7 +596,9 @@ export function Composer() {
 	}
 
 	function removeImage(id: string): void {
-		setImages((prev) => prev.filter((img) => img.id !== id));
+		releaseImages(imagesRef.current.filter((img) => img.id === id));
+		imagesRef.current = imagesRef.current.filter((img) => img.id !== id);
+		setImages(imagesRef.current);
 	}
 
 	return (
@@ -607,6 +617,11 @@ export function Composer() {
 			onDrop={(e) => void handleDrop(e)}
 		>
 			<div className="mx-auto max-w-[760px]">
+				{restored?.droppedImages ? (
+					<div role="status" className="mb-2 font-mono text-2xs text-warn">
+						{restored.droppedImages} unsent {restored.droppedImages === 1 ? "image was" : "images were"} dropped to save memory.
+					</div>
+				) : null}
 				{images.length > 0 ? (
 					<div className="mb-2 flex flex-wrap items-end gap-1.5">
 						{images.map((img, i) => (
@@ -614,7 +629,7 @@ export function Composer() {
 								key={img.id}
 								index={i + 1}
 								preview={img.preview}
-								bytes={estimateBytes(img.data)}
+								bytes={img.file.size}
 								onRemove={() => removeImage(img.id)}
 							/>
 						))}
@@ -786,7 +801,7 @@ function ImageThumb({
 	);
 }
 
-async function fileToBase64(file: File): Promise<string> {
+async function blobToBase64(blob: Blob): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onerror = () => reject(reader.error ?? new Error("read failed"));
@@ -795,14 +810,8 @@ async function fileToBase64(file: File): Promise<string> {
 			const comma = result.indexOf(",");
 			resolve(comma >= 0 ? result.slice(comma + 1) : result);
 		};
-		reader.readAsDataURL(file);
+		reader.readAsDataURL(blob);
 	});
-}
-
-function estimateBytes(base64: string): number {
-	if (!base64) return 0;
-	const padding = (base64.match(/=+$/)?.[0] ?? "").length;
-	return Math.floor((base64.length * 3) / 4) - padding;
 }
 
 function formatKb(bytes: number): string {

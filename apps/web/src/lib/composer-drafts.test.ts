@@ -1,13 +1,23 @@
-import { afterEach, expect, test } from "bun:test";
-import { dropDraft, MAX_DRAFT_IMAGE_CHARS, MAX_DRAFTS, readDraft, saveDraft, type PendingImage } from "./composer-drafts";
+import { afterEach, beforeEach, expect, test } from "bun:test";
+import { dropDraft, MAX_DRAFTS, readDraft, saveDraft, type PendingImage } from "./composer-drafts";
 
+const MiB = 1024 * 1024;
 const ids = Array.from({ length: MAX_DRAFTS + 2 }, (_, i) => `s${i}`);
-afterEach(() => { for (const id of ids) dropDraft(id); });
+const originalRevoke = URL.revokeObjectURL;
+let revoked: string[] = [];
 
-/** An attachment whose base64 and preview together hold `chars` characters. */
-function image(chars: number): PendingImage {
-	const data = "A".repeat(chars / 2);
-	return { id: crypto.randomUUID(), type: "image", mimeType: "image/png", data, preview: data };
+beforeEach(() => {
+	revoked = [];
+	URL.revokeObjectURL = (url: string) => { revoked.push(url); };
+});
+afterEach(() => {
+	for (const id of ids) dropDraft(id);
+	URL.revokeObjectURL = originalRevoke;
+});
+
+/** A pasted image of `bytes` bytes; its preview URL is named for the assertions. */
+function image(name: string, bytes: number): PendingImage {
+	return { id: name, file: new Blob([new Uint8Array(bytes)], { type: "image/png" }), mimeType: "image/png", preview: `blob:${name}` };
 }
 
 test("past the cap, the draft touched least recently is dropped", () => {
@@ -26,20 +36,36 @@ test("an emptied draft is not kept", () => {
 	expect(readDraft("s0")).toBeUndefined();
 });
 
-test("past the image budget, the oldest drafts lose their images first and keep their text", () => {
-	const third = Math.floor(MAX_DRAFT_IMAGE_CHARS / 3) + 1024;
-	saveDraft("s0", { text: "t0", images: [image(third)] });
-	saveDraft("s1", { text: "", images: [image(third)] });
-	saveDraft("s2", { text: "t2", images: [image(third)] });
-	// Three thirds plus a little: only the oldest gives up its images.
-	expect(readDraft("s0")).toEqual({ text: "t0", images: [] });
+test("two 20 MiB images in one draft fit the budget", () => {
+	saveDraft("s0", { text: "[Image #1] [Image #2] compare", images: [image("a", 20 * MiB), image("b", 20 * MiB)] });
+	saveDraft("s1", { text: "other chat", images: [] });
+	expect(readDraft("s0")?.images).toHaveLength(2);
+	expect(revoked).toEqual([]);
+});
+
+test("past the image budget, the oldest draft loses its images, their placeholders, and says so", () => {
+	saveDraft("s0", { text: "look at [Image #1] and [Image #2] please", images: [image("a", 30 * MiB), image("b", 10 * MiB)] });
+	saveDraft("s1", { text: "", images: [image("c", 20 * MiB)] });
+	saveDraft("s2", { text: "[Image #1]", images: [image("d", 20 * MiB)] });
+	// 80 MiB held: s0, the oldest, gives up its 40 MiB; s1 and s2 keep theirs.
+	expect(readDraft("s0")).toEqual({ text: "look at and please", images: [], droppedImages: 2 });
+	expect(revoked).toEqual(["blob:a", "blob:b"]);
 	expect(readDraft("s1")?.images).toHaveLength(1);
 	expect(readDraft("s2")?.images).toHaveLength(1);
+});
 
-	// A draft on screen keeps its images even alone over the budget; an
-	// image-only draft that loses its images is gone.
-	saveDraft("s3", { text: "t3", images: [image(MAX_DRAFT_IMAGE_CHARS + 2)] });
-	expect(readDraft("s1")).toBeUndefined();
-	expect(readDraft("s2")).toEqual({ text: "t2", images: [] });
-	expect(readDraft("s3")?.images).toHaveLength(1);
+test("an image-only draft that loses its images stays, to report the loss", () => {
+	saveDraft("s0", { text: "[Image #1] ", images: [image("a", 50 * MiB)] });
+	saveDraft("s1", { text: "hi", images: [image("b", 20 * MiB)] });
+	expect(readDraft("s0")).toEqual({ text: "", images: [], droppedImages: 1 });
+	// Once the composer has shown it and saved the draft back, it is gone.
+	saveDraft("s0", { text: "", images: [] });
+	expect(readDraft("s0")).toBeUndefined();
+});
+
+test("closing a chat releases its draft's images", () => {
+	saveDraft("s0", { text: "x", images: [image("a", 1024)] });
+	dropDraft("s0");
+	expect(revoked).toEqual(["blob:a"]);
+	expect(readDraft("s0")).toBeUndefined();
 });

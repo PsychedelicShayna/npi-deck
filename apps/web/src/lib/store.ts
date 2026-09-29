@@ -225,7 +225,8 @@ interface StoreState {
 	/** Turn the active read-only transcript into a live session. */
 	resumeSession(id: string): Promise<string>;
 	selectSession(id: string): void;
-	sendPrompt(text: string, images?: import("@npi-deck/protocol").ImageAttachment[]): void;
+	/** Send to `sessionId`, or the active chat. A composer passes its own chat: building attachments is async. */
+	sendPrompt(text: string, images?: import("@npi-deck/protocol").ImageAttachment[], sessionId?: string): void;
 	abort(): void;
 	/** Drop every queued (followUp / steering) prompt for the active session.
 	 *  Server echoes a `queue_cleared` session event that reconciles
@@ -417,8 +418,8 @@ export const useStore = create<StoreState>()(
 			}
 		},
 
-		sendPrompt(text, images) {
-			const id = get().activeId;
+		sendPrompt(text, images, sessionId) {
+			const id = sessionId ?? get().activeId;
 			if (!id) return;
 			// First send in a read-only transcript resumes it, then sends to
 			// that chat, wherever the reader has moved by then.
