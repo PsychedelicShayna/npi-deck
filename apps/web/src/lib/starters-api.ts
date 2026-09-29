@@ -1,4 +1,9 @@
-import type { MaintenanceGateState, UpdateMaintenanceGateRequest } from "@npi-deck/protocol";
+import type {
+	MaintenanceGateState,
+	StartersResponse,
+	UpdateMaintenanceGateRequest,
+	UpdateStarterAutoInstallRequest,
+} from "@npi-deck/protocol";
 
 const BASE = "/api";
 
@@ -15,6 +20,15 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const startersApi = {
+	list(): Promise<StartersResponse> {
+		return req<StartersResponse>("/starters");
+	},
+	putAutoInstall(body: UpdateStarterAutoInstallRequest): Promise<StartersResponse> {
+		return req<StartersResponse>("/starters/auto-install", {
+			method: "PUT",
+			body: JSON.stringify(body),
+		});
+	},
 	getMaintenanceGate(): Promise<MaintenanceGateState> {
 		return req<MaintenanceGateState>("/starters/maintenance-gate");
 	},

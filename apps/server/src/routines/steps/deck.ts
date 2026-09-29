@@ -78,6 +78,7 @@ export async function executeDeckStep(
 				// reordering within done doesn't spam.
 				if (destStateId === "s_done" && sourceStateId !== "s_done") {
 					void notificationService.notify({
+						kind: "task_shipped",
 						level: "info",
 						sound: true,
 						title: `Agent shipped: ${moved.title}`,

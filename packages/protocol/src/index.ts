@@ -123,6 +123,49 @@ export interface RestartServerResponse {
 	message: string;
 }
 
+/**
+ * Whether the deck can change an env-backed setting. A value the launching
+ * shell exported wins over the managed .env, so saving would have no effect:
+ * those settings are reported with `editable: false`.
+ */
+export interface EnvBackedSetting {
+	key: string;
+	source: EnvValueSource;
+	editable: boolean;
+}
+
+/** `GET /api/settings/workspaces`: the roots pinned into the session picker. */
+export interface WorkspaceSettingsResponse {
+	/** Where new sessions start (`NPI_DECK_DEFAULT_CWD`); always listed in the picker. */
+	defaultCwd: string;
+	/** Extra roots from `NPI_DECK_WORKSPACES`, in saved order. */
+	pinned: Array<{ cwd: string; label: string; exists: boolean }>;
+	setting: EnvBackedSetting;
+}
+
+/** `PUT /api/settings/workspaces`: the full pinned list; paths must be existing directories. */
+export interface UpdateWorkspaceSettingsRequest {
+	pinned: string[];
+}
+
+/** `GET /api/settings/notifications`: every notification the server can emit. */
+export interface NotificationSettingsResponse {
+	sources: Array<{
+		kind: NotificationKind;
+		label: string;
+		/** What makes the server emit it, in plain language. */
+		trigger: string;
+		level: NotificationLevel;
+		enabled: boolean;
+	}>;
+	setting: EnvBackedSetting;
+}
+
+/** `PUT /api/settings/notifications`: kinds to switch off; every other kind is on. */
+export interface UpdateNotificationSettingsRequest {
+	disabled: NotificationKind[];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // NeoPi configuration registry (`~/.omp/agent/config.yml`)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -333,7 +376,7 @@ export interface BackendStatusResponse {
 export interface BackendSwitchResponse { ok: boolean; message: string; busy?: Array<{ kind: string; id: string }> }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Starters (opt-in extensions: the maintenance gate)
+// Starters (bundled skills and extensions; the maintenance gate's knobs)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type GateValueSource = "process-env" | "env-file" | "default" | "unset";
@@ -372,6 +415,37 @@ export interface UpdateMaintenanceGateRequest {
 	minOpMsgs?: number | null;
 	minReleaseAgeMs?: number | null;
 	fireFloorMs?: number | null;
+}
+
+/** One bundled starter skill or extension and whether it is in the NeoPi agent dir. */
+export interface StarterItem {
+	name: string;
+	description: string;
+	installed: boolean;
+	installedPath: string;
+}
+
+/** One kind of starter (skills or extensions): the bundle, its target and the launch-time copy switch. */
+export interface StarterGroup {
+	/** Copy missing starters into `targetDir` when the deck launches. */
+	autoInstall: boolean;
+	setting: EnvBackedSetting;
+	/** Bundled source directory, or null when the deck cannot find it. */
+	sourceDir: string | null;
+	targetDir: string;
+	items: StarterItem[];
+}
+
+/** `GET /api/starters`. */
+export interface StartersResponse {
+	skills: StarterGroup;
+	extensions: StarterGroup;
+}
+
+/** `PUT /api/starters/auto-install`; omitted fields stay as they are. */
+export interface UpdateStarterAutoInstallRequest {
+	skills?: boolean;
+	extensions?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1219,15 +1293,16 @@ export type ServerFrame =
 			timestamp: string;
 	  }
 	/**
-	 * User-facing notification. Emitted by the deck's `NotificationService` for
-	 * routine failures, budget breaches, suspended approval prompts, and any
-	 * other surface that opts in. Browser-channel deliver()s push these frames
-	 * to every connected client; the web layer renders an OS-level
-	 * `Notification` (when permission granted) plus an audio cue.
+	 * User-facing notification. Emitted by the deck's `NotificationService`
+	 * for each `NotificationKind`, unless that kind is switched off in
+	 * Settings. Browser-channel deliver()s push these frames to every
+	 * connected client; the web layer renders an OS-level `Notification`
+	 * (when permission granted) plus an audio cue.
 	 */
 	| {
 			type: "notification";
 			id: string;
+			kind: NotificationKind;
 			level: NotificationLevel;
 			title: string;
 			body?: string;
@@ -1241,8 +1316,18 @@ export type ServerFrame =
 /** Severity for a deck notification. Drives the audio tone + visual styling. */
 export type NotificationLevel = "info" | "warn" | "error" | "critical";
 
+/**
+ * What produced a notification. Each kind can be switched off in Settings →
+ * Notifications (`NPI_DECK_NOTIFICATIONS_DISABLED`).
+ *   - `routine_failed`: a routine run ended failed, cancelled, timed out or over budget.
+ *   - `task_shipped`: a routine step moved a task into Done.
+ *   - `auth_fallback`: a model call failed auth while a subscription login covers the same model.
+ */
+export type NotificationKind = "routine_failed" | "task_shipped" | "auth_fallback";
+
 /** Payload accepted by `NotificationService.notify` on the server. */
 export interface NotificationPayload {
+	kind: NotificationKind;
 	level: NotificationLevel;
 	title: string;
 	body?: string;

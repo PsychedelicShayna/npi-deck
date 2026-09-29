@@ -50,7 +50,20 @@ The managed `.env` is `<data dir>/.env`. The same directory holds:
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
 | `NPI_DECK_DEFAULT_CWD` | `process.cwd()` | next session | Working dir for new chat sessions. |
-| `NPI_DECK_WORKSPACES` | _(none)_ | next session | Comma-separated extra workspace roots shown in the picker. |
+| `NPI_DECK_WORKSPACES` | _(none)_ | no | Comma-separated extra workspace roots shown in the picker. Managed from Settings → Workspaces, which checks each is an existing directory and applies the list at once. |
+
+### Notifications
+
+| Var | Default | Restart? | Notes |
+|---|---|---|---|
+| `NPI_DECK_NOTIFICATIONS_DISABLED` | _(none)_ | no | Comma-separated notification sources the server does not emit: `routine_failed`, `task_shipped`, `auth_fallback`. Managed from Settings → Notifications. |
+
+### Starters
+
+| Var | Default | Restart? | Notes |
+|---|---|---|---|
+| `NPI_DECK_INSTALL_STARTER_SKILLS` | _(on)_ | yes | `0`/`false`/`no`/`off` stops copying missing starter skills into the NeoPi agent dir at launch. Managed from Settings → Starters. |
+| `NPI_DECK_INSTALL_STARTER_EXTENSIONS` | _(on)_ | yes | Same, for starter extensions. |
 
 ### NeoPi SDK and new-chat models
 

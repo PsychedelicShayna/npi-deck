@@ -19,6 +19,7 @@ export class BrowserNotificationChannel implements NotificationChannel {
 		broadcastBus.broadcast({
 			type: "notification",
 			id: envelope.id,
+			kind: envelope.kind,
 			level: envelope.level,
 			title: envelope.title,
 			...(envelope.body !== undefined ? { body: envelope.body } : {}),

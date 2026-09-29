@@ -16,7 +16,7 @@
  * The source dir comes from `starterSkillsDir()` (assets.ts;
  * `NPI_DECK_STARTER_SKILLS_DIR` overrides).
  *
- * Disable with `NPI_DECK_INSTALL_STARTER_SKILLS=0`.
+ * Disable with `NPI_DECK_INSTALL_STARTER_SKILLS=0` (or Settings → Starters).
  */
 
 import { existsSync } from "node:fs";
@@ -26,6 +26,7 @@ import * as path from "node:path";
 import { starterSkillsDir } from "./assets.ts";
 import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
+import { starterAutoInstallEnabled } from "./starters.ts";
 
 const log = logger("starter-skills");
 
@@ -34,9 +35,9 @@ export interface StarterInstallResult {
 	skipped: string[];
 }
 
-export async function installStarterSkills(): Promise<StarterInstallResult> {
-	if (process.env.NPI_DECK_INSTALL_STARTER_SKILLS === "0") {
-		log.info("starter skills install disabled via NPI_DECK_INSTALL_STARTER_SKILLS=0");
+export async function installStarterSkills(agentDir = sdk().getAgentDir()): Promise<StarterInstallResult> {
+	if (!starterAutoInstallEnabled("skills")) {
+		log.info("starter skills install disabled via NPI_DECK_INSTALL_STARTER_SKILLS");
 		return { installed: [], skipped: [] };
 	}
 
@@ -46,7 +47,7 @@ export async function installStarterSkills(): Promise<StarterInstallResult> {
 		return { installed: [], skipped: [] };
 	}
 
-	const targetRoot = path.join(sdk().getAgentDir(), "skills");
+	const targetRoot = path.join(agentDir, "skills");
 
 	let entries;
 	try {

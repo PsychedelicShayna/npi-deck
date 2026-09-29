@@ -382,6 +382,7 @@ export async function runV1Pipeline(input: {
 			? "timed out"
 			: abortReason ?? "failed";
 		void notificationService.notify({
+			kind: "routine_failed",
 			level,
 			title: `routine "${routine.name}" ${reasonLabel}`,
 			body: stepCountFailed > 0

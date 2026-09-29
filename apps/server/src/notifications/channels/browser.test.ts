@@ -25,6 +25,7 @@ describe("BrowserNotificationChannel", () => {
 			const channel = new BrowserNotificationChannel();
 			channel.deliver({
 				id: "n-1",
+				kind: "routine_failed",
 				level: "error",
 				title: "boom",
 				body: "details",
@@ -38,6 +39,7 @@ describe("BrowserNotificationChannel", () => {
 			expect(got).toBeDefined();
 			if (got?.type !== "notification") throw new Error("frame missing");
 			expect(got.id).toBe("n-1");
+			expect(got.kind).toBe("routine_failed");
 			expect(got.level).toBe("error");
 			expect(got.title).toBe("boom");
 			expect(got.body).toBe("details");
@@ -56,6 +58,7 @@ describe("BrowserNotificationChannel", () => {
 			const channel = new BrowserNotificationChannel();
 			channel.deliver({
 				id: "n-2",
+				kind: "task_shipped",
 				level: "info",
 				title: "minimal",
 				timestamp: "2026-05-23T20:00:00.000Z",

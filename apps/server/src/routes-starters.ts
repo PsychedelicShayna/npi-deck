@@ -1,20 +1,73 @@
 /**
  * Starter routes
  *
- * Opt-in starter extensions whose config the deck manages. Today that is the
- * maintenance gate: GET projects its env-backed state (see
- * `maintenance-gate.ts`), PUT writes the managed env file.
+ * Starters are the skills and extensions bundled with the deck. GET /starters
+ * lists them with their installed state and the launch-time install switches;
+ * PUT /starters/auto-install flips those switches. The maintenance gate, the
+ * one starter extension with settings, projects its env-backed state (see
+ * `maintenance-gate.ts`); its PUT writes the managed env file.
  */
 
 import { Hono } from "hono";
-import type { MaintenanceGateState, UpdateMaintenanceGateRequest } from "@npi-deck/protocol";
+import type {
+	MaintenanceGateState,
+	StartersResponse,
+	UpdateMaintenanceGateRequest,
+	UpdateStarterAutoInstallRequest,
+} from "@npi-deck/protocol";
 
+import { sdk } from "./backend/runtime.ts";
 import { appendEnvAudit, commitManagedEnvUpdates } from "./env-store.ts";
-import { ENV_SCHEMA_BY_KEY, validateEnvValue } from "./env-schema.ts";
+import { ENV_SCHEMA_BY_KEY, resolveEnvSetting, validateEnvValue } from "./env-schema.ts";
 import { MAINTENANCE_GATE_ENV_KEYS, readMaintenanceGateState } from "./maintenance-gate.ts";
+import { STARTER_AUTO_INSTALL_ENV, readStarterGroup, type StarterKind } from "./starters.ts";
 
-export function buildStartersRouter(): Hono {
+export function buildStartersRouter(opts: { agentDir?: () => string } = {}): Hono {
 	const app = new Hono();
+	const agentDir = opts.agentDir ?? (() => sdk().getAgentDir());
+	const readStarters = (): StartersResponse | null => {
+		let dir: string;
+		try {
+			dir = agentDir();
+		} catch {
+			return null;
+		}
+		return { skills: readStarterGroup("skills", dir), extensions: readStarterGroup("extensions", dir) };
+	};
+	const noBackend = { error: "No NeoPi backend is loaded, so the deck cannot tell which agent directory starters install into. Pick one under Settings → Backend." };
+
+	app.get("/starters", (c) => {
+		const body = readStarters();
+		return body ? c.json(body) : c.json(noBackend, 503);
+	});
+
+	app.put("/starters/auto-install", async (c) => {
+		let body: UpdateStarterAutoInstallRequest;
+		try {
+			body = (await c.req.json()) as UpdateStarterAutoInstallRequest;
+		} catch {
+			return c.json({ error: "invalid json body" }, 400);
+		}
+		const updates: Record<string, string | null> = {};
+		for (const kind of ["skills", "extensions"] as StarterKind[]) {
+			const value = body[kind];
+			if (value === undefined) continue;
+			if (typeof value !== "boolean") return c.json({ error: `${kind} must be a boolean` }, 400);
+			const key = STARTER_AUTO_INSTALL_ENV[kind];
+			if (!resolveEnvSetting(key).setting.editable) {
+				return c.json({ error: `${key} is set by the launching shell; unset it there to change it here` }, 409);
+			}
+			// Unset is the default (install); 0 turns the installer off.
+			updates[key] = value ? null : "0";
+		}
+		await commitManagedEnvUpdates(updates);
+		const set = Object.keys(updates).filter((k) => updates[k] !== null);
+		const unset = Object.keys(updates).filter((k) => updates[k] === null);
+		if (set.length > 0) await appendEnvAudit("set", set);
+		if (unset.length > 0) await appendEnvAudit("unset", unset);
+		const next = readStarters();
+		return next ? c.json(next) : c.json(noBackend, 503);
+	});
 
 	app.get("/starters/maintenance-gate", (c) => {
 		const body: MaintenanceGateState = readMaintenanceGateState();

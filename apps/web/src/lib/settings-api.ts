@@ -1,10 +1,14 @@
 import type { BackendStatusResponse, BackendSwitchResponse } from "@npi-deck/protocol";
 import type {
 	ListEnvSettingsResponse,
+	NotificationSettingsResponse,
 	PatchEnvSettingsRequest,
 	PatchEnvSettingsResponse,
 	RestartServerResponse,
 	RevealEnvValueResponse,
+	UpdateNotificationSettingsRequest,
+	UpdateWorkspaceSettingsRequest,
+	WorkspaceSettingsResponse,
 } from "@npi-deck/protocol";
 
 const BASE = "/api";
@@ -33,6 +37,24 @@ export const settingsApi = {
 	},
 	revealEnv(key: string): Promise<RevealEnvValueResponse> {
 		return req<RevealEnvValueResponse>(`/settings/env/${encodeURIComponent(key)}?reveal=1`);
+	},
+	getWorkspaces(): Promise<WorkspaceSettingsResponse> {
+		return req<WorkspaceSettingsResponse>("/settings/workspaces");
+	},
+	putWorkspaces(pinned: string[]): Promise<WorkspaceSettingsResponse> {
+		return req<WorkspaceSettingsResponse>("/settings/workspaces", {
+			method: "PUT",
+			body: JSON.stringify({ pinned } satisfies UpdateWorkspaceSettingsRequest),
+		});
+	},
+	getNotifications(): Promise<NotificationSettingsResponse> {
+		return req<NotificationSettingsResponse>("/settings/notifications");
+	},
+	putNotifications(disabled: UpdateNotificationSettingsRequest["disabled"]): Promise<NotificationSettingsResponse> {
+		return req<NotificationSettingsResponse>("/settings/notifications", {
+			method: "PUT",
+			body: JSON.stringify({ disabled } satisfies UpdateNotificationSettingsRequest),
+		});
 	},
 	restartServer(): Promise<RestartServerResponse> {
 		return req<RestartServerResponse>("/server/restart", { method: "POST" });

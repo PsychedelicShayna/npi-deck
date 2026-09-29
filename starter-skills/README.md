@@ -38,5 +38,5 @@ For full context see [ATTRIBUTION.md](./ATTRIBUTION.md) and the task that drove 
 
 ## Disabling
 
-Set `NPI_DECK_INSTALL_STARTER_SKILLS=0` to skip the bootstrap entirely.
+Set `NPI_DECK_INSTALL_STARTER_SKILLS=0` (or `false`/`no`/`off`, or untick it in Settings → Starters) to skip the bootstrap entirely.
 Set `NPI_DECK_STARTER_SKILLS_DIR=<path>` to override the source directory.

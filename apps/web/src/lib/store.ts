@@ -6,6 +6,7 @@ import type {
 	ExtUiDialogResponse,
 	ListSessionsResponse,
 	ListWorkspacesResponse,
+	NotificationKind,
 	NotificationLevel,
 	PendingPlanApprovalWire,
 	PlanModeContextWire,
@@ -23,6 +24,7 @@ import type {
  */
 export interface NotificationItem {
 	id: string;
+	kind: NotificationKind;
 	level: NotificationLevel;
 	title: string;
 	body?: string;
@@ -777,6 +779,7 @@ function handleFrame(
 				if (s.notifications.some((n) => n.id === frame.id)) return {};
 				const item: NotificationItem = {
 					id: frame.id,
+					kind: frame.kind,
 					level: frame.level,
 					title: frame.title,
 					timestamp: frame.timestamp,

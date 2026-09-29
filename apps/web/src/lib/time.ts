@@ -60,6 +60,18 @@ export function formatBriefTime(iso: string, now: number = Date.now()): string {
 	return `${mm}/${dd}/${yy}`;
 }
 
+/** Elapsed time since `startedIso` as "42s", "5m", "3h12m" or "2d4h". */
+export function formatUptime(startedIso: string, now: number = Date.now()): string {
+	const seconds = Math.max(0, Math.floor((now - Date.parse(startedIso)) / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	if (minutes < 60) return `${minutes}m`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return `${hours}h${minutes % 60}m`;
+	const days = Math.floor(hours / 24);
+	return `${days}d${hours % 24}h`;
+}
+
 function pad2(n: number): string {
 	return n < 10 ? `0${n}` : String(n);
 }

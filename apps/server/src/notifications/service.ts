@@ -7,6 +7,10 @@
  * supports adding more channels later (telegram, email, push) without
  * touching call sites — `register` is the seam.
  *
+ * A payload whose `kind` is listed in `NPI_DECK_NOTIFICATIONS_DISABLED`
+ * (Settings → Notifications) is dropped before any channel sees it. The
+ * variable is read on every notify, so a Settings save applies at once.
+ *
  * Channel handlers MUST be idempotent w.r.t. notification id: a transport
  * could deliver twice on reconnect; the channel decides how to dedupe (the
  * browser channel doesn't bother — clients ignore duplicate ids via the
@@ -14,6 +18,7 @@
  */
 
 import { logger } from "../log.ts";
+import { NOTIFICATIONS_DISABLED_ENV, parseDisabledKinds } from "./kinds.ts";
 import type {
 	NotificationChannel,
 	NotificationEnvelope,
@@ -48,12 +53,18 @@ export class NotificationService {
 	}
 
 	/**
-	 * Fire a notification across every channel. Returns a promise that
-	 * resolves once all channels have either delivered or thrown. Caller is
-	 * expected to fire-and-forget unless they specifically need to await
-	 * delivery (e.g. test code).
+	 * Fire a notification across every channel. Resolves once all channels
+	 * have either delivered or thrown, with the envelope they received, or
+	 * null when the payload's kind is switched off. Caller is expected to
+	 * fire-and-forget unless they specifically need to await delivery (e.g.
+	 * test code).
 	 */
-	async notify(payload: NotificationPayload): Promise<NotificationEnvelope> {
+	async notify(payload: NotificationPayload): Promise<NotificationEnvelope | null> {
+		if (parseDisabledKinds(process.env[NOTIFICATIONS_DISABLED_ENV]).has(payload.kind)) {
+			log.debug(`notify (${payload.kind} disabled): ${payload.level} ${payload.title}`);
+			return null;
+		}
+
 		// Default sound: true for warn and above. Explicit false respected.
 		const sound =
 			payload.sound !== undefined

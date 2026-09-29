@@ -13,7 +13,7 @@
  * a fresh `omp` install with npi-deck picks them up automatically; deleting
  * the destination dir + restarting the deck restores them.
  *
- * Disable with `NPI_DECK_INSTALL_STARTER_EXTENSIONS=0`.
+ * Disable with `NPI_DECK_INSTALL_STARTER_EXTENSIONS=0` (or Settings → Starters).
  *
  * The source dir comes from `starterExtensionsDir()` (assets.ts;
  * `NPI_DECK_STARTER_EXTENSIONS_DIR` overrides).
@@ -26,6 +26,7 @@ import * as path from "node:path";
 import { starterExtensionsDir } from "./assets.ts";
 import { sdk } from "./backend/runtime.ts";
 import { logger } from "./log.ts";
+import { starterAutoInstallEnabled } from "./starters.ts";
 
 const log = logger("starter-extensions");
 
@@ -34,9 +35,9 @@ export interface StarterExtensionInstallResult {
 	skipped: string[];
 }
 
-export async function installStarterExtensions(): Promise<StarterExtensionInstallResult> {
-	if (process.env.NPI_DECK_INSTALL_STARTER_EXTENSIONS === "0") {
-		log.info("starter extensions install disabled via NPI_DECK_INSTALL_STARTER_EXTENSIONS=0");
+export async function installStarterExtensions(agentDir = sdk().getAgentDir()): Promise<StarterExtensionInstallResult> {
+	if (!starterAutoInstallEnabled("extensions")) {
+		log.info("starter extensions install disabled via NPI_DECK_INSTALL_STARTER_EXTENSIONS");
 		return { installed: [], skipped: [] };
 	}
 
@@ -46,7 +47,7 @@ export async function installStarterExtensions(): Promise<StarterExtensionInstal
 		return { installed: [], skipped: [] };
 	}
 
-	const targetRoot = path.join(sdk().getAgentDir(), "extensions");
+	const targetRoot = path.join(agentDir, "extensions");
 
 	let entries;
 	try {

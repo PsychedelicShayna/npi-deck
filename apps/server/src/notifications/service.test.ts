@@ -45,7 +45,7 @@ describe("NotificationService", () => {
 		const channel = new RecordingChannel();
 		svc.register(channel);
 
-		const env = await svc.notify({ level: "info", title: "hello" });
+		const env = (await svc.notify({ kind: "routine_failed", level: "info", title: "hello" }))!;
 
 		expect(env.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 		expect(env.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
@@ -58,10 +58,10 @@ describe("NotificationService", () => {
 		const ch = new RecordingChannel();
 		svc.register(ch);
 
-		await svc.notify({ level: "info", title: "i" });
-		await svc.notify({ level: "warn", title: "w" });
-		await svc.notify({ level: "error", title: "e" });
-		await svc.notify({ level: "critical", title: "c" });
+		await svc.notify({ kind: "routine_failed", level: "info", title: "i" });
+		await svc.notify({ kind: "routine_failed", level: "warn", title: "w" });
+		await svc.notify({ kind: "routine_failed", level: "error", title: "e" });
+		await svc.notify({ kind: "routine_failed", level: "critical", title: "c" });
 
 		expect(ch.received.map((e) => e.sound)).toEqual([false, true, true, true]);
 	});
@@ -71,7 +71,7 @@ describe("NotificationService", () => {
 		const ch = new RecordingChannel();
 		svc.register(ch);
 
-		await svc.notify({ level: "critical", title: "silent crit", sound: false });
+		await svc.notify({ kind: "routine_failed", level: "critical", title: "silent crit", sound: false });
 
 		expect(ch.received[0]?.sound).toBe(false);
 	});
@@ -83,7 +83,7 @@ describe("NotificationService", () => {
 		svc.register(a);
 		svc.register(b);
 
-		const env = await svc.notify({ level: "warn", title: "fan-out" });
+		const env = (await svc.notify({ kind: "routine_failed", level: "warn", title: "fan-out" }))!;
 
 		expect(a.received).toHaveLength(1);
 		expect(b.received).toHaveLength(1);
@@ -98,7 +98,7 @@ describe("NotificationService", () => {
 		svc.register(failing);
 		svc.register(good);
 
-		await svc.notify({ level: "error", title: "isolate-me" });
+		await svc.notify({ kind: "routine_failed", level: "error", title: "isolate-me" });
 
 		expect(good.received).toHaveLength(1);
 		expect(good.received[0]?.title).toBe("isolate-me");
@@ -111,7 +111,7 @@ describe("NotificationService", () => {
 		svc.register(first);
 		svc.register(second);
 
-		await svc.notify({ level: "info", title: "x" });
+		await svc.notify({ kind: "routine_failed", level: "info", title: "x" });
 
 		expect(svc.listChannels()).toEqual(["dup"]);
 		expect(first.received).toHaveLength(0);
@@ -126,7 +126,7 @@ describe("NotificationService", () => {
 		expect(svc.unregister("temp")).toBe(true);
 		expect(svc.unregister("temp")).toBe(false);
 
-		await svc.notify({ level: "info", title: "after-unreg" });
+		await svc.notify({ kind: "routine_failed", level: "info", title: "after-unreg" });
 
 		expect(ch.received).toHaveLength(0);
 	});
@@ -134,7 +134,7 @@ describe("NotificationService", () => {
 	test("no channels registered: notify still returns an envelope", async () => {
 		const svc = new NotificationService();
 
-		const env = await svc.notify({ level: "info", title: "into the void" });
+		const env = (await svc.notify({ kind: "routine_failed", level: "info", title: "into the void" }))!;
 
 		expect(env.title).toBe("into the void");
 		expect(env.id).toBeTruthy();
@@ -147,7 +147,7 @@ describe("NotificationService", () => {
 
 		const levels: NotificationLevel[] = ["info", "warn", "error", "critical"];
 		for (const level of levels) {
-			await svc.notify({ level, title: `t-${level}` });
+			await svc.notify({ kind: "routine_failed", level, title: `t-${level}` });
 		}
 
 		expect(ch.received.map((e) => e.level)).toEqual(levels);
@@ -159,6 +159,7 @@ describe("NotificationService", () => {
 		svc.register(ch);
 
 		await svc.notify({
+			kind: "routine_failed",
 			level: "warn",
 			title: "with-extras",
 			body: "more detail",

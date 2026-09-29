@@ -955,6 +955,7 @@ export class InProcessAgentBridge implements AgentBridge {
 		if (!alternative) return;
 		const altProvider = String(alternative.provider);
 		await notificationService.notify({
+			kind: "auth_fallback",
 			level: "warn",
 			title: `Authentication failed for ${current.provider}/${current.id}`,
 			body: `You appear to be authenticated for the same model under \`${altProvider}\` (subscription). Switch in the model picker to use your subscription instead.\n\nOriginal error: ${errorMessage.slice(0, 240)}`,

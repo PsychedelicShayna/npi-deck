@@ -1,16 +1,18 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtempSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ListEnvSettingsResponse, RestartServerResponse } from "@npi-deck/protocol";
+import type { ListEnvSettingsResponse, NotificationSettingsResponse, RestartServerResponse, WorkspaceSettingsResponse } from "@npi-deck/protocol";
 
 import type { AgentBridge } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
 import { MANAGED_ENV_KEYS_LOADED, readManagedEnvFile } from "./env-store.ts";
+import { NotificationService } from "./notifications/service.ts";
+import type { NotificationEnvelope } from "./notifications/types.ts";
 import { buildSettingsRouter } from "./routes-settings.ts";
 import { PROXY_PEER_HEADER } from "./request-peer.ts";
 
-const ENV_KEYS = ["NPI_DECK_HOME", "NPI_DECK_DEFAULT_CWD", "NPI_DECK_WORKSPACES"];
+const ENV_KEYS = ["NPI_DECK_HOME", "NPI_DECK_DEFAULT_CWD", "NPI_DECK_WORKSPACES", "NPI_DECK_NOTIFICATIONS_DISABLED"];
 
 let saved: Record<string, string | undefined>;
 let dataDir: string;
@@ -30,9 +32,19 @@ afterEach(() => {
 	}
 });
 
-function buildApp(restartServer?: () => RestartServerResponse) {
-	const config = { defaultCwd: os.homedir(), extraWorkspaces: [] as string[] } as unknown as Config;
+function buildApp(
+	config = { defaultCwd: os.homedir(), extraWorkspaces: [] as string[] } as unknown as Config,
+	restartServer?: () => RestartServerResponse,
+) {
 	return buildSettingsRouter({} as AgentBridge, config, { restartServer });
+}
+
+function put(app: ReturnType<typeof buildApp>, url: string, body: unknown) {
+	return app.request(`http://127.0.0.1${url}`, {
+		method: "PUT",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
 }
 
 function patch(app: ReturnType<typeof buildApp>, updates: Record<string, string | null>) {
@@ -93,7 +105,7 @@ describe("privileged routes authorize by socket peer, not Host (#79)", () => {
 	function setup() {
 		process.env.NPI_DECK_WORKSPACES = SECRET;
 		let restarts = 0;
-		const app = buildApp(() => {
+		const app = buildApp(undefined, () => {
 			restarts++;
 			return { ok: true, message: "restarting" };
 		});
@@ -170,5 +182,117 @@ describe("privileged routes authorize by socket peer, not Host (#79)", () => {
 		expect((await app.request(REVEAL, { headers }, { peerAddress: "192.168.1.50" })).status).toBe(403);
 		expect((await app.request(RESTART, { method: "POST", headers }, { peerAddress: "192.168.1.50" })).status).toBe(403);
 		expect(restarts()).toBe(0);
+	});
+});
+
+describe("Settings → Workspaces (#98)", () => {
+	test("saving pinned roots persists them and updates the live picker list without a restart", async () => {
+		const a = path.join(dataDir, "ws-a");
+		const b = path.join(dataDir, "ws-b");
+		mkdirSync(a);
+		mkdirSync(b);
+		const config = { defaultCwd: os.homedir(), extraWorkspaces: [] as string[] } as unknown as Config;
+		const app = buildApp(config);
+
+		const res = await put(app, "/settings/workspaces", { pinned: [a, `${b}/`, a] });
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as WorkspaceSettingsResponse;
+		expect(body.pinned).toEqual([
+			{ cwd: a, label: "ws-a", exists: true },
+			{ cwd: b, label: "ws-b", exists: true },
+		]);
+		expect(config.extraWorkspaces).toEqual([a, b]);
+		expect(readManagedEnvFile().values.get("NPI_DECK_WORKSPACES")).toBe(`${a},${b}`);
+
+		// Removing one is the same save with a shorter list.
+		const removed = (await (await put(app, "/settings/workspaces", { pinned: [b] })).json()) as WorkspaceSettingsResponse;
+		expect(removed.pinned.map((p) => p.cwd)).toEqual([b]);
+		expect(config.extraWorkspaces).toEqual([b]);
+	});
+
+	test("a root that is not an existing absolute directory is refused and nothing changes", async () => {
+		const file = path.join(dataDir, "not-a-dir");
+		await Bun.write(file, "x");
+		const config = { defaultCwd: os.homedir(), extraWorkspaces: [] as string[] } as unknown as Config;
+		const app = buildApp(config);
+		for (const bad of [path.join(dataDir, "missing"), file, "relative/dir", path.join(dataDir, "a,b")]) {
+			const res = await put(app, "/settings/workspaces", { pinned: [bad] });
+			expect(res.status).toBe(400);
+		}
+		expect(config.extraWorkspaces).toEqual([]);
+		expect(readManagedEnvFile().values.has("NPI_DECK_WORKSPACES")).toBe(false);
+	});
+
+	test("a pinned root deleted from disk is listed as missing", async () => {
+		const gone = path.join(dataDir, "gone");
+		mkdirSync(gone);
+		const app = buildApp();
+		expect((await put(app, "/settings/workspaces", { pinned: [gone] })).status).toBe(200);
+		rmSync(gone, { recursive: true });
+		const body = (await (await app.request("http://127.0.0.1/settings/workspaces")).json()) as WorkspaceSettingsResponse;
+		expect(body.pinned).toEqual([{ cwd: gone, label: "gone", exists: false }]);
+		expect(body.setting).toEqual({ key: "NPI_DECK_WORKSPACES", source: "env-file", editable: true });
+	});
+
+	test("roots exported by the launching shell are read-only: saving would not take effect", async () => {
+		process.env.NPI_DECK_WORKSPACES = dataDir;
+		// loadConfig() read the exported value at launch.
+		const config = { defaultCwd: os.homedir(), extraWorkspaces: [dataDir] } as unknown as Config;
+		const app = buildApp(config);
+		const body = (await (await app.request("http://127.0.0.1/settings/workspaces")).json()) as WorkspaceSettingsResponse;
+		expect(body.setting).toEqual({ key: "NPI_DECK_WORKSPACES", source: "process-env", editable: false });
+		expect(body.pinned.map((p) => p.cwd)).toEqual([dataDir]);
+		expect((await put(app, "/settings/workspaces", { pinned: [] })).status).toBe(409);
+		expect(readManagedEnvFile().values.has("NPI_DECK_WORKSPACES")).toBe(false);
+		expect(config.extraWorkspaces).toEqual([dataDir]);
+	});
+});
+
+describe("Settings → Notifications (#98)", () => {
+	async function deliveredKinds(): Promise<string[]> {
+		const received: NotificationEnvelope[] = [];
+		const svc = new NotificationService();
+		svc.register({ id: "rec", deliver: (e) => void received.push(e) });
+		await svc.notify({ kind: "routine_failed", level: "error", title: "r" });
+		await svc.notify({ kind: "task_shipped", level: "info", title: "t" });
+		await svc.notify({ kind: "auth_fallback", level: "warn", title: "a" });
+		return received.map((e) => e.kind);
+	}
+
+	test("every source is listed with its trigger and is on by default", async () => {
+		const body = (await (await buildApp().request("http://127.0.0.1/settings/notifications")).json()) as NotificationSettingsResponse;
+		expect(body.sources.map((s) => [s.kind, s.enabled])).toEqual([
+			["routine_failed", true],
+			["task_shipped", true],
+			["auth_fallback", true],
+		]);
+		for (const source of body.sources) expect(source.trigger.length).toBeGreaterThan(20);
+		expect(await deliveredKinds()).toEqual(["routine_failed", "task_shipped", "auth_fallback"]);
+	});
+
+	test("switching a source off stops the server emitting it, live; switching it back on restores it", async () => {
+		const app = buildApp();
+		const res = await put(app, "/settings/notifications", { disabled: ["task_shipped"] });
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as NotificationSettingsResponse;
+		expect(body.sources.find((s) => s.kind === "task_shipped")?.enabled).toBe(false);
+		expect(await deliveredKinds()).toEqual(["routine_failed", "auth_fallback"]);
+
+		expect((await put(app, "/settings/notifications", { disabled: [] })).status).toBe(200);
+		expect(await deliveredKinds()).toEqual(["routine_failed", "task_shipped", "auth_fallback"]);
+	});
+
+	test("an unknown source is refused", async () => {
+		expect((await put(buildApp(), "/settings/notifications", { disabled: ["bogus"] })).status).toBe(400);
+		expect(readManagedEnvFile().values.has("NPI_DECK_NOTIFICATIONS_DISABLED")).toBe(false);
+	});
+
+	test("a shell-exported switch is read-only", async () => {
+		process.env.NPI_DECK_NOTIFICATIONS_DISABLED = "auth_fallback";
+		const app = buildApp();
+		const body = (await (await app.request("http://127.0.0.1/settings/notifications")).json()) as NotificationSettingsResponse;
+		expect(body.setting.editable).toBe(false);
+		expect(body.sources.find((s) => s.kind === "auth_fallback")?.enabled).toBe(false);
+		expect((await put(app, "/settings/notifications", { disabled: [] })).status).toBe(409);
 	});
 });

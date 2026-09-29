@@ -9,7 +9,11 @@ import type {
 	GateKnob,
 	ListEnvSettingsResponse,
 	MaintenanceGateState,
+	NotificationKind,
 	NotificationLevel,
+	NotificationSettingsResponse,
+	StarterGroup,
+	StartersResponse,
 } from "@npi-deck/protocol";
 import type { ProviderInfo } from "@npi-deck/protocol";
 
@@ -21,6 +25,9 @@ import { OAuthFlowModal } from "@/components/settings/OAuthFlowModal";
 import { ModelsConfigSection } from "@/components/settings/ModelsConfigSection";
 import { NpiConfigSection } from "@/components/settings/NpiConfigSection";
 import { McpServersSection } from "@/components/settings/McpServersSection";
+import { WorkspacesSection } from "@/components/settings/WorkspacesSection";
+import { AboutSection } from "@/components/settings/AboutSection";
+import { apiErrorText } from "@/components/settings/api-error";
 import { bridgesApi } from "@/lib/bridges-api";
 import { settingsApi } from "@/lib/settings-api";
 import { startersApi } from "@/lib/starters-api";
@@ -29,6 +36,7 @@ import { playNotificationTone } from "@/lib/audio";
 import { useNotificationPermission } from "@/lib/notifications";
 import { useStore, type NotificationItem } from "@/lib/store";
 import { THEMES, useTheme } from "@/lib/theme";
+import { formatUptime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 const SECTIONS = [
@@ -39,10 +47,10 @@ const SECTIONS = [
 	{ id: "mcp", label: "MCP servers", description: "Model Context Protocol servers and scopes" },
 	{ id: "providers", label: "Providers", description: "OAuth sign-in and API-key state" },
 	{ id: "messaging", label: "Messaging", description: "Telegram and future chat bridges" },
-	{ id: "starters", label: "Starters", description: "Opt-in starter extensions" },
+	{ id: "starters", label: "Starters", description: "Skills and extensions the deck bundles" },
 	{ id: "appearance", label: "Appearance", description: "Themes, colors, fonts" },
-	{ id: "workspaces", label: "Workspaces", description: "Pinned roots and display names" },
-	{ id: "notifications", label: "Notifications", description: "Idle alerts and quiet hours" },
+	{ id: "workspaces", label: "Workspaces", description: "Folders the session picker offers" },
+	{ id: "notifications", label: "Notifications", description: "What alerts you, and how" },
 	{ id: "about", label: "About", description: "Version, paths, diagnostics" },
 ] as const;
 
@@ -108,8 +116,10 @@ export function SettingsView() {
 								<AppearanceSection />
 							) : selected === "notifications" ? (
 								<NotificationsSection />
+							) : selected === "workspaces" ? (
+								<WorkspacesSection />
 							) : (
-								<StubSection section={selected} />
+								<AboutSection />
 							)}
 						</section>
 					</div>
@@ -766,10 +776,9 @@ function AppearanceSection() {
 }
 
 /**
- * Notifications settings — surfaces the bits T-85 already plumbed:
- * browser-permission state with a request CTA, audio toggle, per-level tone
- * preview, a way to re-show the dismissed permission banner, server identity
- * pulled from the heartbeat frame, and a tail of the in-app notification log.
+ * Notifications settings: which server events notify (per source, saved on
+ * the server), then how this browser delivers them (OS permission, audio,
+ * the permission banner), then the in-memory log of recent ones.
  */
 function NotificationsSection() {
 	const {
@@ -779,7 +788,6 @@ function NotificationsSection() {
 		setAudioEnabled,
 		bannerDismissed,
 	} = useNotificationPermission();
-	const heartbeat = useStore((s) => s.heartbeat);
 	const notifications = useStore((s) => s.notifications);
 	const dismissNotification = useStore((s) => s.dismissNotification);
 
@@ -791,23 +799,20 @@ function NotificationsSection() {
 		[notifications],
 	);
 
-	// Heartbeat-age clock so "5s ago" updates without re-receiving a frame.
-	// Ticks only while the panel is mounted; cheap.
-	const [nowMs, setNowMs] = useState(() => Date.now());
-	useEffect(() => {
-		const handle = window.setInterval(() => setNowMs(Date.now()), 1000);
-		return () => window.clearInterval(handle);
-	}, []);
-
 	return (
 		<div className="mx-auto max-w-3xl space-y-4">
 			<div>
 				<h1 className="text-xl font-semibold tracking-tight">Notifications</h1>
 				<p className="mt-1 text-sm text-ink-3">
-					Browser notifications and audio cues for routine failures, agent activity,
-					and other server-emitted events. Settings live in this browser only.
+					The deck server sends a notification when one of the events below happens. It appears as a
+					toast in every open deck tab, as an OS notification once this browser allows them, and with
+					an audio cue for warnings, errors and shipped tasks while audio is on. Switching a source off
+					stops the server sending it to every browser. Permission, audio and the banner below apply to
+					this browser only.
 				</p>
 			</div>
+
+			<NotificationSourcesCard />
 
 			<PermissionCard
 				permission={permission}
@@ -834,8 +839,6 @@ function NotificationsSection() {
 					window.location.reload();
 				}}
 			/>
-
-			<ServerIdentityCard heartbeat={heartbeat} nowMs={nowMs} />
 
 			<RecentNotificationsCard
 				items={recent}
@@ -888,8 +891,8 @@ function PermissionCard({
 					</>
 				) : permission === "granted" ? (
 					<>
-						OS notifications will fire for items the server marks important
-						(routine failures, long-running steps, agent task completions).
+						The OS shows a notification for every source switched on above, including while
+						the deck tab is in the background.
 					</>
 				) : permission === "denied" ? (
 					<>
@@ -1001,53 +1004,77 @@ function BannerResetCard({
 	);
 }
 
-function ServerIdentityCard({
-	heartbeat,
-	nowMs,
-}: {
-	heartbeat:
-		| {
-				lastReceivedAtMs: number;
-				serverStartedAt: string;
-				pid: number;
-				uptimeSecs: number;
-				buildSha: string | null;
-				version: string;
-		  }
-		| null;
-	nowMs: number;
-}) {
-	if (!heartbeat) {
-		return (
-			<div className="rounded-md border border-line bg-paper-2 p-4 text-xs text-ink-3">
-				<div className="meta mb-1">Server identity</div>
-				Waiting for the first heartbeat…
-			</div>
-		);
+/** Per-source switches for server-emitted notifications, saved as `NPI_DECK_NOTIFICATIONS_DISABLED`. */
+function NotificationSourcesCard() {
+	const [data, setData] = useState<NotificationSettingsResponse | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+
+	useEffect(() => {
+		settingsApi.getNotifications().then(setData, (err) => setError(apiErrorText(err)));
+	}, []);
+
+	async function toggle(kind: NotificationKind, enabled: boolean): Promise<void> {
+		if (!data) return;
+		const disabled = data.sources
+			.filter((s) => (s.kind === kind ? !enabled : !s.enabled))
+			.map((s) => s.kind);
+		setBusy(true);
+		try {
+			setData(await settingsApi.putNotifications(disabled));
+			setError(undefined);
+		} catch (err) {
+			setError(apiErrorText(err));
+		} finally {
+			setBusy(false);
+		}
 	}
-	const ageMs = Math.max(0, nowMs - heartbeat.lastReceivedAtMs);
-	const ageTone: "success" | "warn" | "danger" =
-		ageMs < 10_000 ? "success" : ageMs < 30_000 ? "warn" : "danger";
-	const ageLabel = ageMs < 1_000 ? "just now" : `${Math.round(ageMs / 1000)}s ago`;
-	const shortSha = heartbeat.buildSha ? heartbeat.buildSha.slice(0, 7) : "unknown";
+
 	return (
-		<div className="rounded-md border border-line bg-paper-2 p-4">
-			<div className="flex flex-wrap items-center justify-between gap-3">
-				<div className="meta">Server identity</div>
-				<Badge tone={ageTone}>last heartbeat {ageLabel}</Badge>
+		<div className="overflow-hidden rounded-md border border-line bg-paper">
+			<div className="border-b border-line bg-paper-2 px-3 py-2">
+				<div className="meta">Sources</div>
+				<div className="mt-0.5 text-xs text-ink-3">
+					Every event the server notifies about. Saved on the server; applies at once.
+				</div>
 			</div>
-			<dl className="mt-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 font-mono text-xs text-ink-2">
-				<dt className="text-ink-3">pid</dt>
-				<dd>{heartbeat.pid}</dd>
-				<dt className="text-ink-3">version</dt>
-				<dd>{heartbeat.version}</dd>
-				<dt className="text-ink-3">build</dt>
-				<dd>{shortSha}</dd>
-				<dt className="text-ink-3">started</dt>
-				<dd>{new Date(heartbeat.serverStartedAt).toLocaleString()}</dd>
-				<dt className="text-ink-3">uptime</dt>
-				<dd>{formatUptime(heartbeat.serverStartedAt)}</dd>
-			</dl>
+			{error ? (
+				<div role="alert" className="border-b border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+					{error}
+				</div>
+			) : null}
+			{data && !data.setting.editable ? (
+				<div role="note" className="border-b border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
+					The shell that launched the deck exports <span className="font-mono">{data.setting.key}</span>, and
+					that value overrides the deck&rsquo;s .env. Unset it there and restart the deck to change these here.
+				</div>
+			) : null}
+			{data ? (
+				<ul className="divide-y divide-line">
+					{data.sources.map((source) => (
+						<li key={source.kind} className="flex items-start gap-3 px-3 py-3">
+							<input
+								id={`notification-source-${source.kind}`}
+								type="checkbox"
+								className="mt-1"
+								checked={source.enabled}
+								disabled={busy || !data.setting.editable}
+								onChange={(e) => void toggle(source.kind, e.target.checked)}
+							/>
+							<label htmlFor={`notification-source-${source.kind}`} className="min-w-0 flex-1">
+								<div className="flex items-center gap-2 text-sm font-medium text-ink">
+									{source.label}
+									<Badge tone={notificationLevelTone(source.level)}>{source.level}</Badge>
+									{!source.enabled ? <Badge tone="muted">off</Badge> : null}
+								</div>
+								<div className="mt-0.5 text-xs text-ink-3">{source.trigger}</div>
+							</label>
+						</li>
+					))}
+				</ul>
+			) : error ? null : (
+				<div className="px-3 py-4 text-xs text-ink-3">Loading...</div>
+			)}
 		</div>
 	);
 }
@@ -1064,8 +1091,8 @@ function RecentNotificationsCard({
 			<div className="border-b border-line bg-paper-2 px-3 py-2">
 				<div className="meta">Recent activity</div>
 				<div className="mt-0.5 text-xs text-ink-3">
-					Latest server-emitted notifications. Capped at 50 in memory; this list
-					shows the freshest 20.
+					Notifications this tab has received since it loaded, newest first. The tab keeps
+					the latest 50 and lists 20.
 				</div>
 			</div>
 			{items.length === 0 ? (
@@ -1090,6 +1117,7 @@ function RecentNotificationsCard({
 								) : null}
 								<div className="mt-1 font-mono text-2xs text-ink-3">
 									{new Date(item.timestamp).toLocaleString()}
+									{` · ${item.kind}`}
 									{item.source ? ` · ${item.source}` : ""}
 								</div>
 							</div>
@@ -1190,20 +1218,133 @@ function ThemeSwatchStrip({ definition }: { definition: (typeof THEMES)[number] 
 }
 
 /**
- * Starters section — config for opt-in starter extensions the deck manages.
- * Today that is the maintenance gate.
+ * Starters section: what starters are, each bundled skill and extension with
+ * its installed state and launch-time copy switch, then the maintenance
+ * gate's settings (the one starter extension that has any).
  */
 function StartersSection() {
+	const [data, setData] = useState<StartersResponse | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | undefined>();
+
+	useEffect(() => {
+		startersApi.list().then(setData, (err) => setError(apiErrorText(err)));
+	}, []);
+
+	async function setAutoInstall(kind: "skills" | "extensions", enabled: boolean): Promise<void> {
+		setBusy(true);
+		try {
+			setData(await startersApi.putAutoInstall({ [kind]: enabled }));
+			setError(undefined);
+		} catch (err) {
+			setError(apiErrorText(err));
+		} finally {
+			setBusy(false);
+		}
+	}
+
 	return (
 		<div className="mx-auto max-w-5xl space-y-6">
 			<div>
 				<h1 className="text-xl font-semibold tracking-tight">Starters</h1>
-				<p className="mt-1 max-w-3xl text-sm text-ink-3">
-					Opt-in starter extensions. Changes take effect on the extension&rsquo;s
-					next evaluation.
-				</p>
+				<div className="mt-1 max-w-3xl space-y-2 text-sm text-ink-3">
+					<p>
+						Starters are skills and extensions that ship with the deck, so NeoPi has them without a trip
+						to the marketplace. A skill is a set of instructions the agent loads when a task calls for it,
+						or when you ask for it by name, such as <span className="font-mono">/skill:handoff</span>. An
+						extension is code NeoPi runs inside every session, in the deck and in the terminal alike.
+					</p>
+					<p>
+						Each time the deck launches, it copies any starter missing from your NeoPi agent directory. It
+						never overwrites a copy that is already there, so once installed, a starter is yours to edit.
+						Deleting one only lasts until the next launch; to keep it gone, switch the copy off below.
+					</p>
+				</div>
 			</div>
+			{error ? (
+				<div role="alert" className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 font-mono text-xs text-danger">
+					{error}
+				</div>
+			) : null}
+			{data ? (
+				<>
+					<StarterGroupCard
+						title="Starter skills"
+						group={data.skills}
+						busy={busy}
+						onToggle={(enabled) => void setAutoInstall("skills", enabled)}
+					/>
+					<StarterGroupCard
+						title="Starter extensions"
+						group={data.extensions}
+						busy={busy}
+						onToggle={(enabled) => void setAutoInstall("extensions", enabled)}
+					/>
+				</>
+			) : error ? null : (
+				<div className="text-sm text-ink-3">Loading...</div>
+			)}
 			<MaintenanceGateCard />
+		</div>
+	);
+}
+
+function StarterGroupCard({
+	title,
+	group,
+	busy,
+	onToggle,
+}: {
+	title: string;
+	group: StarterGroup;
+	busy: boolean;
+	onToggle: (enabled: boolean) => void;
+}) {
+	const inputId = `starter-auto-install-${group.setting.key}`;
+	return (
+		<div className="overflow-hidden rounded-md border border-line bg-paper">
+			<div className="border-b border-line bg-paper-2 px-3 py-2">
+				<div className="meta">{title}</div>
+				<div className="mt-1 space-y-0.5 font-mono text-2xs text-ink-3">
+					<div>bundled in: {group.sourceDir ?? "not found; nothing to copy"}</div>
+					<div>installed to: {group.targetDir}</div>
+				</div>
+				<div className="mt-2 flex items-center gap-2 text-sm">
+					<input
+						id={inputId}
+						type="checkbox"
+						checked={group.autoInstall}
+						disabled={busy || !group.setting.editable}
+						onChange={(e) => onToggle(e.target.checked)}
+					/>
+					<label htmlFor={inputId}>Copy missing starters when the deck launches</label>
+					<span className="font-mono text-2xs text-ink-3">{group.setting.key}</span>
+				</div>
+				<div className="mt-1 text-xs text-ink-3">
+					{group.setting.editable
+						? "Takes effect the next time the deck launches."
+						: `The shell that launched the deck exports ${group.setting.key}, which overrides the deck's .env. Change it there.`}
+				</div>
+			</div>
+			{group.items.length === 0 ? (
+				<div className="px-3 py-4 text-xs text-ink-3">This deck bundles none.</div>
+			) : (
+				<ul className="divide-y divide-line">
+					{group.items.map((item) => (
+						<li key={item.name} className="flex items-start gap-3 px-3 py-2">
+							<div className="min-w-0 flex-1">
+								<div className="font-mono text-sm text-ink">{item.name}</div>
+								{item.description ? <div className="mt-0.5 text-xs text-ink-3">{item.description}</div> : null}
+							</div>
+							{item.installed ? (
+								<Badge tone="success" title={item.installedPath}>installed</Badge>
+							) : (
+								<Badge tone="muted" title={item.installedPath}>not installed</Badge>
+							)}
+						</li>
+					))}
+				</ul>
+			)}
 		</div>
 	);
 }
@@ -1303,11 +1444,11 @@ function MaintenanceGateCard() {
 					{profile === "inactive" ? <Badge tone="muted">inactive</Badge> : null}
 				</div>
 				<p className="mt-1 text-xs text-ink-3">
-					Nudges the agent at <code className="font-mono">turn_end</code> to capture
-					insights / decisions / tasks into the appropriate destination. Fires at
-					most once per release segment, gated by three floors. Disabling here
-					skips org-root detection so even an unaltered installed extension
-					stays silent.
+					When the agent finishes a turn, this extension reminds it to save anything worth keeping
+					(an insight, a decision, a task) before the conversation moves on. It reminds at most once
+					until the agent saves something or says nothing needs saving, and only after all three
+					thresholds below have passed. Switching it off silences it in new sessions, even when the
+					extension is installed.
 				</p>
 				<div className="mt-1 space-y-0.5 font-mono text-2xs text-ink-3">
 					<div>extension: {data?.installedExtensionPath ?? "..."}</div>
@@ -1448,17 +1589,6 @@ function GateKnobInput({
 	);
 }
 
-function StubSection({ section }: { section: Exclude<SectionId, "env" | "messaging" | "appearance" | "notifications"> }) {
-	const spec = SECTIONS.find((s) => s.id === section)!;
-	return (
-		<div className="mx-auto max-w-3xl rounded-md border border-dashed border-line bg-paper-2 p-6">
-			<div className="meta">{spec.label}</div>
-			<h1 className="mt-2 text-xl font-semibold">Not built yet</h1>
-			<p className="mt-1 text-sm text-ink-3">This section is reserved so the settings layout is stable.</p>
-		</div>
-	);
-}
-
 function SettingsSideRail() {
 	return <div className="p-3 text-xs text-ink-3">Settings</div>;
 }
@@ -1508,17 +1638,6 @@ function bridgeStatusLabel(status: BridgeInfo["status"], info: BridgeInfo | unde
 	if (status === "crashed") return info?.exitSignal ? `crashed (${info.exitSignal})` : "crashed";
 	if (info && info.missingEnv.length > 0) return "missing credentials";
 	return "stopped";
-}
-
-function formatUptime(startedIso: string): string {
-	const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(startedIso)) / 1000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m`;
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) return `${hours}h${minutes % 60}m`;
-	const days = Math.floor(hours / 24);
-	return `${days}d${hours % 24}h`;
 }
 
 /**

@@ -1,4 +1,7 @@
-import type { EnvRestartTarget, EnvValueType } from "@npi-deck/protocol";
+import type { EnvBackedSetting, EnvRestartTarget, EnvValueSource, EnvValueType } from "@npi-deck/protocol";
+
+import { MANAGED_ENV_KEYS_LOADED, readManagedEnvFile } from "./env-store.ts";
+import { NOTIFICATIONS_DISABLED_ENV, NOTIFICATION_SOURCES, isNotificationKind } from "./notifications/kinds.ts";
 
 export interface EnvSchemaEntry {
 	key: string;
@@ -10,6 +13,8 @@ export interface EnvSchemaEntry {
 	restartTarget?: EnvRestartTarget;
 	description: string;
 	options?: string[];
+	/** Extra check beyond `valueType`; returns an error message. */
+	validate?: (value: string) => string | undefined;
 }
 
 export const ENV_SCHEMA: EnvSchemaEntry[] = [
@@ -55,6 +60,34 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		restartRequired: false,
 		hotApply: true,
 		description: "Comma-separated extra workspace roots.",
+	},
+	{
+		key: NOTIFICATIONS_DISABLED_ENV,
+		valueType: "string",
+		sensitive: false,
+		restartRequired: false,
+		hotApply: true,
+		description: `Comma-separated notification sources the server does not emit: ${NOTIFICATION_SOURCES.map((s) => s.kind).join(", ")}.`,
+		validate: (value) => {
+			const unknown = value.split(",").map((s) => s.trim()).filter((s) => s && !isNotificationKind(s));
+			return unknown.length > 0 ? `Unknown notification source: ${unknown.join(", ")}` : undefined;
+		},
+	},
+	{
+		key: "NPI_DECK_INSTALL_STARTER_SKILLS",
+		valueType: "boolean",
+		sensitive: false,
+		restartRequired: true,
+		hotApply: false,
+		description: "Copy missing bundled starter skills into the NeoPi agent dir when the deck launches. Set 0 to skip.",
+	},
+	{
+		key: "NPI_DECK_INSTALL_STARTER_EXTENSIONS",
+		valueType: "boolean",
+		sensitive: false,
+		restartRequired: true,
+		hotApply: false,
+		description: "Copy missing bundled starter extensions into the NeoPi agent dir when the deck launches. Set 0 to skip.",
 	},
 	{
 		key: "NPI_DECK_IDLE_TIMEOUT_MS",
@@ -223,5 +256,35 @@ export function validateEnvValue(entry: EnvSchemaEntry, value: string): string |
 	if (entry.valueType === "enum" && entry.options && !entry.options.includes(value.trim())) {
 		return `Expected one of: ${entry.options.join(", ")}`;
 	}
-	return undefined;
+	return entry.validate?.(value);
+}
+
+/** True for the off spellings `validateEnvValue` accepts for a boolean: 0, false, no, off. */
+export function isEnvFlagOff(value: string | undefined): boolean {
+	return ["0", "false", "no", "off"].includes((value ?? "").trim().toLowerCase());
+}
+
+/**
+ * Effective value of a schema key and where it came from. A value the
+ * launching shell exported wins over the managed .env; a key the deck loaded
+ * from (or wrote to) the .env reports `env-file`.
+ */
+export function resolveEnvEntry(entry: EnvSchemaEntry): { source: EnvValueSource; value?: string } {
+	const file = readManagedEnvFile();
+	const fileValue = file.values.get(entry.key);
+	const processValue = process.env[entry.key];
+	if (processValue !== undefined && !(MANAGED_ENV_KEYS_LOADED.has(entry.key) && processValue === fileValue)) {
+		return { source: "process-env", value: processValue };
+	}
+	if (fileValue !== undefined) return { source: "env-file", value: fileValue };
+	if (entry.defaultValue !== undefined) return { source: "default", value: entry.defaultValue };
+	return { source: "unset" };
+}
+
+/** Resolve `key` for a Settings panel: its value, and whether saving through the managed .env can change it. */
+export function resolveEnvSetting(key: string): { value?: string; setting: EnvBackedSetting } {
+	const entry = ENV_SCHEMA_BY_KEY.get(key);
+	if (!entry) throw new Error(`${key} is not in ENV_SCHEMA`);
+	const { source, value } = resolveEnvEntry(entry);
+	return { value, setting: { key, source, editable: source !== "process-env" } };
 }
