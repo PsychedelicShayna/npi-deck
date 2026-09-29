@@ -27,7 +27,7 @@ export interface AgentBridge {
 	/**
 	 * Resumes of one file run one at a time: a concurrent resume gets the same
 	 * live session. Rejects with {@link SessionClosedError} when the session
-	 * was closed while it was opening.
+	 * was closed, or the bridge disposed, while it was opening.
 	 */
 	resumeSession(opts: ResumeSessionOpts): Promise<SessionHandle>;
 	getSession(sessionId: string): SessionHandle | undefined;
@@ -38,8 +38,9 @@ export interface AgentBridge {
 	 * drains in-flight model work for up to 20 s), so it runs in the background
 	 * and `session_disposed` reaches the session's subscribers when it ends.
 	 * Resuming the same file meanwhile waits for the close. A session still
-	 * opening is closed as soon as it has opened and never becomes live. False
-	 * when no session with this id is opening, live or closing.
+	 * opening, including one whose file is still being read, is closed as soon
+	 * as it has opened and never becomes live. False when no session with this
+	 * id is opening, live or closing.
 	 */
 	closeSession(sessionId: string): boolean;
 	listSessions(opts: { cwd?: string }): Promise<SessionSummary[]>;
@@ -124,6 +125,11 @@ export interface AgentBridge {
 		proposalId: string,
 		response: PlanApprovalResponse,
 	): Promise<"settled" | "unknown">;
+	/**
+	 * Shut down: refuse new opens, let every open in flight finish and close
+	 * its session instead of making it live, then dispose every live and
+	 * closing session and wait for all of them.
+	 */
 	dispose(): Promise<void>;
 }
 

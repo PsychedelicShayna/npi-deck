@@ -11,7 +11,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ServerFrame } from "@npi-deck/protocol";
 
-import { loadBackend, resolveBackendSelection } from "./backend/runtime.ts";
+import { loadBackend, resolveBackendSelection, sdk } from "./backend/runtime.ts";
 import { InProcessAgentBridge } from "./bridge/in-process.ts";
 import type { Config } from "./config.ts";
 import { spawnOwnedSync } from "./owned-process.ts";
@@ -72,7 +72,7 @@ if (!fixtureRoot) {
 			const output = `${child.stdout.toString()}${child.stderr.toString()}`;
 			if (child.exitCode !== 0) console.error(output);
 			expect(child.exitCode).toBe(0);
-			expect(output).toContain("2 pass");
+			expect(output).toContain("4 pass");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -200,6 +200,62 @@ if (!fixtureRoot) {
 			const reopened = await bridge.resumeSession({ sessionPath: file });
 			expect(bridge.getSession(id)).toBe(reopened);
 			expect(reopened.snapshot().messages.length).toBe(2);
+		} finally {
+			await close();
+		}
+	}, 90_000);
+
+	test("a close sent while the chat's file is still being read answers 202 and the resume 409", async () => {
+		const id = "01a0ea00-0000-7000-8000-000000000112";
+		const { file, bridge, request, close } = await fixture(id);
+		// Stands in for a long transcript: NeoPi's file read waits for the test.
+		const manager = sdk().SessionManager as { open: (...args: unknown[]) => Promise<unknown> };
+		const read = manager.open;
+		const reading = Promise.withResolvers<void>();
+		const finish = Promise.withResolvers<void>();
+		manager.open = async (...args) => {
+			reading.resolve();
+			await finish.promise;
+			return read.apply(manager, args);
+		};
+		try {
+			const resuming = request("POST", "/sessions", { resumeFromPath: file });
+			await reading.promise;
+			expect((await request("DELETE", `/sessions/${id}`)).status).toBe(202);
+			manager.open = read;
+			finish.resolve();
+			expect((await resuming).status).toBe(409);
+			expect(bridge.getSession(id)).toBeUndefined();
+
+			const reopened = await bridge.resumeSession({ sessionPath: file });
+			expect(bridge.getSession(id)).toBe(reopened);
+		} finally {
+			manager.open = read;
+			finish.resolve();
+			await close();
+		}
+	}, 90_000);
+
+	test("a shutdown while a chat opens never makes it live and waits for its teardown", async () => {
+		const id = "01a0ea00-0000-7000-8000-000000000113";
+		const { file, bridge, close } = await fixture(id);
+		try {
+			const start = hold("session_start");
+			const resuming = bridge.resumeSession({ sessionPath: file }).then(() => "opened", (err: Error) => err.name);
+			await start.entered;
+
+			const shutdown = hold("session_shutdown");
+			let stopped = false;
+			const stopping = bridge.dispose().then(() => { stopped = true; });
+			start.release();
+			// The opened chat is torn down rather than published, and shutdown waits for it.
+			await shutdown.entered;
+			expect(bridge.getSession(id)).toBeUndefined();
+			expect(stopped).toBe(false);
+			shutdown.release();
+			await stopping;
+			expect(await resuming).toBe("SessionClosedError");
+			expect(bridge.getSession(id)).toBeUndefined();
 		} finally {
 			await close();
 		}

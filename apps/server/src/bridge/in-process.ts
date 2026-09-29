@@ -98,6 +98,39 @@ function mixtureRefusal(lease: MixtureRoster | undefined, name: string, registry
 	return `mixture/${name} does not validate under this chat's settings: ${errors.map((issue) => `${issue.code} (${issue.message})`).join("; ")}`;
 }
 
+/** A session the bridge is opening; see `InProcessAgentBridge.opening`. */
+interface OpenReservation {
+	/** Undefined only while a resume reads a file whose header gave no id. */
+	sessionId: string | undefined;
+	closeRequested: boolean;
+	/** Resolves once the open has published the session or handed it to a close. */
+	done: Promise<void>;
+	release(): void;
+}
+
+/**
+ * A session file's id from its header record, reading only the file's start.
+ * The header is the first line, or the second after NeoPi's fixed-width title
+ * slot. Undefined when the start holds no readable header.
+ */
+async function sessionFileId(file: string): Promise<string | undefined> {
+	let head: string;
+	try {
+		head = await Bun.file(file).slice(0, 64 * 1024).text();
+	} catch {
+		return undefined;
+	}
+	for (const line of head.split("\n", 2)) {
+		try {
+			const record = JSON.parse(line) as { type?: unknown; id?: unknown } | null;
+			if (record?.type === "session" && typeof record.id === "string") return record.id;
+		} catch {
+			// The title slot, or a header cut off by the slice.
+		}
+	}
+	return undefined;
+}
+
 interface Active {
 	handle: InProcessSessionHandle;
 	session: AgentSession;
@@ -139,8 +172,11 @@ export class InProcessAgentBridge implements AgentBridge {
 	private active = new Map<string, Active>();
 	/** Sessions whose dispose is still running; no longer live. See {@link closeSession}. */
 	private closing = new Map<string, { sessionFile: string | undefined; done: Promise<void> }>();
-	/** Sessions being opened; a close asked for meanwhile is applied when the open finishes. */
-	private opening = new Map<string, { closeRequested: boolean }>();
+	/**
+	 * Sessions being opened. A close asked for meanwhile, or shutdown, is
+	 * applied when the open finishes: the session never becomes live.
+	 */
+	private opening = new Set<OpenReservation>();
 	/** Tail of each session file's resume queue, keyed by absolute path. */
 	private resumes = new Map<string, Promise<void>>();
 	private disposed = false;
@@ -201,35 +237,67 @@ export class InProcessAgentBridge implements AgentBridge {
 			for (const a of this.active.values()) {
 				if (sameFile(a.handle.sessionFile)) return a.handle;
 			}
-			const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
-			// Absolute, like createSession: the SDK session and the deck's mixture
-			// lease must probe the same MIXTURES.toml search path even when an
-			// older session header stored a relative cwd.
-			const cwd = path.resolve((sessionManager.getCwd?.() as string | undefined) ?? process.cwd());
-			const handle = await this.open(cwd, sessionManager, undefined, opts.mcpServersAllowed);
-			log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
-			return handle;
+			// Reserve the id from the file's header before the full read, so a
+			// close of this chat sent while its file loads already finds it.
+			const reservation = this.reserveOpen(await sessionFileId(opts.sessionPath));
+			try {
+				const sessionManager = await sdk().SessionManager.open(opts.sessionPath);
+				if (reservation.closeRequested || this.disposed) {
+					await sessionManager.close();
+					throw this.closedWhileOpening(sessionManager.getSessionId());
+				}
+				// Absolute, like createSession: the SDK session and the deck's mixture
+				// lease must probe the same MIXTURES.toml search path even when an
+				// older session header stored a relative cwd.
+				const cwd = path.resolve((sessionManager.getCwd?.() as string | undefined) ?? process.cwd());
+				const handle = await this.open(cwd, sessionManager, undefined, opts.mcpServersAllowed, false, reservation);
+				log.info(`resumed session ${handle.sessionId} from ${opts.sessionPath}`);
+				return handle;
+			} finally { reservation.release(); }
 		} finally { release(); }
 	}
 
+	/** Mark a session as opening; `release()` ends the mark. Refused once the bridge is disposed. */
+	private reserveOpen(sessionId: string | undefined): OpenReservation {
+		if (this.disposed) throw new SessionClosedError("the deck is shutting down");
+		const settled = Promise.withResolvers<void>();
+		const reservation: OpenReservation = {
+			sessionId,
+			closeRequested: false,
+			done: settled.promise,
+			release: () => {
+				this.opening.delete(reservation);
+				settled.resolve();
+			},
+		};
+		this.opening.add(reservation);
+		return reservation;
+	}
+
+	private closedWhileOpening(sessionId: string): SessionClosedError {
+		return new SessionClosedError(this.disposed
+			? `the deck shut down while session ${sessionId} was opening`
+			: `session ${sessionId} was closed while it was opening`);
+	}
+
 	/**
-	 * Start an SDK session and make it live. A close requested while it opens
-	 * wins: the new session is disposed without ever becoming live.
+	 * Start an SDK session and make it live. A close requested while it opens,
+	 * or shutdown, wins: the new session is disposed without ever becoming live.
 	 */
-	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed?: string[], fresh = false): Promise<InProcessSessionHandle> {
+	private async open(cwd: string, sessionManager: SessionManager, model: ModelRef | undefined, mcpServersAllowed?: string[], fresh = false, reserved?: OpenReservation): Promise<InProcessSessionHandle> {
 		const sessionId = sessionManager.getSessionId();
-		const pending = { closeRequested: false };
-		this.opening.set(sessionId, pending);
+		const reservation = reserved ?? this.reserveOpen(sessionId);
+		reservation.sessionId = sessionId;
 		try {
 			const { handle, entry } = await this.start(cwd, sessionManager, model, mcpServersAllowed, fresh);
-			if (pending.closeRequested) {
+			if (reservation.closeRequested || this.disposed) {
 				this.beginClose(sessionId, handle);
-				throw new SessionClosedError(`session ${sessionId} was closed while it was opening`);
+				throw this.closedWhileOpening(sessionId);
 			}
 			this.active.set(sessionId, entry);
 			return handle;
 		} finally {
-			if (this.opening.get(sessionId) === pending) this.opening.delete(sessionId);
+			reservation.release();
 		}
 	}
 
@@ -358,8 +426,8 @@ export class InProcessAgentBridge implements AgentBridge {
 	}
 
 	closeSession(sessionId: string): boolean {
-		const pending = this.opening.get(sessionId);
-		if (pending) {
+		for (const pending of this.opening) {
+			if (pending.sessionId !== sessionId) continue;
 			pending.closeRequested = true;
 			return true;
 		}
@@ -622,6 +690,10 @@ export class InProcessAgentBridge implements AgentBridge {
 			clearInterval(this.reaperTimer);
 			this.reaperTimer = null;
 		}
+		// An open in flight sees `disposed` before it publishes and closes its
+		// session instead; wait for that so its teardown is awaited below.
+		if (this.opening.size) log.info(`waiting for ${this.opening.size} opening session(s)`);
+		await Promise.all(Array.from(this.opening, (pending) => pending.done));
 		log.info(`disposing ${this.active.size} active session(s), ${this.closing.size} closing`);
 		const disposals = Array.from(this.active.values()).map((a) =>
 			a.handle.dispose().catch((err) => log.warn(`dispose failed`, err)),
