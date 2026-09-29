@@ -1820,11 +1820,15 @@ export interface OAuthPromptReplyRequest {
 export type McpServerScope = "user" | "project";
 export type McpTransport = "stdio" | "http" | "sse";
 
-/** One env variable or HTTP header. Secret-looking values never leave the server: `value` is null and `masked` is true. */
-export interface McpKeyValue {
+/**
+ * One env variable or HTTP header the config file defines. Values never leave
+ * the server — any of them can be a credential — so a client sees the name and
+ * whether a value is stored, and keeps it by sending `value: null`.
+ */
+export interface McpKeyRef {
 	key: string;
-	value: string | null;
-	masked: boolean;
+	/** The config file stores a non-empty value for this key. */
+	set: boolean;
 }
 
 /** An env/header pair a write submits; `value: null` keeps whatever the config file already holds for that key. */
@@ -1832,6 +1836,23 @@ export interface McpKeyValueInput {
 	key: string;
 	value: string | null;
 }
+
+/**
+ * One command argument as the client may show it. A credential-bearing
+ * argument (the value after a `--api-key`-shaped flag, or the right side of
+ * `--api-key=…`) is redacted; `display` keeps only the flag.
+ */
+export interface McpArg {
+	display: string;
+	redacted: boolean;
+}
+
+/**
+ * One argument a write submits: literal text, or `{keepIndex}` to keep the
+ * stored argument at that position, which is how a redacted one survives an
+ * edit (and stays correct when the list is reordered).
+ */
+export type McpArgInput = string | { keepIndex: number };
 
 /** Why a discovered server does not run. */
 export type McpDisabledReason =
@@ -1853,12 +1874,15 @@ export interface McpServerRow {
 	name: string;
 	transport: McpTransport;
 	command?: string;
-	args?: string[];
+	args?: McpArg[];
 	/** Working directory for a stdio server. */
 	cwd?: string;
+	/** The URL with any userinfo and query values redacted; keep it by sending `url: null`. */
 	url?: string;
-	env: McpKeyValue[];
-	headers: McpKeyValue[];
+	/** The stored URL carries credentials, so `url` above is not the whole of it. */
+	urlRedacted?: boolean;
+	env: McpKeyRef[];
+	headers: McpKeyRef[];
 	timeout?: number;
 	/** Absolute path of the file that defines this server. */
 	sourcePath: string;
@@ -1907,10 +1931,11 @@ export interface McpServerWriteRequest extends McpServerTargetRequest {
 	transport: McpTransport;
 	/** stdio only. */
 	command?: string;
-	args?: string[];
+	/** Omitted keeps the stored arguments; `{keepIndex}` keeps one of them. */
+	args?: McpArgInput[];
 	cwd?: string;
-	/** http and sse only. */
-	url?: string;
+	/** http and sse only; null keeps the stored URL, credentials included. */
+	url?: string | null;
 	env?: McpKeyValueInput[];
 	headers?: McpKeyValueInput[];
 	/** Connection timeout in ms; null removes it. */

@@ -354,7 +354,7 @@ await check("MCP servers: list every source, write one scope, toggle, apply live
 	"getMCPConfigPath", "mcpCapability", "isProviderEnabled", "isUserSourceEnabled", "cfgDisabledExtensions",
 	"cfgMcpEnableProjectConfig", "readMCPConfigFile", "getMCPServer", "addMCPServer", "updateMCPServer",
 	"removeMCPServer", "setMcpServerEnabled", "readDisabledServers", "readEnabledServers", "validateServerName",
-	"validateServerConfig", "applyMcpToggleRuntime", "clearFsCache",
+	"validateServerConfig", "applyMcpToggleRuntime", "clearFsCache", "writeMCPConfigFile", "withFileLock",
 ], async () => {
 	const servers = feature("mcp-servers");
 	const cwd = mkdir("root-mcp-edit");
@@ -431,6 +431,27 @@ await check("MCP servers: list every source, write one scope, toggle, apply live
 		await servers.removeMCPServer(projectPath, "contract-live");
 		assert(await servers.getMCPServer(projectPath, "contract-live") === undefined, "remove left the entry behind");
 
+		// The deck merges an edit inside this lock and writes with the lock-free
+		// writer; NeoPi's own writers must queue behind it rather than interleave.
+		const order: string[] = [];
+		const held = servers.withFileLock(projectPath, async () => {
+			order.push("lock-enter");
+			await Bun.sleep(120);
+			const stored = await servers.readMCPConfigFile(projectPath);
+			await servers.writeMCPConfigFile(projectPath, {
+				...stored, mcpServers: { ...stored.mcpServers, locked: { type: "stdio", command: "true" } },
+			});
+			order.push("lock-exit");
+		});
+		await Bun.sleep(20);
+		const contender = servers.addMCPServer(projectPath, "contender", { type: "stdio", command: "true" })
+			.then(() => order.push("contender"));
+		await Promise.all([held, contender]);
+		assert(order.join(",") === "lock-enter,lock-exit,contender", `writers interleaved: ${order.join(",")}`);
+		const both = await servers.readMCPConfigFile(projectPath);
+		assert(both.mcpServers?.locked !== undefined && both.mcpServers?.contender !== undefined, "a locked write lost the contender's entry");
+		await servers.removeMCPServer(projectPath, "locked");
+		await servers.removeMCPServer(projectPath, "contender");
 		// An edit made outside NeoPi's writer (a terminal, another tool) is only
 		// visible once the capability file cache is dropped.
 		await Bun.write(projectPath, JSON.stringify({ mcpServers: { "contract-external": { type: "stdio", command: "true" } } }));

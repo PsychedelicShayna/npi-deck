@@ -3,8 +3,10 @@ import { Hono, type Context } from "hono";
 import type { MCPServer } from "@oh-my-pi/pi-coding-agent/capability/mcp";
 import type { MCPServerConfig } from "@oh-my-pi/pi-coding-agent/mcp/types";
 import type {
+	McpArg,
+	McpArgInput,
 	McpDisabledReason,
-	McpKeyValue,
+	McpKeyRef,
 	McpKeyValueInput,
 	McpLiveApply,
 	McpServerCreateRequest,
@@ -29,26 +31,75 @@ const log = logger("routes:mcp-servers");
 const LOAD_FAILED = "NeoPi could not read the MCP configuration; the deck server log has the details.";
 const WRITE_FAILED = "NeoPi could not save the MCP configuration; the deck server log has the details.";
 
-/** Env and header names whose values are assumed to be credentials. */
-const SECRET_KEY = /(key|token|secret|password|passwd|credential|auth|cookie|session|signature|bearer|licen[cs]e)/i;
-/** Well-known credential prefixes, so a value under an innocuous name is still masked. */
-const SECRET_VALUE =
-	/^(bearer\s|basic\s|sk-|pk-|rk_|ghp_|gho_|ghs_|ghu_|github_pat_|xox[baprs]-|glpat-|AIza|ya29\.|hf_|npm_|dop_v1_|shpat_|AKIA)/i;
+/**
+ * A flag whose argument is a credential. Used only to decide what to hide;
+ * anything it misses is still safe, because values the deck shows are limited
+ * to arguments and URLs the user typed, and env/header values are never sent.
+ */
+const SECRET_FLAG = /(key|token|secret|password|passwd|credential|auth|cookie|session|bearer|pat)/i;
+const REDACTED = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
-/** A value the deck refuses to echo: a credential-looking name, a known prefix, or an opaque high-entropy blob. */
-function looksSecret(key: string, value: string): boolean {
-	if (SECRET_KEY.test(key)) return true;
-	if (SECRET_VALUE.test(value)) return true;
-	// Long single-token values mixing letters and digits are API keys; paths and
-	// sentences carry separators, so they stay readable.
-	return value.length >= 20 && !/[\s/\\]/.test(value) && /[A-Za-z]/.test(value) && /[0-9]/.test(value);
+/** Names and set-state only: any env or header value can be a credential, so none is sent. */
+function keyRefs(record: Record<string, string> | undefined): McpKeyRef[] {
+	return Object.entries(record ?? {}).map(([key, value]) => ({ key, set: typeof value === "string" && value !== "" }));
 }
 
-function maskEntries(record: Record<string, string> | undefined): McpKeyValue[] {
-	return Object.entries(record ?? {}).map(([key, raw]) => {
-		const value = String(raw);
-		return looksSecret(key, value) ? { key, value: null, masked: true } : { key, value, masked: false };
-	});
+/**
+ * Arguments as a client may show them. `--api-key X` and `--api-key=X` keep the
+ * flag and drop the value; an argument that is only a secret (the one after the
+ * flag) shows nothing else. Any argument carrying a URL also loses that URL's
+ * userinfo and query values, so a connection string under an innocuous flag
+ * (`--db=postgres://user:pw@host/db`) is not echoed either.
+ */
+function redactArgs(args: readonly string[] | undefined): McpArg[] {
+	const out: McpArg[] = [];
+	let valueOfSecretFlag = false;
+	for (const raw of args ?? []) {
+		const arg = String(raw);
+		if (valueOfSecretFlag) {
+			valueOfSecretFlag = false;
+			out.push({ display: REDACTED, redacted: true });
+			continue;
+		}
+		const equals = arg.indexOf("=");
+		const flagged = arg.startsWith("-") && equals > 0 && SECRET_FLAG.test(arg.slice(0, equals));
+		if (flagged) {
+			out.push({ display: `${arg.slice(0, equals)}=${REDACTED}`, redacted: true });
+			continue;
+		}
+		if (arg.startsWith("-") && equals === -1 && SECRET_FLAG.test(arg)) valueOfSecretFlag = true;
+		// `--db=postgres://…`, or a bare URL argument.
+		const prefix = equals > 0 ? arg.slice(0, equals + 1) : "";
+		const rest = arg.slice(prefix.length);
+		if (rest.includes("://")) {
+			const url = redactUrl(rest);
+			if (url.redacted) {
+				out.push({ display: `${prefix}${url.display}`, redacted: true });
+				continue;
+			}
+		}
+		out.push({ display: arg, redacted: false });
+	}
+	return out;
+}
+
+/** A URL without its userinfo or query values; both routinely carry tokens. */
+function redactUrl(raw: string): { display: string; redacted: boolean } {
+	let url: URL;
+	try { url = new URL(raw); }
+	// Not a URL NeoPi can connect to either; show nothing rather than guess where a secret sits.
+	catch { return { display: REDACTED, redacted: true }; }
+	let redacted = false;
+	if (url.username !== "" || url.password !== "") {
+		url.username = REDACTED;
+		url.password = "";
+		redacted = true;
+	}
+	for (const key of [...url.searchParams.keys()]) {
+		url.searchParams.set(key, REDACTED);
+		redacted = true;
+	}
+	return { display: decodeURI(url.toString()), redacted };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -161,18 +212,19 @@ async function listServers(cwd: string): Promise<McpServersResponse> {
 
 		const scope = writableSource(cwd, source.path);
 		const transport = transportOf(server);
+		const url = transport === "stdio" || server.url === undefined ? undefined : redactUrl(server.url);
 		return {
 			name: server.name,
 			transport,
 			...(transport === "stdio"
 				? {
 						...(server.command !== undefined ? { command: server.command } : {}),
-						...(server.args !== undefined ? { args: server.args } : {}),
+						...(server.args !== undefined ? { args: redactArgs(server.args) } : {}),
 						...(server.cwd !== undefined ? { cwd: server.cwd } : {}),
 					}
-				: { ...(server.url !== undefined ? { url: server.url } : {}) }),
-			env: maskEntries(server.env),
-			headers: maskEntries(server.headers),
+				: { ...(url !== undefined ? { url: url.display, ...(url.redacted ? { urlRedacted: true } : {}) } : {}) }),
+			env: keyRefs(server.env),
+			headers: keyRefs(server.headers),
 			...(server.timeout !== undefined ? { timeout: server.timeout } : {}),
 			sourcePath: source.path,
 			level: source.level,
@@ -197,11 +249,17 @@ async function listServers(cwd: string): Promise<McpServersResponse> {
 	};
 }
 
-/** The row for `name` after a write: preferring the file written, else whichever definition now wins. */
+/**
+ * The row for `name` after a write: the file written when it still defines the
+ * server, else whichever definition NeoPi now resolves — never a shadowed
+ * loser, which would misreport both the state and what the live chats run.
+ */
 async function rowFor(cwd: string, name: string, file: string): Promise<McpServerRow | null> {
 	const { servers } = await listServers(cwd);
-	return servers.find(row => row.name === name && row.sourcePath === file)
-		?? servers.find(row => row.name === name)
+	const named = servers.filter(row => row.name === name);
+	return named.find(row => row.sourcePath === file)
+		?? named.find(row => row.state !== "shadowed")
+		?? named[0]
 		?? null;
 }
 
@@ -241,6 +299,42 @@ function mergeEntries(
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** An argument that is a credential only because a `--api-key`-shaped flag precedes it. */
+function isSecretFlag(arg: string | undefined): boolean {
+	return arg !== undefined && arg.startsWith("-") && !arg.includes("=") && SECRET_FLAG.test(arg);
+}
+
+/**
+ * Submitted arguments resolved against the stored list: `{keepIndex}` keeps the
+ * argument at that position, which is how a redacted credential survives an
+ * edit — including one that reorders or drops other arguments. An omitted list
+ * keeps the stored one.
+ *
+ * A kept argument that is hidden only because its flag precedes it must stay
+ * behind such a flag; otherwise the next listing would show a value the file
+ * had kept hidden. Replacing it means typing a new one.
+ */
+function mergeArgs(args: McpArgInput[] | undefined, stored: readonly string[] | undefined): string[] | undefined {
+	if (args === undefined) return stored === undefined ? undefined : [...stored];
+	if (!Array.isArray(args)) throw new RequestError("args must be an array of strings or {keepIndex} entries", 400);
+	const hidden = redactArgs(stored);
+	const out: string[] = [];
+	for (const arg of args) {
+		if (typeof arg === "string") { out.push(arg); continue; }
+		if (!isRecord(arg) || typeof arg.keepIndex !== "number" || !Number.isInteger(arg.keepIndex)) {
+			throw new RequestError("args must be an array of strings or {keepIndex} entries", 400);
+		}
+		const kept = stored?.[arg.keepIndex];
+		if (typeof kept !== "string") throw new RequestError(`args keepIndex ${arg.keepIndex} has no stored argument; type one`, 400);
+		const behindFlag = hidden[arg.keepIndex]?.redacted === true && isSecretFlag(stored?.[arg.keepIndex - 1]);
+		if (behindFlag && !isSecretFlag(out[out.length - 1])) {
+			throw new RequestError(`args keepIndex ${arg.keepIndex} is a credential; keep it directly after its flag, or type a new value`, 400);
+		}
+		out.push(kept);
+	}
+	return out.length > 0 ? out : undefined;
+}
+
 /**
  * The entry to write: the editor's fields over everything else NeoPi stores for
  * this server (auth, oauth, policies, enabled flag). An omitted `env`,
@@ -264,14 +358,8 @@ function buildConfig(name: string, body: McpServerWriteRequest, existing: MCPSer
 			throw new RequestError(`Server "${name}": stdio server requires "command" field`, 400);
 		}
 		config.command = body.command.trim();
-		if (body.args === undefined) {
-			if (prior?.args !== undefined) config.args = prior.args;
-		} else {
-			if (!Array.isArray(body.args) || body.args.some(arg => typeof arg !== "string")) {
-				throw new RequestError("args must be an array of strings", 400);
-			}
-			if (body.args.length > 0) config.args = body.args;
-		}
+		const args = mergeArgs(body.args, prior?.args as string[] | undefined);
+		if (args !== undefined) config.args = args;
 		if (body.cwd === undefined) {
 			if (prior?.cwd !== undefined) config.cwd = prior.cwd;
 		} else if (typeof body.cwd === "string" && body.cwd.trim() !== "") {
@@ -284,10 +372,18 @@ function buildConfig(name: string, body: McpServerWriteRequest, existing: MCPSer
 		if (body.env !== undefined && parseEntries(body.env, "env").length > 0) {
 			throw new RequestError("env applies to stdio servers only", 400);
 		}
-		if (typeof body.url !== "string" || body.url.trim() === "") {
+		if (body.url === null) {
+			// The stored URL carries credentials the client never saw; keep it whole.
+			const stored = prior?.url;
+			if (typeof stored !== "string" || stored.trim() === "") {
+				throw new RequestError(`Server "${name}": there is no stored URL to keep; type one`, 400);
+			}
+			config.url = stored;
+		} else if (typeof body.url !== "string" || body.url.trim() === "") {
 			throw new RequestError(`Server "${name}": ${body.transport} server requires "url" field`, 400);
+		} else {
+			config.url = body.url.trim();
 		}
-		config.url = body.url.trim();
 		const priorHeaders = prior?.headers as Record<string, string> | undefined;
 		const headers = body.headers === undefined
 			? priorHeaders
@@ -415,17 +511,32 @@ export function buildMcpServersRouter(bridge: AgentBridge, config: Config): Hono
 		return { path: file, server: await rowFor(cwd, name, file), applyNote: applyNote(file, live, true), live };
 	}));
 
-	/** Replace an existing server's definition in the file that holds it. */
+	/**
+	 * Replace an existing server's definition in the file that holds it. The
+	 * read, the merge (kept env values, kept arguments, kept URL, and every
+	 * field the editor does not own) and the write all happen inside NeoPi's own
+	 * per-file lock, so a concurrent writer cannot have its change merged away.
+	 */
 	app.put("/mcp-servers/:name", c => respond(c, async () => {
 		const body = await readJson<McpServerWriteRequest>(c);
 		const target = requireTarget(body);
 		const name = requireName(c.req.param("name"));
 		const file = targetFile(cwd, target);
 		const mcp = feature("mcp-servers");
-		const existing = await mcp.getMCPServer(file, name);
-		if (existing === undefined) throw new RequestError(`Server "${name}" is not defined in ${file}`, 404);
-		const entry = buildConfig(name, body, existing);
-		await mcp.updateMCPServer(file, name, entry);
+		const entry = await mcp.withFileLock(file, async () => {
+			const stored = await mcp.readMCPConfigFile(file);
+			const existing = stored.mcpServers?.[name];
+			if (existing === undefined) throw new RequestError(`Server "${name}" is not defined in ${file}`, 404);
+			const merged = buildConfig(name, body, existing);
+			await mcp.writeMCPConfigFile(file, { ...stored, mcpServers: { ...stored.mcpServers, [name]: merged } });
+			return merged;
+		}).catch((err: unknown) => {
+			// NeoPi waits ~5s for the lock, then gives up; that is a busy file, not a broken one.
+			if (err instanceof Error && err.message.startsWith("Failed to acquire lock")) {
+				throw new RequestError(`Another writer is holding ${file}; try again.`, 409);
+			}
+			throw err;
+		});
 		await verifyWrite(file, name, entry);
 		const connect = entry.enabled !== false;
 		const live = await reconcileLive(bridge, name, connect);
@@ -440,9 +551,12 @@ export function buildMcpServersRouter(bridge: AgentBridge, config: Config): Hono
 		if (await mcp.getMCPServer(file, name) === undefined) throw new RequestError(`Server "${name}" is not defined in ${file}`, 404);
 		await mcp.removeMCPServer(file, name);
 		if (await mcp.getMCPServer(file, name) !== undefined) throw new RequestError(`NeoPi kept "${name}" in ${file}; reload and try again.`, 409);
-		const live = await reconcileLive(bridge, name, false);
-		// A lower-priority definition of the same name can surface once this one is gone.
-		return { path: file, server: await rowFor(cwd, name, file), applyNote: applyNote(file, live, false), live };
+		// Removing one definition can uncover a lower-priority one of the same
+		// name: the live chats then have to connect that, not just drop this.
+		const survivor = await rowFor(cwd, name, file);
+		const connect = survivor !== null && survivor.state === "enabled";
+		const live = await reconcileLive(bridge, name, connect);
+		return { path: file, server: survivor, applyNote: applyNote(file, live, connect), live };
 	}));
 
 	/**

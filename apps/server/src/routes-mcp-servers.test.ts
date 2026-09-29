@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import type { McpServerMutationResponse, McpServersResponse } from "@npi-deck/protocol";
-import { loadBackend, resolveBackendSelection, sdk } from "./backend/runtime.ts";
+import { feature, loadBackend, resolveBackendSelection, sdk } from "./backend/runtime.ts";
 import { buildMcpServersRouter } from "./routes-mcp-servers.ts";
 import type { AgentBridge, LiveMcpSession } from "./bridge/types.ts";
 import type { Config } from "./config.ts";
@@ -37,7 +37,11 @@ const request = (url: string, init?: RequestInit) => app.request(`http://127.0.0
 const send = (method: string, url: string, body: unknown) =>
 	request(url, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 const list = async () => await (await request("/mcp-servers")).json() as McpServersResponse;
-const rowOf = async (name: string) => (await list()).servers.find(server => server.name === name);
+/** The definition NeoPi resolves for a name: a shadowed loser is not it. */
+const rowOf = async (name: string) => {
+	const named = (await list()).servers.filter(server => server.name === name);
+	return named.find(server => server.state !== "shadowed") ?? named[0];
+};
 
 /** A chat whose MCP runtime accepts the reconcile and reports the server connected. */
 function connectedChat(sessionId: string): LiveMcpSession {
@@ -61,14 +65,19 @@ beforeEach(async () => {
 			"user-secretive": {
 				type: "stdio",
 				command: "bun",
-				args: ["serve.ts"],
-				env: { API_KEY: "s3cret-user-key", LOG_LEVEL: "debug" },
+				// A credential in an argument, and one whose key and value shape look innocuous.
+				args: ["serve.ts", "--api-key", "s3cret-flag-value", "--db=postgres://alice:s3cret-dsn@db/x", "--verbose"],
+				env: { POSTGRES_URL: "postgres://alice:s3cret-dsn@db/x", LOG_LEVEL: "debug", EMPTY: "" },
 			},
 		},
 	}, null, 2));
 	await writeFile(projectFile, JSON.stringify({
 		mcpServers: {
-			"project-http": { type: "http", url: "https://example.test/mcp", headers: { Authorization: "Bearer s3cret-header" } },
+			"project-http": {
+				type: "http",
+				url: "https://alice:s3cret-userinfo@example.test/mcp?token=s3cret-query&mode=fast",
+				headers: { Authorization: "Bearer s3cret-header" },
+			},
 			"project-off": { type: "stdio", command: "true", enabled: false },
 		},
 	}, null, 2));
@@ -91,42 +100,116 @@ test("lists every scope with its source file, transport and enabled state", asyn
 	expect(names).toEqual(["project-http", "project-off", "user-secretive"]);
 
 	expect(response.servers.find(s => s.name === "user-secretive")).toMatchObject({
-		transport: "stdio", command: "bun", args: ["serve.ts"], sourcePath: userFile, level: "user", scope: "user", editable: true, state: "enabled",
+		transport: "stdio", command: "bun", sourcePath: userFile, level: "user", scope: "user", editable: true, state: "enabled",
 	});
 	expect(response.servers.find(s => s.name === "project-http")).toMatchObject({
-		transport: "http", url: "https://example.test/mcp", sourcePath: projectFile, level: "project", scope: "project", state: "enabled",
+		transport: "http", sourcePath: projectFile, level: "project", scope: "project", state: "enabled",
 	});
 	expect(response.servers.find(s => s.name === "project-off")).toMatchObject({ state: "disabled", disabledReason: "config-flag" });
 });
 
-test("secret-looking env and header values never leave the server; their keys do", async () => {
+test("no env or header value, no credential argument and no URL secret reaches a client", async () => {
 	const raw = await (await request("/mcp-servers")).text();
-	expect(raw).not.toContain("s3cret-user-key");
-	expect(raw).not.toContain("s3cret-header");
+	for (const secret of ["s3cret-dsn", "s3cret-header", "s3cret-flag-value", "s3cret-userinfo", "s3cret-query"]) {
+		expect(raw).not.toContain(secret);
+	}
 
+	// Keys and set-state only: a DSN under an innocuous name is never echoed.
 	expect((await rowOf("user-secretive"))?.env).toEqual([
-		{ key: "API_KEY", value: null, masked: true },
-		{ key: "LOG_LEVEL", value: "debug", masked: false },
+		{ key: "POSTGRES_URL", set: true },
+		{ key: "LOG_LEVEL", set: true },
+		{ key: "EMPTY", set: false },
 	]);
-	expect((await rowOf("project-http"))?.headers).toEqual([{ key: "Authorization", value: null, masked: true }]);
+	expect((await rowOf("project-http"))?.headers).toEqual([{ key: "Authorization", set: true }]);
+
+	// Arguments keep their flags and drop the credential, in both spellings.
+	expect((await rowOf("user-secretive"))?.args).toEqual([
+		{ display: "serve.ts", redacted: false },
+		{ display: "--api-key", redacted: false },
+		{ display: "••••••", redacted: true },
+		{ display: "--db=postgres://••••••@db/x", redacted: true },
+		{ display: "--verbose", redacted: false },
+	]);
+
+	const http = await rowOf("project-http");
+	expect(http?.url).toBe("https://••••••@example.test/mcp?token=••••••&mode=••••••");
+	expect(http?.urlRedacted).toBe(true);
 });
 
-test("an edit keeps a masked secret it was never shown", async () => {
+test("an edit keeps the values it was never shown, through a reorder", async () => {
 	const response = await send("PUT", "/mcp-servers/user-secretive", {
 		scope: "user",
 		sourcePath: userFile,
 		transport: "stdio",
 		command: "bun",
-		args: ["serve.ts", "--verbose"],
-		env: [{ key: "API_KEY", value: null }, { key: "LOG_LEVEL", value: "info" }],
+		// The two redacted arguments (indexes 2 and 3) are kept by position while
+		// the rest of the list is rewritten and reordered around them.
+		args: ["serve.ts", "--api-key", { keepIndex: 2 }, "--loud", { keepIndex: 3 }],
+		env: [{ key: "POSTGRES_URL", value: null }, { key: "LOG_LEVEL", value: "info" }],
 	});
 	expect(response.status).toBe(200);
-	const body = await response.json() as McpServerMutationResponse;
-	expect(body.path).toBe(userFile);
-	expect(body.server).toMatchObject({ args: ["serve.ts", "--verbose"] });
+	const text = await response.text();
+	expect(text).not.toContain("s3cret-dsn");
+	expect(text).not.toContain("s3cret-flag-value");
+	expect((JSON.parse(text) as McpServerMutationResponse).path).toBe(userFile);
 
-	const saved = JSON.parse(await readFile(userFile, "utf8")) as { mcpServers: Record<string, { env: Record<string, string> }> };
-	expect(saved.mcpServers["user-secretive"]!.env).toEqual({ API_KEY: "s3cret-user-key", LOG_LEVEL: "info" });
+	const saved = JSON.parse(await readFile(userFile, "utf8")) as {
+		mcpServers: Record<string, { args: string[]; env: Record<string, string> }>;
+	};
+	expect(saved.mcpServers["user-secretive"]!.args).toEqual([
+		"serve.ts", "--api-key", "s3cret-flag-value", "--loud", "--db=postgres://alice:s3cret-dsn@db/x",
+	]);
+	expect(saved.mcpServers["user-secretive"]!.env).toEqual({
+		POSTGRES_URL: "postgres://alice:s3cret-dsn@db/x", LOG_LEVEL: "info",
+	});
+});
+
+test("a kept argument cannot be moved out from behind the flag that hides it", async () => {
+	const before = await readFile(userFile, "utf8");
+	// Index 2 is hidden only because `--api-key` precedes it; dropping the flag
+	// would put the credential back on screen at the next listing.
+	const orphaned = await send("PUT", "/mcp-servers/user-secretive", {
+		scope: "user", sourcePath: userFile, transport: "stdio", command: "bun",
+		args: ["serve.ts", { keepIndex: 2 }],
+	});
+	expect(orphaned.status).toBe(400);
+	expect(((await orphaned.json()) as { error: string }).error).toContain("keep it directly after its flag");
+	expect(await readFile(userFile, "utf8")).toBe(before);
+
+	// Index 3 hides its own credential, so it travels anywhere.
+	const moved = await send("PUT", "/mcp-servers/user-secretive", {
+		scope: "user", sourcePath: userFile, transport: "stdio", command: "bun",
+		args: [{ keepIndex: 3 }, "serve.ts"],
+	});
+	expect(moved.status).toBe(200);
+	expect(JSON.parse(await readFile(userFile, "utf8")).mcpServers["user-secretive"].args)
+		.toEqual(["--db=postgres://alice:s3cret-dsn@db/x", "serve.ts"]);
+});
+
+test("an http edit keeps the stored URL when the client only ever saw it redacted", async () => {
+	const response = await send("PUT", "/mcp-servers/project-http", {
+		scope: "project", sourcePath: projectFile, transport: "http", url: null, timeout: 9000,
+		headers: [{ key: "Authorization", value: null }],
+	});
+	expect(response.status).toBe(200);
+	const saved = JSON.parse(await readFile(projectFile, "utf8")) as {
+		mcpServers: Record<string, { url: string; timeout: number; headers: Record<string, string> }>;
+	};
+	expect(saved.mcpServers["project-http"]).toMatchObject({
+		url: "https://alice:s3cret-userinfo@example.test/mcp?token=s3cret-query&mode=fast",
+		timeout: 9000,
+		headers: { Authorization: "Bearer s3cret-header" },
+	});
+
+	// A typed URL replaces it; keeping one that does not exist is refused.
+	const typed = await send("PUT", "/mcp-servers/project-http", {
+		scope: "project", sourcePath: projectFile, transport: "http", url: "https://plain.test/mcp",
+	});
+	expect(typed.status).toBe(200);
+	expect(JSON.parse(await readFile(projectFile, "utf8")).mcpServers["project-http"].url).toBe("https://plain.test/mcp");
+	const missing = await send("PUT", "/mcp-servers/project-off", { scope: "project", transport: "http", url: null });
+	expect(missing.status).toBe(400);
+	expect(((await missing.json()) as { error: string }).error).toContain("no stored URL");
 });
 
 test("a rejected definition leaves the config file byte-identical", async () => {
@@ -137,6 +220,7 @@ test("a rejected definition leaves the config file byte-identical", async () => 
 		[{ scope: "project", transport: "carrier-pigeon", command: "true" }, "transport must be"],
 		[{ scope: "project", transport: "stdio", command: "true", env: [{ key: "A B", value: "x" }] }, "contains a space"],
 		[{ scope: "project", transport: "stdio", command: "true", env: [{ key: "NEW_KEY", value: null }] }, "no stored value"],
+		[{ scope: "project", transport: "stdio", command: "true", args: [{ keepIndex: 4 }] }, "keepIndex 4 has no stored argument"],
 		[{ scope: "project", transport: "stdio", command: "true", timeout: -5 }, "timeout must be"],
 	];
 	for (const [body, message] of cases) {
@@ -229,6 +313,66 @@ test("apply reporting states exactly what reached live chats", async () => {
 
 	const removed = await send("DELETE", "/mcp-servers/loud", { scope: "project" });
 	expect((await removed.json() as McpServerMutationResponse).applyNote).not.toContain("connected");
+});
+
+test("an edit made while the write waits for the file lock is merged, not overwritten", async () => {
+	const mcp = feature("mcp-servers");
+	let saw: "before" | "after" = "before";
+	// Hold NeoPi's per-file lock, then start the edit: it must block until the
+	// external change has landed and then merge against that, not against what
+	// the file held when the request arrived.
+	let pending: Promise<Response> | undefined;
+	await mcp.withFileLock(userFile, async () => {
+		pending = (async () => {
+			const response = await send("PUT", "/mcp-servers/user-secretive", {
+				scope: "user", sourcePath: userFile, transport: "stdio", command: "bunx", env: [{ key: "LOG_LEVEL", value: "warn" }],
+			});
+			saw = "after";
+			return response;
+		})();
+		await Bun.sleep(150);
+		expect(saw).toBe("before");
+		const stored = await mcp.readMCPConfigFile(userFile);
+		await mcp.writeMCPConfigFile(userFile, {
+			...stored,
+			mcpServers: { ...stored.mcpServers, "user-secretive": { ...stored.mcpServers!["user-secretive"]!, timeout: 4242 } },
+		});
+	});
+	const response = await pending!;
+	expect(response.status).toBe(200);
+
+	const saved = JSON.parse(await readFile(userFile, "utf8")) as {
+		mcpServers: Record<string, { command: string; timeout?: number; env: Record<string, string> }>;
+	};
+	// The request's own fields won, and the concurrent writer's field survived.
+	expect(saved.mcpServers["user-secretive"]).toMatchObject({ command: "bunx", timeout: 4242, env: { LOG_LEVEL: "warn" } });
+});
+
+test("removing a definition reconnects the one it was shadowing", async () => {
+	await writeFile(userFile, JSON.stringify({
+		mcpServers: { shared: { type: "stdio", command: "user-copy" } },
+	}, null, 2));
+	await writeFile(projectFile, JSON.stringify({
+		mcpServers: { shared: { type: "stdio", command: "project-copy" } },
+	}, null, 2));
+	// The project copy wins; the user copy is listed as shadowed.
+	expect(await rowOf("shared")).toMatchObject({ sourcePath: projectFile, state: "enabled" });
+
+	live = [connectedChat("with-mcp")];
+	const removed = await send("DELETE", "/mcp-servers/shared", { scope: "project" });
+	expect(removed.status).toBe(200);
+	const body = await removed.json() as McpServerMutationResponse;
+	// The surviving user definition is reported and the chat now runs it.
+	expect(body.server).toMatchObject({ sourcePath: userFile, command: "user-copy", state: "enabled" });
+	expect(body.live).toEqual([{ sessionId: "with-mcp", cwd: project, outcome: "applied", status: "connected" }]);
+	expect(applied).toEqual([{ name: "shared", enabled: false }, { name: "shared", enabled: true }]);
+
+	// With nothing left to run, the removal only drops it.
+	applied.length = 0;
+	const last = await send("DELETE", "/mcp-servers/shared", { scope: "user" });
+	expect(last.status).toBe(200);
+	expect((await last.json() as McpServerMutationResponse).server).toBeNull();
+	expect(applied).toEqual([{ name: "shared", enabled: false }]);
 });
 
 test("a malformed mcp.json fails with a generic error that never quotes it, and stays in place", async () => {

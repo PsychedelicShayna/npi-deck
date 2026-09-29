@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, RotateCcw, Save, Trash2, X } from "lucide-react";
 import type {
-	McpKeyValue,
+	McpArgInput,
+	McpKeyRef,
 	McpKeyValueInput,
 	McpServerMutationResponse,
 	McpServerRow,
@@ -17,6 +18,13 @@ import { cn } from "@/lib/utils";
 
 /** An env or header row being edited; `stored` means "keep the value the file holds". */
 type Pair = { key: string; value: string; stored: boolean };
+/**
+ * One argument row: typed text, or the stored argument at `keepIndex` (a
+ * redacted credential). `flag` binds a hidden value to the flag that hides it,
+ * so the pair moves and is removed together — the server refuses to write one
+ * without the other.
+ */
+type Arg = { text: string; keepIndex?: number; flag?: string };
 
 interface Draft {
 	name: string;
@@ -24,9 +32,11 @@ interface Draft {
 	sourcePath?: string;
 	transport: McpTransport;
 	command: string;
-	args: string;
+	args: Arg[];
 	cwd: string;
 	url: string;
+	/** The stored URL holds credentials this page never received; keep it unless the field is edited. */
+	urlKept: boolean;
 	timeout: string;
 	env: Pair[];
 	headers: Pair[];
@@ -41,11 +51,37 @@ const DISABLED_REASON: Record<NonNullable<McpServerRow["disabledReason"]>, strin
 	shadowed: "A higher-priority source defines the same name, so this entry never loads.",
 };
 
-const pairsOf = (entries: McpKeyValue[]): Pair[] =>
-	entries.map(entry => ({ key: entry.key, value: entry.masked ? "" : entry.value ?? "", stored: entry.masked }));
+/** Values never arrive, so every listed key starts as "keep what is stored". */
+const pairsOf = (entries: McpKeyRef[]): Pair[] =>
+	entries.map(entry => ({ key: entry.key, value: "", stored: entry.set }));
 
 const inputsOf = (pairs: Pair[]): McpKeyValueInput[] =>
 	pairs.filter(pair => pair.key.trim() !== "").map(pair => ({ key: pair.key.trim(), value: pair.stored ? null : pair.value }));
+
+/**
+ * Arguments as editable rows. A value hidden only because a `--api-key`-shaped
+ * flag precedes it is folded into that flag's row.
+ */
+function argsOf(row: McpServerRow): Arg[] {
+	const out: Arg[] = [];
+	(row.args ?? []).forEach((arg, index) => {
+		const previous = out[out.length - 1];
+		// The server renders exactly this display for a flag's hidden value.
+		if (arg.redacted && arg.display === "\u2022\u2022\u2022\u2022\u2022\u2022" && previous?.keepIndex === undefined && previous?.text.startsWith("-")) {
+			out[out.length - 1] = { text: previous.text, flag: previous.text, keepIndex: index };
+			return;
+		}
+		out.push(arg.redacted ? { text: arg.display, keepIndex: index } : { text: arg.display });
+	});
+	return out;
+}
+
+const argInputsOf = (args: Arg[]): McpArgInput[] =>
+	args.filter(arg => arg.keepIndex !== undefined || arg.text.trim() !== "")
+		.flatMap(arg => {
+			if (arg.keepIndex === undefined) return [arg.text.trim()];
+			return arg.flag === undefined ? [{ keepIndex: arg.keepIndex }] : [arg.flag, { keepIndex: arg.keepIndex }];
+		});
 
 function draftOf(row: McpServerRow): Draft {
 	return {
@@ -54,9 +90,10 @@ function draftOf(row: McpServerRow): Draft {
 		...(row.scope !== undefined ? { sourcePath: row.sourcePath } : {}),
 		transport: row.transport,
 		command: row.command ?? "",
-		args: (row.args ?? []).join("\n"),
+		args: argsOf(row),
 		cwd: row.cwd ?? "",
 		url: row.url ?? "",
+		urlKept: row.urlRedacted === true,
 		timeout: row.timeout === undefined ? "" : String(row.timeout),
 		env: pairsOf(row.env),
 		headers: pairsOf(row.headers),
@@ -64,7 +101,7 @@ function draftOf(row: McpServerRow): Draft {
 }
 
 const emptyDraft = (scope: McpServerScope): Draft => ({
-	name: "", scope, transport: "stdio", command: "", args: "", cwd: "", url: "", timeout: "", env: [], headers: [],
+	name: "", scope, transport: "stdio", command: "", args: [], cwd: "", url: "", urlKept: false, timeout: "", env: [], headers: [],
 });
 
 /**
@@ -96,6 +133,16 @@ export function McpServersSection() {
 		await refresh();
 	}, [refresh]);
 
+	/** Every mutation settles here: a rejected save shows in the section's error bar, never as an unhandled rejection. */
+	const run = useCallback(async (action: () => Promise<McpServerMutationResponse>): Promise<void> => {
+		try {
+			setError(undefined);
+			await report(await action());
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		}
+	}, [report]);
+
 	const groups = useMemo(() => {
 		if (!data) return [];
 		const order: Array<McpServerRow["level"]> = ["user", "project", "native"];
@@ -112,7 +159,8 @@ export function McpServersSection() {
 					<p className="mt-1 max-w-3xl text-sm text-ink-3">
 						Every Model Context Protocol server NeoPi discovers, from your user and project{" "}
 						<span className="font-mono">mcp.json</span> and from other tools' configs. Env and header values
-						that look like credentials are masked and never sent to this page.
+						never leave the server, credential-bearing arguments keep only their flag, and a URL is shown
+						without its userinfo or query values. An edit keeps whatever it was not shown.
 					</p>
 				</div>
 				<div className="flex gap-2">
@@ -159,7 +207,7 @@ export function McpServersSection() {
 								nameEditable
 								scopeEditable
 								onCancel={() => setAdding(null)}
-								onSubmit={async draft => report(await mcpServersApi.create({
+								onSubmit={draft => run(() => mcpServersApi.create({
 									name: draft.name.trim(),
 									scope: draft.scope,
 									...writeBody(draft),
@@ -196,14 +244,14 @@ export function McpServersSection() {
 }
 
 function writeBody(draft: Draft) {
-	const args = draft.args.split("\n").map(line => line.trim()).filter(line => line !== "");
 	const timeout = draft.timeout.trim() === "" ? null : Number(draft.timeout);
 	return {
 		...(draft.sourcePath !== undefined ? { sourcePath: draft.sourcePath } : {}),
 		transport: draft.transport,
 		...(draft.transport === "stdio"
-			? { command: draft.command.trim(), args, cwd: draft.cwd.trim(), env: inputsOf(draft.env) }
-			: { url: draft.url.trim(), headers: inputsOf(draft.headers) }),
+			? { command: draft.command.trim(), args: argInputsOf(draft.args), cwd: draft.cwd.trim(), env: inputsOf(draft.env) }
+			// A URL this page only ever saw redacted is kept as stored.
+			: { url: draft.urlKept ? null : draft.url.trim(), headers: inputsOf(draft.headers) }),
 		timeout,
 	};
 }
@@ -237,7 +285,7 @@ function ServerRow({ row, editing, onEdit, onCancel, onResult, onError }: {
 			</div>
 			<div className="break-all font-mono text-2xs text-ink-4">
 				{row.transport === "stdio"
-					? [row.command, ...(row.args ?? [])].filter(Boolean).join(" ") || "(no command)"
+					? [row.command, ...(row.args ?? []).map(arg => arg.display)].filter(Boolean).join(" ") || "(no command)"
 					: row.url ?? "(no url)"}
 			</div>
 			<div className="break-all font-mono text-2xs text-ink-4">{row.providerName || row.provider} · {row.sourcePath}</div>
@@ -286,14 +334,19 @@ function ServerRow({ row, editing, onEdit, onCancel, onResult, onError }: {
 	);
 }
 
-function KeyList({ label, entries }: { label: string; entries: McpKeyValue[] }) {
+/** Names only: an env or header value never leaves the server, so the page shows whether one is stored. */
+function KeyList({ label, entries }: { label: string; entries: McpKeyRef[] }) {
 	if (entries.length === 0) return null;
 	return (
 		<div className="flex flex-wrap items-center gap-1 font-mono text-2xs text-ink-4">
 			<span className="uppercase tracking-meta">{label}</span>
 			{entries.map(entry => (
-				<span key={entry.key} className={cn("rounded px-1", entry.masked ? "bg-danger/10 text-danger" : "bg-paper-3")}>
-					{entry.key}={entry.masked ? "••••••" : entry.value}
+				<span
+					key={entry.key}
+					title={entry.set ? "A value is stored; it is never sent to this page" : "The config file leaves this key empty"}
+					className={cn("rounded px-1", entry.set ? "bg-paper-3" : "bg-warn/10 text-warn")}
+				>
+					{entry.key}={entry.set ? "\u2022\u2022\u2022\u2022\u2022\u2022" : "(empty)"}
 				</span>
 			))}
 		</div>
@@ -349,13 +402,57 @@ function Editor({ draft: initial, nameEditable, scopeEditable, onCancel, onSubmi
 					<Field label="Working directory (optional)">
 						<input value={draft.cwd} onChange={e => set("cwd", e.target.value)} className={inputClass} />
 					</Field>
-					<Field label="Arguments (one per line)">
-						<textarea value={draft.args} onChange={e => set("args", e.target.value)} rows={3} className={cn(inputClass, "h-auto py-1 font-mono")} />
+					<Field label="Arguments">
+						<div className="space-y-1">
+							{draft.args.map((arg, index) => (
+								<div key={index} className="flex items-center gap-2">
+									<input
+										value={arg.flag !== undefined ? `${arg.flag} \u2022\u2022\u2022\u2022\u2022\u2022` : arg.text}
+										readOnly={arg.keepIndex !== undefined}
+										onChange={e => set("args", draft.args.map((a, i) => i === index ? { text: e.target.value } : a))}
+										className={cn(inputClass, "min-w-0 flex-1 font-mono", arg.keepIndex !== undefined && "text-ink-4")}
+										placeholder="--flag or value"
+									/>
+									{arg.keepIndex !== undefined ? (
+										<Badge
+											tone="danger"
+											title={arg.flag !== undefined
+												? "This flag's value is a credential and stays with it. Remove the row to replace the pair."
+												: "This argument carries a credential; it is kept as stored. Remove the row to replace it."}
+										>
+											kept
+										</Badge>
+									) : null}
+									<button
+										type="button"
+										aria-label={`Remove argument ${index + 1}`}
+										className="text-ink-4 hover:text-danger"
+										onClick={() => set("args", draft.args.filter((_, i) => i !== index))}
+									>
+										<X className="h-3.5 w-3.5" />
+									</button>
+								</div>
+							))}
+							<Button variant="ghost" size="sm" onClick={() => set("args", [...draft.args, { text: "" }])}>
+								<Plus className="h-3.5 w-3.5" />
+								Add argument
+							</Button>
+						</div>
 					</Field>
 				</div>
 			) : (
 				<Field label="URL">
-					<input value={draft.url} onChange={e => set("url", e.target.value)} className={inputClass} placeholder="https://example.com/mcp" />
+					<input
+						value={draft.url}
+						onChange={e => setDraft(current => ({ ...current, url: e.target.value, urlKept: false }))}
+						className={inputClass}
+						placeholder="https://example.com/mcp"
+					/>
+					{draft.urlKept ? (
+						<p className="text-2xs text-ink-4">
+							This URL carries credentials, so it is shown redacted and kept as stored unless you type a new one.
+						</p>
+					) : null}
 				</Field>
 			)}
 

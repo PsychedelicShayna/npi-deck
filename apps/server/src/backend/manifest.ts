@@ -46,6 +46,7 @@ export type ModuleTypes = {
 	"@oh-my-pi/pi-coding-agent/discovery": typeof import("@oh-my-pi/pi-coding-agent/discovery");
 	"@oh-my-pi/pi-coding-agent/extensibility/settings": typeof import("@oh-my-pi/pi-coding-agent/extensibility/settings");
 	"@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime": typeof import("@oh-my-pi/pi-coding-agent/modes/components/extensions/mcp-runtime");
+	"@oh-my-pi/pi-utils/file-lock": typeof import("@oh-my-pi/pi-utils/file-lock");
 	"@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents": typeof import("@oh-my-pi/pi-coding-agent/modes/rpc/rpc-subagents");
 	"@oh-my-pi/pi-coding-agent/moa/registration": typeof import("@oh-my-pi/pi-coding-agent/moa/registration");
 	"@oh-my-pi/pi-coding-agent/plan-mode/approved-plan": typeof import("@oh-my-pi/pi-coding-agent/plan-mode/approved-plan");
@@ -219,6 +220,8 @@ export const MANIFEST = {
 			cfgDisabledExtensions: op("@oh-my-pi/pi-coding-agent/extensibility/settings", "cfgDisabledExtensions"),
 			cfgMcpEnableProjectConfig: op("@oh-my-pi/pi-coding-agent/mcp/settings", "cfgMcpEnableProjectConfig"),
 			readMCPConfigFile: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "readMCPConfigFile"),
+			writeMCPConfigFile: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "writeMCPConfigFile"),
+			withFileLock: op("@oh-my-pi/pi-utils/file-lock", "withFileLock"),
 			getMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "getMCPServer"),
 			addMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "addMCPServer"),
 			updateMCPServer: op("@oh-my-pi/pi-coding-agent/mcp/config-writer", "updateMCPServer"),
