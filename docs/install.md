@@ -256,7 +256,9 @@ the environment that starts the deck, not from the managed `.env` inside it):
 - **Run state**: `run/` (launcher lock, generation and owned-process
   journals).
 
-Nothing is read from the old `~/.omp-deck` or `~/.config/omp-deck` dirs.
+Nothing is read from the old `~/.omp-deck` or `~/.config/omp-deck` dirs; to
+bring their state over, run `bun scripts/migrate-omp-deck.ts` (see
+[upgrading.md](./upgrading.md#070-dev--from-omp-deck-to-npi-deck)).
 
 Elsewhere:
 

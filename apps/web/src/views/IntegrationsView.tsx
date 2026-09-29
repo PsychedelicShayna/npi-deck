@@ -70,7 +70,7 @@ export function IntegrationsView() {
 							<div className="rounded border border-line bg-paper-2 p-3">
 								<div className="meta mb-1.5">Design doc</div>
 								<a
-									href="https://github.com/bjb2/omp-deck/blob/main/docs/proposals/routines-v1-plan.md#5-integrations-via-mcp-v15"
+									href="https://github.com/PsychedelicShayna/npi-deck/blob/main/docs/proposals/routines-v1-plan.md#5-integrations-via-mcp-v15"
 									target="_blank"
 									rel="noreferrer"
 									className="flex items-center gap-1 text-sm text-accent hover:underline"

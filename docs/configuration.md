@@ -23,7 +23,8 @@ Everything the deck keeps lives in one directory: `~/.npi-deck`, or
 `NPI_DECK_HOME` if set. `NPI_DECK_HOME` must come from the launching
 environment; the managed `.env` lives inside the data dir, so it cannot move
 it. The old `~/.omp-deck`, `~/.config/omp-deck` and `NPI_DECK_DATA_DIR`
-locations are not read.
+locations are not read. `bun scripts/migrate-omp-deck.ts` copies that state
+over on request; see [upgrading.md](./upgrading.md#070-dev--from-omp-deck-to-npi-deck).
 
 The managed `.env` is `<data dir>/.env`. The same directory holds:
 
