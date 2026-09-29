@@ -8,7 +8,9 @@
  *   `apiKey`, every header value under any name (provider, model and model
  *   override headers) and every `requestMetadata` value;
  * - every `baseUrl` (provider, model, model override), whole, whatever its
- *   shape: a host, path, userinfo, query or fragment can each carry one;
+ *   shape: a host, path, userinfo, query or fragment can each carry one. Its
+ *   components also join the survival checks below (see urlParts), but are
+ *   not substituted elsewhere;
  * - every value under a credential-like key anywhere else (`token`, `secret`,
  *   `password`, `*key`, …), following aliases and merge keys;
  * - every other occurrence of such a value at least MIN_REPLACE long, in any
@@ -36,6 +38,8 @@ const COMMENT_EXACT = /^# <npi-deck-comment:[0-9a-f]{16}>$/;
 const SECRET_KEY_SUFFIXES = ["key", "authorization", "token", "secret", "password", "cookie", "credential", "credentials"];
 /** Shorter credentials are not substituted inside other text (the match would be ambiguous); their presence withholds the text. */
 const MIN_REPLACE = 8;
+/** Path segments and host labels are registered for the survival checks only when token-like: this long and holding a digit; see urlParts. */
+const MIN_URL_SEGMENT = 8;
 /** Walk budget: aliases can multiply a document exponentially. */
 const MAX_VISITS = 100_000;
 const ABSENT = "absent";
@@ -95,6 +99,59 @@ export function displayUrl(value: string | undefined, secrets: Map<string, Secre
 	const url = PLACEHOLDER_EXACT.test(value) ? secrets.get(value)?.text ?? "" : value;
 	const scheme = /^https?:\/\//i.exec(url)?.[0].toLowerCase() ?? "";
 	return `${scheme}${HIDDEN}`;
+}
+
+/** Every raw and percent-decoded form of `text` (a query value also with `+` as a space). */
+function forms(text: string, query = false): string[] {
+	const out = [text];
+	const variants = query ? [text, text.replaceAll("+", " ")] : [text];
+	for (const variant of variants) {
+		try {
+			out.push(decodeURIComponent(variant));
+		} catch {
+			// Not percent-encoded text; the raw form stands.
+		}
+	}
+	return out;
+}
+
+const tokenLike = (text: string) => text.length >= MIN_URL_SEGMENT && /\d/.test(text);
+
+/**
+ * Pieces of a baseUrl that may repeat a credential elsewhere in the file, for
+ * the survival checks (never substituted): userinfo, its user and password,
+ * every query value and the fragment at any length, and each token-like path
+ * segment and host label (MIN_URL_SEGMENT or more characters and holding a
+ * digit). Other path segments and host labels (`v1`, `api`, `anthropic`,
+ * `openrouter`, `completions`) are not registered, since they are public words
+ * that recur in provider names and `api` values and would withhold ordinary
+ * files. Accepted limitation: a credential in a host or path that is shorter
+ * than that or has no digit can appear elsewhere in the file unnoticed.
+ */
+function urlParts(value: string): string[] {
+	const match = /^(?:[^:/?#]+:)?(?:\/\/([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/s.exec(value);
+	if (!match) return [];
+	const [, authority, pathPart, query, fragment] = match;
+	const parts: string[] = [];
+	if (authority !== undefined) {
+		const at = authority.lastIndexOf("@");
+		if (at >= 0) {
+			const userinfo = authority.slice(0, at);
+			const colon = userinfo.indexOf(":");
+			for (const piece of colon >= 0 ? [userinfo, userinfo.slice(0, colon), userinfo.slice(colon + 1)] : [userinfo]) parts.push(...forms(piece));
+		}
+		const host = authority.slice(at + 1).replace(/:\d*$/, "").replace(/^\[|\]$/g, "");
+		for (const label of host.split(".")) for (const form of forms(label)) if (tokenLike(form)) parts.push(form);
+	}
+	for (const segment of (pathPart ?? "").split("/")) for (const form of forms(segment)) if (tokenLike(form)) parts.push(form);
+	if (query !== undefined) {
+		for (const pair of query.split("&")) {
+			const equals = pair.indexOf("=");
+			parts.push(...forms(equals >= 0 ? pair.slice(equals + 1) : pair, true));
+		}
+	}
+	if (fragment !== undefined) parts.push(...forms(fragment));
+	return parts.filter(part => part !== "");
 }
 
 /** Whether a restored placeholder's credential may stand at `path`: any at a credential position, only a masked baseUrl at a baseUrl. */
@@ -274,9 +331,10 @@ export function maskModelsYaml(text: string): MaskResult {
 		const id = placeholderFor(value);
 		secrets.set(id, { value: node.value, text: value, fromUrl: (secrets.get(id)?.fromUrl ?? false) || reached.url.has(node) });
 	}
-	const known = [...knownSet];
 	// Longest first, so a credential containing another is replaced whole.
-	const replaceable = known.filter(secret => secret.length >= MIN_REPLACE).sort((a, b) => b.length - a.length);
+	const replaceable = [...knownSet].filter(secret => secret.length >= MIN_REPLACE).sort((a, b) => b.length - a.length);
+	for (const node of reached.url) if (typeof node.value === "string") for (const part of urlParts(node.value)) knownSet.add(part);
+	const known = [...knownSet];
 	const edits: Edit[] = [];
 	for (const node of allScalars(doc)) {
 		if (!node.range) continue;

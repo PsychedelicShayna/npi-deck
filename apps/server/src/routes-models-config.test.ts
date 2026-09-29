@@ -182,6 +182,39 @@ test("a short credential that also appears elsewhere withholds the document; a l
 	expect(resave.status).toBe(400);
 });
 
+test("a baseUrl's query value, path token or host label repeated in a shown field withholds the document", async () => {
+	const provider = (name: string, baseUrl: string, model: string) =>
+		`providers:\n  ${name}:\n    baseUrl: "${baseUrl}"\n    api: openai-completions\n    auth: none\n    models:\n      - id: ${model}\n`;
+	const cases: Array<[string, string, string]> = [
+		["query value", provider("gw", "https://gw.test/v1?token=sk-live-123", "gw-model\n        name: sk-live-123"), "sk-live-123"],
+		["encoded query value", provider("gw", "https://gw.test/v1?token=sk%2Dlive%2D456", "gw-model\n        name: sk-live-456"), "sk-live-456"],
+		["path token", provider("gw", "https://gw.test/v1/keys/sk-path-tok-4242", "sk-path-tok-4242"), "sk-path-tok-4242"],
+		["host label", provider("tenant-7f3a9c2e", "https://tenant-7f3a9c2e.gw.test/v1", "gw-model"), "tenant-7f3a9c2e"],
+	];
+	for (const [what, file, secret] of cases) {
+		await writeFile(modelsFile, file);
+		const body = await load();
+		expect({ what, raw: body.raw, providers: body.providers }).toEqual({ what, raw: null, providers: [] });
+		expect(body.rawUnavailable).toBeDefined();
+		expect(JSON.stringify([body.raw, body.providers, body.error])).not.toContain(secret);
+	}
+
+	// Host labels and path segments that are words (short, or without a digit) are not registered,
+	// so ordinary files whose names echo their URL keep their raw text.
+	const ordinary: Array<[string, string]> = [
+		["openai-direct", provider("openai-direct", "https://api.openai.com/v1", "gpt-4o")],
+		["anthropic", provider("anthropic", "https://api.anthropic.com", "claude-sonnet").replace("api: openai-completions", "api: anthropic-messages")],
+		["openrouter", provider("openrouter", "https://openrouter.ai/api/v1", "openrouter/auto")],
+	];
+	for (const [name, file] of ordinary) {
+		await writeFile(modelsFile, file);
+		const body = await load();
+		expect({ name, rawShown: typeof body.raw === "string" && /baseUrl: "<npi-deck-masked:[0-9a-f]{16}>"/.test(body.raw) }).toEqual({ name, rawShown: true });
+		expect(body.providers).toMatchObject([{ name, baseUrl: "https://••••••" }]);
+	}
+	expect((await load()).raw).toContain("- id: openrouter/auto");
+});
+
 test("every baseUrl is masked whole, shown only as its scheme, and restores exactly, only as a baseUrl", async () => {
 	const urls = {
 		query: "https://gateway.test/v1?token=sk-query-live-1111",
