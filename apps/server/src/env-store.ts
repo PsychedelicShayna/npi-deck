@@ -181,7 +181,8 @@ export async function appendEnvAudit(action: string, keys: string[], filePath = 
 function parseEnvLines(text: string): EnvLine[] {
 	if (!text) return [];
 	return text.split(/\r?\n/).map((raw) => {
-		const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(raw);
+		// `s`: JSON.stringify leaves U+2028/U+2029 unescaped, and a bare `.` stops at them.
+		const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/s.exec(raw);
 		if (!match) return { kind: "raw", raw };
 		const key = match[1]!;
 		const value = parseValue(match[2] ?? "");
@@ -192,13 +193,56 @@ function parseEnvLines(text: string): EnvLine[] {
 function parseValue(raw: string): string {
 	const trimmed = raw.trim();
 	if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
-		return trimmed.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+		return unescapeDoubleQuoted(trimmed.slice(1, -1));
 	}
 	if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
 		return trimmed.slice(1, -1);
 	}
 	const hash = trimmed.search(/\s#/);
 	return (hash >= 0 ? trimmed.slice(0, hash) : trimmed).trim();
+}
+
+const SIMPLE_ESCAPES: Record<string, string> = {
+	'"': '"',
+	"\\": "\\",
+	"/": "/",
+	b: "\b",
+	f: "\f",
+	n: "\n",
+	r: "\r",
+	t: "\t",
+};
+
+/**
+ * Decode the body of a double-quoted value in one left-to-right pass. Every escape
+ * `JSON.stringify` emits decodes to what it encoded, so `quoteEnvValue` round-trips
+ * exactly. Hand-written dotenv lines stay readable: an unknown escape such as `\p`
+ * in `"C:\path"` is kept as written, and so is an unescaped `"`.
+ */
+function unescapeDoubleQuoted(body: string): string {
+	let out = "";
+	for (let i = 0; i < body.length; i++) {
+		const ch = body[i]!;
+		if (ch !== "\\" || i + 1 >= body.length) {
+			out += ch;
+			continue;
+		}
+		const next = body[i + 1]!;
+		const simple = SIMPLE_ESCAPES[next];
+		if (simple !== undefined) {
+			out += simple;
+			i++;
+			continue;
+		}
+		const hex = next === "u" ? body.slice(i + 2, i + 6) : "";
+		if (/^[0-9A-Fa-f]{4}$/.test(hex)) {
+			out += String.fromCharCode(Number.parseInt(hex, 16));
+			i += 5;
+			continue;
+		}
+		out += ch;
+	}
+	return out;
 }
 
 function stringifyEnvLines(lines: EnvLine[]): string {
@@ -212,6 +256,7 @@ function stringifyEnvLines(lines: EnvLine[]): string {
 	return text.endsWith("\n") ? text : `${text}\n`;
 }
 
+/** Bare when unambiguous, else JSON-quoted; `unescapeDoubleQuoted` is its inverse. */
 function quoteEnvValue(value: string): string {
 	if (value === "") return '""';
 	if (/^[A-Za-z0-9_./:@,+-]+$/.test(value)) return value;
