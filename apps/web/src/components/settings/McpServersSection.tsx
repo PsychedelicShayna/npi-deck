@@ -92,7 +92,8 @@ function draftOf(row: McpServerRow): Draft {
 		command: row.command ?? "",
 		args: argsOf(row),
 		cwd: row.cwd ?? "",
-		url: row.url ?? "",
+		// A listed URL is only its scheme; the field starts empty and keeps the stored one until typed over.
+		url: row.urlRedacted ? "" : row.url ?? "",
 		urlKept: row.urlRedacted === true,
 		timeout: row.timeout === undefined ? "" : String(row.timeout),
 		env: pairsOf(row.env),
@@ -169,8 +170,8 @@ export function McpServersSection() {
 					<p className="mt-1 max-w-3xl text-sm text-ink-3">
 						Every Model Context Protocol server NeoPi discovers, from your user and project{" "}
 						<span className="font-mono">mcp.json</span> and from other tools' configs. Env and header values
-						never leave the server, credential-bearing arguments keep only their flag, and a URL shows only
-						its scheme, host, port and path. An edit keeps whatever it was not shown.
+						never leave the server, URLs are hidden whole, and other arguments are
+						masked heuristically (the value after a key- or token-shaped flag). An edit keeps whatever it was not shown.
 					</p>
 				</div>
 				<div className="flex gap-2">
@@ -453,11 +454,11 @@ function Editor({ draft: initial, nameEditable, scopeEditable, onCancel, onSubmi
 						value={draft.url}
 						onChange={e => setDraft(current => ({ ...current, url: e.target.value, urlKept: false }))}
 						className={inputClass}
-						placeholder="https://example.com/mcp"
+						placeholder={draft.urlKept ? "\u2022\u2022\u2022\u2022\u2022\u2022 kept as stored \u2014 type to replace" : "https://example.com/mcp"}
 					/>
 					{draft.urlKept ? (
 						<p className="text-2xs text-ink-4">
-							This URL carries credentials, so it is shown redacted and kept as stored unless you type a new one.
+							Any part of a URL can be a credential, so this page never receives it; the stored URL is kept unless you type a new one.
 						</p>
 					) : null}
 				</Field>

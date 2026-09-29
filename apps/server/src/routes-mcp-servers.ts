@@ -61,9 +61,9 @@ function keyRefs(record: Record<string, string> | undefined): McpKeyRef[] {
 /**
  * Arguments as a client may show them. `--api-key X` and `--api-key=X` keep the
  * flag and drop the value; an argument that is only a secret (the one after the
- * flag) shows nothing else. Any argument carrying a URL is reduced the same way
- * a server URL is (see redactUrl), so a connection string under an innocuous
- * flag (`--db=postgres://user:pw@host/db`) is not echoed either.
+ * flag) shows nothing else. Any argument carrying a URL is hidden whole: a
+ * host or a short path segment can itself be a credential. Everything else is
+ * masked by this heuristic only, and shown as stored.
  */
 function redactArgs(args: readonly string[] | undefined): McpArg[] {
 	const out: McpArg[] = [];
@@ -75,60 +75,29 @@ function redactArgs(args: readonly string[] | undefined): McpArg[] {
 			out.push({ display: REDACTED, redacted: true });
 			continue;
 		}
+		if (arg.includes("://")) {
+			out.push({ display: REDACTED, redacted: true });
+			continue;
+		}
 		const equals = arg.indexOf("=");
-		const flagged = arg.startsWith("-") && equals > 0 && SECRET_FLAG.test(arg.slice(0, equals));
-		if (flagged) {
+		if (arg.startsWith("-") && equals > 0 && SECRET_FLAG.test(arg.slice(0, equals))) {
 			out.push({ display: `${arg.slice(0, equals)}=${REDACTED}`, redacted: true });
 			continue;
 		}
 		if (arg.startsWith("-") && equals === -1 && SECRET_FLAG.test(arg)) valueOfSecretFlag = true;
-		// `--db=postgres://…`, or an argument that is itself a URL. Only a flag's
-		// `=` separates a prefix: a bare URL's `?k=v` is part of the URL.
-		const prefix = arg.startsWith("-") && equals > 0 ? arg.slice(0, equals + 1) : "";
-		const rest = arg.slice(prefix.length);
-		if (arg.includes("://")) {
-			const url = redactUrl(rest);
-			if (url.redacted) {
-				out.push({ display: `${prefix}${url.display}`, redacted: true });
-				continue;
-			}
-		}
 		out.push({ display: arg, redacted: false });
 	}
 	return out;
 }
 
-/** A path segment that reads as a credential: an embedded `key=value`, or a long opaque token. */
-function isTokenSegment(segment: string): boolean {
-	return segment.includes("=")
-		|| (segment.length >= 20 && /^[A-Za-z0-9_\-.~%]+$/.test(segment) && /[A-Za-z]/.test(segment) && /[0-9]/.test(segment));
-}
-
 /**
- * A URL as a client may see it: scheme, host, port and path only. Userinfo, the
- * whole query and the fragment are replaced (each routinely carries a token,
- * e.g. `#access_token=…`), and so is any path segment that looks like one.
- * Anything that does not parse as a URL with a host is hidden entirely.
+ * A server URL as a client may see it: its scheme and nothing else. Host, path,
+ * query, fragment and userinfo can each carry a credential, so none is sent;
+ * an edit keeps the stored URL with `url: null`.
  */
-function redactUrl(raw: string): { display: string; redacted: boolean } {
-	let url: URL;
-	try { url = new URL(raw); }
-	catch { return { display: REDACTED, redacted: true }; }
-	if (url.host === "") return { display: REDACTED, redacted: true };
-	let redacted = false;
-	const path = url.pathname.split("/").map(segment => {
-		if (!isTokenSegment(segment)) return segment;
-		redacted = true;
-		return REDACTED;
-	}).join("/");
-	const userinfo = url.username !== "" || url.password !== "";
-	const query = url.search !== "" || raw.includes("?");
-	const fragment = url.hash !== "" || raw.includes("#");
-	if (!redacted && !userinfo && !query && !fragment) return { display: raw, redacted: false };
-	return {
-		display: `${url.protocol}//${userinfo ? `${REDACTED}@` : ""}${url.host}${path}${query ? `?${REDACTED}` : ""}${fragment ? `#${REDACTED}` : ""}`,
-		redacted: true,
-	};
+function redactUrl(raw: string): string {
+	const scheme = /^(https?):\/\//i.exec(raw)?.[1]?.toLowerCase();
+	return scheme ? `${scheme}://${REDACTED}` : REDACTED;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -263,7 +232,7 @@ async function listServers(cwd: string): Promise<McpServersResponse> {
 						...(server.args !== undefined ? { args: redactArgs(server.args) } : {}),
 						...(server.cwd !== undefined ? { cwd: server.cwd } : {}),
 					}
-				: { ...(url !== undefined ? { url: url.display, ...(url.redacted ? { urlRedacted: true } : {}) } : {}) }),
+				: { ...(url !== undefined ? { url, urlRedacted: true } : {}) }),
 			env: keyRefs(server.env),
 			headers: keyRefs(server.headers),
 			...(server.timeout !== undefined ? { timeout: server.timeout } : {}),
@@ -642,14 +611,18 @@ export function buildMcpServersRouter(bridge: AgentBridge, config: Config): Hono
 	}));
 
 	/**
-	 * Enable or disable a server wherever it lives: NeoPi writes the `enabled`
-	 * flag when it owns the file, and otherwise keeps its user-level deny and
-	 * force-enable lists consistent.
+	 * Enable or disable a server wherever it lives. When a NeoPi-owned file
+	 * defines it, only that entry's `enabled` flag changes, read and written
+	 * inside NeoPi's per-file lock so a concurrent edit to the entry survives.
+	 * Otherwise the user-level deny and force-enable lists record it, exactly as
+	 * NeoPi's own `setMcpServerEnabled` resolves the candidates and cleans the lists
+	 * (whose flag write reads outside the lock, so the deck does that part itself).
 	 */
 	app.post("/mcp-servers/:name/enabled", c => respond(c, async () => {
 		const body = await readJson<McpServerEnabledRequest>(c);
 		const target = requireTarget(body);
 		if (typeof body.enabled !== "boolean") throw new RequestError("enabled must be a boolean", 400);
+		const enabled = body.enabled;
 		const name = requireName(c.req.param("name"));
 		const mcp = feature("mcp-servers");
 		const core = sdk();
@@ -659,23 +632,39 @@ export function buildMcpServersRouter(bridge: AgentBridge, config: Config): Hono
 		const owned = target.sourcePath !== undefined && writableSource(cwd, path.resolve(target.sourcePath)) !== undefined
 			? path.resolve(target.sourcePath)
 			: undefined;
-		await mcp.setMcpServerEnabled({
-			userPath,
-			projectPath: mcp.getMCPConfigPath("project", cwd),
-			...(owned !== undefined ? { sourcePath: owned } : {}),
-			name,
-			enabled: body.enabled,
-		});
+		let flagged: string | undefined;
+		for (const candidate of new Set([owned, mcp.getMCPConfigPath("project", cwd), userPath])) {
+			if (candidate === undefined) continue;
+			const wrote = await underLock(candidate, async () => {
+				const stored = await mcp.readMCPConfigFile(candidate);
+				const entry = stored.mcpServers?.[name];
+				if (entry === undefined) return false;
+				await mcp.writeMCPConfigFile(candidate, { ...stored, mcpServers: { ...stored.mcpServers, [name]: { ...entry, enabled } } });
+				return true;
+			});
+			if (wrote) { flagged = candidate; break; }
+		}
+		// NeoPi's list rules: the denylist always wins, so enabling clears it; the
+		// force-enable list is only for a definition NeoPi cannot rewrite.
+		const forced = (await mcp.readEnabledServers(userPath)).includes(name);
+		if (enabled) {
+			if ((await mcp.readDisabledServers(userPath)).includes(name)) await mcp.setServerDisabled(userPath, name, false);
+			if (flagged === undefined && !forced) await mcp.setServerForceEnabled(userPath, name, true);
+			else if (flagged !== undefined && forced) await mcp.setServerForceEnabled(userPath, name, false);
+		} else {
+			if (forced) await mcp.setServerForceEnabled(userPath, name, false);
+			if (flagged === undefined) await mcp.setServerDisabled(userPath, name, true);
+		}
 		// A legacy `mcp:<name>` in NeoPi's disabledExtensions outranks mcp.json,
 		// so re-enabling has to clear it too (NeoPi's dashboard does the same).
 		const settings = await core.Settings.loadReadOnly({ cwd, agentDir: core.getAgentDir() });
 		const disabled = [...mcp.cfgDisabledExtensions.get(settings)];
-		if (body.enabled && disabled.includes(`mcp:${name}`)) {
+		if (enabled && disabled.includes(`mcp:${name}`)) {
 			const writable = await core.Settings.loadIsolated({ cwd, agentDir: core.getAgentDir() });
 			mcp.cfgDisabledExtensions.set(writable, disabled.filter(id => id !== `mcp:${name}`));
 			await writable.flush();
 		}
-		const file = owned ?? userPath;
+		const file = flagged ?? userPath;
 		const row = await rowFor(cwd, name, file);
 		if (row !== null && (row.state === "enabled") !== body.enabled) {
 			throw new RequestError(

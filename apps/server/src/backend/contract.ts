@@ -353,7 +353,7 @@ await check("MCP: per-session override rejects unknown and shadowed names", [
 await check("MCP servers: list every source, write one scope, toggle, apply live", [
 	"getMCPConfigPath", "mcpCapability", "isProviderEnabled", "isUserSourceEnabled", "cfgDisabledExtensions",
 	"cfgMcpEnableProjectConfig", "readMCPConfigFile", "getMCPServer", "addMCPServer",
-	"setMcpServerEnabled", "readDisabledServers", "readEnabledServers", "validateServerName",
+	"setServerDisabled", "setServerForceEnabled", "readDisabledServers", "readEnabledServers", "validateServerName",
 	"validateServerConfig", "applyMcpToggleRuntime", "clearFsCache", "writeMCPConfigFile", "withFileLock",
 ], async () => {
 	const servers = feature("mcp-servers");
@@ -423,15 +423,15 @@ await check("MCP servers: list every source, write one scope, toggle, apply live
 		assert(manager.getConnectionStatus("contract-live") === "disconnected", "live disable left the server connected");
 		assert(!live.session.getAllToolNames().some(name => bound.some(tool => tool.name === name)), "live disable left the server's tools bound");
 
-		// Writable source carries the flag; a server NeoPi cannot rewrite uses the user lists.
-		await servers.setMcpServerEnabled({ userPath, projectPath, sourcePath: projectPath, name: "contract-live", enabled: false });
-		assert((await servers.getMCPServer(projectPath, "contract-live"))?.enabled === false, "disable did not reach the project entry");
-		assert(!(await servers.readDisabledServers(userPath)).includes("contract-live"), "a writable server was denylisted anyway");
-		await servers.setMcpServerEnabled({ userPath, projectPath, name: "contract-foreign", enabled: false });
+		// A server NeoPi cannot rewrite is toggled through the user deny and force-enable lists.
+		await servers.setServerDisabled(userPath, "contract-foreign", true);
 		assert((await servers.readDisabledServers(userPath)).includes("contract-foreign"), "foreign disable did not reach the denylist");
-		await servers.setMcpServerEnabled({ userPath, projectPath, name: "contract-foreign", enabled: true });
+		await servers.setServerDisabled(userPath, "contract-foreign", false);
+		await servers.setServerForceEnabled(userPath, "contract-foreign", true);
 		assert(!(await servers.readDisabledServers(userPath)).includes("contract-foreign"), "re-enable left the denylist entry");
 		assert((await servers.readEnabledServers(userPath)).includes("contract-foreign"), "foreign enable did not reach the allowlist");
+		await servers.setServerForceEnabled(userPath, "contract-foreign", false);
+		assert(!(await servers.readEnabledServers(userPath)).includes("contract-foreign"), "the allowlist entry stayed");
 
 		await servers.withFileLock(projectPath, async () => {
 			const { "contract-live": _removed, ...remaining } = (await servers.readMCPConfigFile(projectPath)).mcpServers ?? {};

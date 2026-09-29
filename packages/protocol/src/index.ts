@@ -1838,9 +1838,10 @@ export interface McpKeyValueInput {
 }
 
 /**
- * One command argument as the client may show it. A credential-bearing
- * argument (the value after a `--api-key`-shaped flag, or the right side of
- * `--api-key=…`) is redacted; `display` keeps only the flag.
+ * One command argument as the client may show it. An argument containing a
+ * URL is hidden whole; the value after a `--api-key`-shaped flag, or the right
+ * side of `--api-key=…`, is redacted with `display` keeping only the flag.
+ * Other arguments are masked by that heuristic only and shown as stored.
  */
 export interface McpArg {
 	display: string;
@@ -1878,12 +1879,12 @@ export interface McpServerRow {
 	/** Working directory for a stdio server. */
 	cwd?: string;
 	/**
-	 * Scheme, host, port and path only: userinfo, query and fragment are replaced,
-	 * as is any path segment that looks like a token. Keep the stored URL by
-	 * sending `url: null`.
+	 * The scheme only (`https://••••••`): host, path, query, fragment and
+	 * userinfo can each be a credential, so none is sent. Keep the stored URL
+	 * by sending `url: null`; a typed URL replaces it.
 	 */
 	url?: string;
-	/** The stored URL carries more than `url` shows. */
+	/** Always true when `url` is present: it is not the stored URL. */
 	urlRedacted?: boolean;
 	env: McpKeyRef[];
 	headers: McpKeyRef[];

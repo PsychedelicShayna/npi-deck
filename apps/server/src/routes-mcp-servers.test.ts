@@ -136,41 +136,40 @@ test("no env or header value, no credential argument and no URL secret reaches a
 		{ display: "serve.ts", redacted: false },
 		{ display: "--api-key", redacted: false },
 		{ display: "••••••", redacted: true },
-		{ display: "--db=postgres://••••••@db/x", redacted: true },
+		{ display: "••••••", redacted: true },
 		{ display: "--verbose", redacted: false },
 	]);
 
 	const http = await rowOf("project-http");
-	expect(http?.url).toBe("https://••••••@example.test/mcp?••••••");
+	expect(http?.url).toBe("https://••••••");
 	expect(http?.urlRedacted).toBe(true);
 });
 
-test("URL fragments, whole queries and token-shaped path segments never reach a client, and still round-trip", async () => {
-	const secretUrl = "https://example.test/v1/abcDEF1234567890ghijKLMN/mcp#access_token=s3cret-fragment";
+test("no part of a URL beyond its scheme reaches a client, in rows or arguments, and it still round-trips", async () => {
+	const secretUrl = "http://tenant-s3cret-host.example.test/k/s3cretpath/mcp#access_token=s3cret-fragment";
 	await writeFile(userFile, JSON.stringify({
 		mcpServers: {
 			"fragment-http": { type: "http", url: secretUrl },
 			"fragment-args": {
 				type: "stdio",
 				command: "bun",
-				args: ["--url=https://example.test/cb#access_token=s3cret-frag-arg", "https://example.test/p?k=s3cret-bare-query", "plain.ts"],
+				args: ["--url=https://s3cret-arg-host.example.test/cb", "https://example.test/s3cret-bare-path", "plain.ts"],
 			},
-			"plain-http": { type: "http", url: "https://example.test/mcp" },
+			"plain-http": { type: "sse", url: "https://example.test/mcp" },
 		},
 	}, null, 2));
 	const raw = await (await request("/mcp-servers")).text();
-	for (const secret of ["s3cret-fragment", "s3cret-frag-arg", "s3cret-bare-query", "abcDEF1234567890ghijKLMN", "access_token", "k="]) {
+	// The host and a short path segment can themselves be credentials.
+	for (const secret of ["s3cret", "example.test", "access_token", "/k/", "/cb"]) {
 		expect(raw).not.toContain(secret);
 	}
-	expect(await rowOf("fragment-http")).toMatchObject({ url: "https://example.test/v1/••••••/mcp#••••••", urlRedacted: true });
+	expect(await rowOf("fragment-http")).toMatchObject({ url: "http://••••••", urlRedacted: true });
+	expect(await rowOf("plain-http")).toMatchObject({ url: "https://••••••", urlRedacted: true });
 	expect((await rowOf("fragment-args"))?.args).toEqual([
-		{ display: "--url=https://example.test/cb#••••••", redacted: true },
-		{ display: "https://example.test/p?••••••", redacted: true },
+		{ display: "••••••", redacted: true },
+		{ display: "••••••", redacted: true },
 		{ display: "plain.ts", redacted: false },
 	]);
-	// A URL with nothing to hide is shown as stored.
-	expect(await rowOf("plain-http")).toMatchObject({ url: "https://example.test/mcp" });
-	expect((await rowOf("plain-http"))?.urlRedacted).toBeUndefined();
 
 	expect((await fresh("PUT", "fragment-http", { scope: "user", sourcePath: userFile, transport: "http", url: null, timeout: 5 })).status).toBe(200);
 	expect((await fresh("PUT", "fragment-args", {
@@ -179,7 +178,7 @@ test("URL fragments, whole queries and token-shaped path segments never reach a 
 	const saved = JSON.parse(await readFile(userFile, "utf8"));
 	expect(saved.mcpServers["fragment-http"]).toMatchObject({ url: secretUrl, timeout: 5 });
 	expect(saved.mcpServers["fragment-args"].args).toEqual([
-		"plain.ts", "https://example.test/p?k=s3cret-bare-query", "--url=https://example.test/cb#access_token=s3cret-frag-arg",
+		"plain.ts", "https://example.test/s3cret-bare-path", "--url=https://s3cret-arg-host.example.test/cb",
 	]);
 });
 
@@ -425,6 +424,43 @@ test("the revision check runs under the file lock, so a write that lands while t
 	});
 	expect((await pending!).status).toBe(409);
 	expect(JSON.parse(await readFile(userFile, "utf8")).mcpServers["user-secretive"]).toMatchObject({ command: "bun", timeout: 4242 });
+});
+
+test("an enable toggle flips only the flag, reading the entry inside the lock", async () => {
+	const mcp = feature("mcp-servers");
+	let saw: "before" | "after" = "before";
+	let pending: Promise<Response> | undefined;
+	await mcp.withFileLock(projectFile, async () => {
+		pending = (async () => {
+			const response = await send("POST", "/mcp-servers/project-off/enabled", { scope: "project", sourcePath: projectFile, enabled: true });
+			saw = "after";
+			return response;
+		})();
+		await Bun.sleep(150);
+		// The toggle is waiting on the lock while someone edits the same entry.
+		expect(saw).toBe("before");
+		const stored = await mcp.readMCPConfigFile(projectFile);
+		await mcp.writeMCPConfigFile(projectFile, {
+			...stored,
+			mcpServers: { ...stored.mcpServers, "project-off": { ...stored.mcpServers!["project-off"]!, command: "edited-elsewhere", timeout: 777 } as never },
+		});
+	});
+	expect((await pending!).status).toBe(200);
+	// The concurrent edit survived; only `enabled` changed, and no list was touched.
+	expect(JSON.parse(await readFile(projectFile, "utf8")).mcpServers["project-off"])
+		.toEqual({ type: "stdio", command: "edited-elsewhere", enabled: true, timeout: 777 });
+	const user = JSON.parse(await readFile(userFile, "utf8"));
+	expect(user.disabledServers).toBeUndefined();
+	expect(user.enabledServers).toBeUndefined();
+
+	// A name no NeoPi-owned file defines goes to the lists instead, and enabling
+	// it again clears the denylist and records a force-enable.
+	expect((await send("POST", "/mcp-servers/foreign-only/enabled", { scope: "user", enabled: false })).status).toBe(200);
+	expect(JSON.parse(await readFile(userFile, "utf8")).disabledServers).toEqual(["foreign-only"]);
+	expect((await send("POST", "/mcp-servers/foreign-only/enabled", { scope: "user", enabled: true })).status).toBe(200);
+	const after = JSON.parse(await readFile(userFile, "utf8"));
+	expect(after.disabledServers).toBeUndefined();
+	expect(after.enabledServers).toEqual(["foreign-only"]);
 });
 
 /** A chat whose NeoPi runtime connects `name` only when its own workspace still resolves it. */
